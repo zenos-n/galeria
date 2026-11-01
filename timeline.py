@@ -313,14 +313,16 @@ class Mosaic(Gtk.Widget):
         self.last_width=width
         rects,self.last_height=self.positions(width)
         self.rendered=rects
+        stable=self.target_layout(width)[0] if self.p<1 else rects
         for widget in self.widgets:
             widget.set_child_visible(widget in rects)
         for widget,(x,y,w,h,opacity) in rects.items():
             widget.set_opacity(0 if widget==self.hidden_tile else max(0,min(1,opacity)))
+            reference=stable.get(widget,self.from_map.get(widget,(x,y,w,h,opacity)))
             min_w=widget.measure(Gtk.Orientation.HORIZONTAL,-1)[0]
-            allocated_w=max(1,round(w),min_w)
+            allocated_w=max(1,round(reference[2]),min_w)
             min_h=widget.measure(Gtk.Orientation.VERTICAL,allocated_w)[0]
-            allocated_h=max(1,round(h),min_h)
+            allocated_h=max(1,round(reference[3]),min_h)
             point=Graphene.Point();point.init(x,y)
             transform=Gsk.Transform.new().translate(point).scale(w/allocated_w,h/allocated_h)
             widget.allocate(allocated_w,allocated_h,-1,transform)
