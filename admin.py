@@ -19,7 +19,7 @@ class AdminPanel(Adw.PreferencesDialog):
         connection=Adw.PreferencesGroup(title='Library')
         if self.client:
             account=self.client.user
-            row=Adw.ActionRow(title=account.get('name') or account.get('email','Immich'),subtitle=self.client.base)
+            row=Adw.ActionRow(title=account.get('name') or account.get('email','Immich'),subtitle=self.client.base,use_markup=False)
             row.add_prefix(Adw.Avatar(size=40,text=account.get('name','Immich'),show_initials=True))
             connection.add(row)
         else:
