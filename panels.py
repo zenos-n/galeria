@@ -116,7 +116,8 @@ class AlbumTree(Gtk.ListView):
 
     def setup(self, _factory, item):
         expander = Gtk.TreeExpander()
-        line = Gtk.Box(spacing=9, margin_start=3, margin_end=6, height_request=34)
+        expander.set_indent_for_icon(False)
+        line = Gtk.Box(spacing=8, margin_start=0, margin_end=6, height_request=34)
         item.icon = Gtk.Image(pixel_size=16)
         item.title = text("", xalign=0, hexpand=True, ellipsize=3)
         line.append(item.icon)

@@ -232,8 +232,7 @@ class GalleryWindow(Adw.ApplicationWindow):
             ("Collections", []),
             ("Media types", [("photos", "Photos", "image-x-generic-symbolic"), ("videos", "Videos", "video-x-generic-symbolic"),
                               ("screenshots", "Screenshots", "camera-photo-symbolic"), ("live", "Live Photos", "media-playback-start-symbolic")]),
-            ("Utilities", [("recent", "Recently added", "gallery-clock-symbolic"),
-                           ("duplicates", "Review duplicates", "edit-copy-symbolic"),
+            ("Utilities", [("duplicates", "Review duplicates", "edit-copy-symbolic"),
                            ("people", "People", "gallery-people-symbolic"), ("tags", "Tags", "gallery-tag-symbolic"),
                            ("trash", "Trash", "user-trash-symbolic")]),
             ("More", [("archive", "Archive", "folder-symbolic"), ("locked", "Locked folder", "changes-prevent-symbolic")]),
@@ -298,7 +297,7 @@ class GalleryWindow(Adw.ApplicationWindow):
         self.account_button = account
         header.pack_end(Gtk.AspectFrame(child=account,ratio=1,obey_child=False,
                                        halign=Gtk.Align.CENTER,valign=Gtk.Align.CENTER))
-        header.pack_end(button("gallery-upload-symbolic", "Upload files", lambda _: self.choose_uploads()))
+        header.pack_end(button("gallery-upload-arrow-symbolic", "Upload files", lambda _: self.choose_uploads()))
         self.toolbar.add_top_bar(header)
         self.search = Gtk.SearchBar()
         entry = Gtk.SearchEntry(placeholder_text="Search your photos", hexpand=True)
@@ -350,7 +349,7 @@ class GalleryWindow(Adw.ApplicationWindow):
         if self.split.get_collapsed():
             self.split.set_show_sidebar(False)
         is_library = row.key == "library"
-        has_grid = is_library or row.key in ("photos", "videos", "screenshots", "live", "recent") or row.key.startswith("album-")
+        has_grid = is_library or row.key in ("photos", "videos", "screenshots", "live") or row.key.startswith("album-")
         self.switcher.set_visible(is_library)
         self.period.set_visible(is_library)
         self.page_title.set_label(self.page_titles[row.key])
@@ -408,6 +407,10 @@ class GalleryWindow(Adw.ApplicationWindow):
     def welcome(self):
         dialog = Adw.AlertDialog(heading="Do you want to use Immich?",
                                 body="Connect to your Immich library, or choose folders on this device.")
+        self.welcome_illustration = Gtk.Picture(can_shrink=True,content_fit=Gtk.ContentFit.CONTAIN,
+                                               height_request=140)
+        self.welcome_illustration.add_css_class('illustration-slot')
+        dialog.set_extra_child(self.welcome_illustration)
         dialog.add_response("local", "No, choose folders")
         dialog.add_response("immich", "Yes, use Immich")
         dialog.set_response_appearance("immich", Adw.ResponseAppearance.SUGGESTED)

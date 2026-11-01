@@ -153,6 +153,7 @@ class Viewer(Gtk.Overlay):
         self.stage=PhotoStage(self.source,self.index)
         self.source.set_opacity(0)
         self.stage.progress=1
+        self.stage.set_opacity(1)
         self.stage.thumbnail.set_opacity(0)
         self.stage.material.set_opacity(1)
         self.stage.symbol.set_opacity(1)
@@ -254,9 +255,11 @@ class Viewer(Gtk.Overlay):
         self.title.set_title('Edit photo' if active else 'Photo preview')
 
     def sync_editor_inset(self, *_):
+        before=self.stage.last_rect
         self.stage.bottom_inset = (self.editor.get_child().measure(
             Gtk.Orientation.VERTICAL, max(300, self.photo_overlay.get_width()))[1] if self.editing else 0)
         self.stage.queue_allocate()
+        self.stage.animate_geometry(before)
 
     def rotate(self, angle):
         self.stage.rotation = (self.stage.rotation + angle) % 360

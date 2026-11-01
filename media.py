@@ -11,6 +11,10 @@ class PhotoStage(Gtk.Widget):
         self.progress = 0.0
         self.source_rect = None
         self.tick = 0
+        self.geometry_tick = 0
+        self.geometry_rect = None
+        self.last_rect = None
+        self.set_opacity(0)
         self.rotation = 0
         self.flipped = False
         self.crop_ratio = None
@@ -34,7 +38,7 @@ class PhotoStage(Gtk.Widget):
         self.crop_frame.set_visible(False)
         self.picture.add_overlay(self.crop_frame)
         # Capture before hiding the grid tile; this is the exact endpoint image.
-        paintable = Gtk.WidgetPaintable.new(source).get_current_image()
+        paintable = Gtk.WidgetPaintable.new(source.get_child()).get_current_image()
         self.thumbnail = Gtk.Picture(paintable=paintable, can_shrink=True, content_fit=Gtk.ContentFit.FILL)
         self.picture.add_overlay(self.thumbnail)
         self.material.set_opacity(0)
@@ -55,6 +59,8 @@ class PhotoStage(Gtk.Widget):
         return (width-w)/2, self.top_inset + margin + (available_height-h)/2, w, h
 
     def rect(self, width, height):
+        if self.geometry_rect is not None:
+            return self.geometry_rect
         end = self.destination(width, height)
         if not self.source_rect:
             return end
@@ -70,6 +76,10 @@ class PhotoStage(Gtk.Widget):
         return x-w/2, y-h/2, w, h
 
     def animate(self, source, reverse, on_progress, complete):
+        if self.geometry_tick:
+            self.remove_tick_callback(self.geometry_tick)
+            self.geometry_tick=0
+            self.geometry_rect=None
         if self.tick:
             self.remove_tick_callback(self.tick)
         start_time, settled = None, False
@@ -91,6 +101,7 @@ class PhotoStage(Gtk.Widget):
                 ok, bounds = source.compute_bounds(self)
                 self.source_rect = ((bounds.get_x(), bounds.get_y(), bounds.get_width(), bounds.get_height())
                                     if ok else self.destination(self.get_width(), self.get_height()))
+                self.set_opacity(1)
             now = clock.get_frame_time()
             if start_time is None:
                 start_time = now
@@ -109,7 +120,35 @@ class PhotoStage(Gtk.Widget):
 
         self.tick = self.add_tick_callback(frame)
 
+    def animate_geometry(self, previous=None):
+        if self.progress < 1 or self.tick:
+            return
+        if self.geometry_tick:
+            self.remove_tick_callback(self.geometry_tick)
+        start = previous or self.last_rect or self.destination(self.get_width(),self.get_height())
+        end = self.destination(self.get_width(),self.get_height())
+        started = None
+        duration = 260000 if Gtk.Settings.get_default().get_property('gtk-enable-animations') else 1
+        def frame(_widget, clock):
+            nonlocal started
+            now = clock.get_frame_time()
+            if started is None:
+                started = now
+            t = min(1,(now-started)/duration)
+            p = t*t*(3-2*t)
+            self.geometry_rect = tuple(a+(b-a)*p for a,b in zip(start,end))
+            self.queue_allocate()
+            if t>=1:
+                self.geometry_tick=0
+                self.geometry_rect=None
+                return GLib.SOURCE_REMOVE
+            return GLib.SOURCE_CONTINUE
+        self.geometry_tick=self.add_tick_callback(frame)
+
     def dispose(self):
+        if self.geometry_tick:
+            self.remove_tick_callback(self.geometry_tick)
+            self.geometry_tick=0
         if self.tick:
             self.remove_tick_callback(self.tick)
             self.tick = 0
@@ -121,6 +160,7 @@ class PhotoStage(Gtk.Widget):
 
     def do_size_allocate(self, width, height, baseline):
         x,y,w,h = self.rect(width,height)
+        self.last_rect=(x,y,w,h)
         self.picture.measure(Gtk.Orientation.HORIZONTAL,-1)
         self.picture.measure(Gtk.Orientation.VERTICAL,round(w))
         point=Graphene.Point()

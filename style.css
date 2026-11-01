@@ -19,7 +19,7 @@
 .placeholder-icon { opacity: .16; }
 .video-duration { background: rgba(0,0,0,.65); color: white; border-radius: 5px; padding: 2px 5px; margin: 5px; font-size: 10px; }
 .viewer-backdrop { background: rgba(5,5,7,.88); }
-.viewer-header { background: rgba(10,10,12,.5); color: #fafafa; }
+.viewer-header { background: transparent; box-shadow: none; color: #fafafa; }
 .viewer-header button { color: #fafafa; }
 .viewer-arrow { background: rgba(28,28,28,.85); color: white; margin: 14px; min-width: 32px; min-height: 32px; }
 .expanded-photo { background: #353739; color: #ececec; }
@@ -34,7 +34,7 @@
 .exposure-light { background: white; }
 .exposure-dark { background: black; }
 .album-tree { background: transparent; padding: 0 10px; }
-.album-tree row { padding: 0 6px; }
+.album-tree row { padding: 0 2px; }
 .album-tree treeexpander { padding: 0; }
 .avatar-button { padding: 3px; border-radius: 50%; min-width: 28px; min-height: 28px; }
 .upload-indicator { margin: 8px 10px 0; }
@@ -55,5 +55,11 @@
 .swatch-red { background: #ed333b; min-width: 20px; min-height: 20px; }
 .swatch-blue { background: #3584e4; min-width: 20px; min-height: 20px; }
 .swatch-yellow { background: #f8e45c; min-width: 20px; min-height: 20px; }
+.color-swatch { padding: 0; min-width: 26px; min-height: 26px; border-radius: 50%; border: 1px solid alpha(@window_fg_color,.2); }
+.editor-choice { padding: 8px; border-radius: 8px; }
+.editor-choice:checked { background: alpha(@accent_bg_color,.15); outline: 1px solid alpha(@accent_color,.6); outline-offset: -1px; }
+.editor-choice label { font-size: 12px; }
+.adjustment-choice { padding: 5px 8px; }
+.illustration-slot { background: alpha(@accent_bg_color,.08); border-radius: 12px; }
 .login-body { margin: 22px 28px 28px; }
 .login-error { color: @error_color; font-size: 13px; }
