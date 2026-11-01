@@ -13,6 +13,8 @@ class LibraryUI:
         self.local_items=[]
         self.local_roots=[]
         self.next_page=None
+        self.album_items=[]
+        self.album_result_id=None
         self.data_generation=0
         self.search_generation=0
         self.texture_cache={}
@@ -138,10 +140,21 @@ class LibraryUI:
         if self.current_page.startswith('album-'):
             album_id=self.current_page.removeprefix('album-')
             client=self.client
+            if append and self.album_result_id==album_id:
+                count=len(self.media_items)+100
+                self.next_page=count if len(self.album_items)>count else None
+                self.set_library_items(self.album_items[:count])
+                return
             self.busy_library('Loading album…')
             self.next_page=None
+            def loaded(items):
+                if request_id!=self.search_generation:return
+                self.album_items=items
+                self.album_result_id=album_id
+                self.next_page=100 if len(items)>100 else None
+                self.set_library_items(items[:100])
             self.background(lambda:client.album(album_id),
-                            lambda items:self.set_library_items(items) if request_id==self.search_generation else None,
+                            loaded,
                             lambda error:self.library_failed(error) if request_id==self.search_generation else None)
             return
         client=self.client
