@@ -1,0 +1,59 @@
+.gallery-sidebar { background: @sidebar_bg_color; }
+.gallery-sidebar .navigation-sidebar { padding: 6px 10px; }
+.gallery-sidebar row { min-height: 34px; margin: 1px 0; border-radius: 7px; }
+.gallery-sidebar row image { opacity: .8; }
+.sidebar-section { font-size: 11px; font-weight: 600; opacity: .48; margin: 15px 18px 5px; }
+.source-label { font-size: 11px; opacity: .5; margin: 8px 18px 12px; }
+.timeline { background: @window_bg_color; color: @window_fg_color; }
+.timeline-date { font-weight: 500; }
+.day-heading { font-size: 12px; font-weight: 600; opacity: .65; }
+.photo-tile { padding: 0; border: 0; border-radius: 0; min-width: 0; min-height: 0; background: alpha(@window_fg_color, .05); }
+.photo-tile:hover { outline: 2px solid alpha(@accent_color, .85); outline-offset: -2px; }
+.photo-tile picture { border-radius: 0; }
+.placeholder { min-width: 0; min-height: 0; }
+.shade-0 { background: alpha(@window_fg_color,.045); }
+.shade-1 { background: alpha(@window_fg_color,.095); }
+.shade-2 { background: alpha(@window_fg_color,.065); }
+.shade-3 { background: alpha(@window_fg_color,.13); }
+.shade-4 { background: alpha(@window_fg_color,.08); }
+.placeholder-icon { opacity: .16; }
+.video-duration { background: rgba(0,0,0,.65); color: white; border-radius: 5px; padding: 2px 5px; margin: 5px; font-size: 10px; }
+.viewer-backdrop { background: rgba(5,5,7,.88); }
+.viewer-header { background: rgba(10,10,12,.5); color: #fafafa; }
+.viewer-header button { color: #fafafa; }
+.viewer-arrow { background: rgba(28,28,28,.85); color: white; margin: 14px; min-width: 32px; min-height: 32px; }
+.expanded-photo { background: #353739; color: #ececec; }
+.expanded-photo.shade-0 { background: #303234; }
+.expanded-photo.shade-1 { background: #3b3e40; }
+.expanded-photo.shade-2 { background: #343839; }
+.expanded-photo.shade-3 { background: #454749; }
+.expanded-photo.shade-4 { background: #383c3e; }
+.viewer-details { color: #f2f2f2; }
+.editor-bar { background: alpha(@window_bg_color,.97); padding: 16px; }
+.crop-frame { border: 1px solid rgba(255,255,255,.75); margin: 12px; background: linear-gradient(to right, transparent 33%, rgba(255,255,255,.3) 33.2%, transparent 33.5%, transparent 66%, rgba(255,255,255,.3) 66.2%, transparent 66.5%), linear-gradient(to bottom, transparent 33%, rgba(255,255,255,.3) 33.2%, transparent 33.5%, transparent 66%, rgba(255,255,255,.3) 66.2%, transparent 66.5%); }
+.exposure-light { background: white; }
+.exposure-dark { background: black; }
+.album-tree { background: transparent; padding: 0 10px; }
+.album-tree row { padding: 0 6px; }
+.album-tree treeexpander { padding: 0; }
+.avatar-button { padding: 3px; border-radius: 50%; min-width: 28px; min-height: 28px; }
+.upload-indicator { margin: 8px 10px 0; }
+.upload-indicator > button { padding: 7px 10px; border-radius: 7px; background: transparent; box-shadow: none; }
+.upload-indicator > button:hover, .upload-indicator > button:checked { background: alpha(@window_fg_color,.07); }
+.upload-ring { color: @accent_color; }
+.upload-popover progressbar trough { min-height: 6px; border-radius: 6px; }
+.upload-popover progressbar progress { min-height: 6px; border-radius: 6px; }
+.upload-cancel { background: alpha(@window_fg_color,.08); min-height: 28px; min-width: 28px; }
+.details-sidebar { background: @sidebar_bg_color; color: @sidebar_fg_color; }
+.details-sidebar headerbar { background: @sidebar_bg_color; color: @sidebar_fg_color; }
+.immersive-viewer .viewer-backdrop { background: #000; }
+.share-preview { background: alpha(@window_fg_color,.08); border-radius: 8px; }
+.drop-hint { background: alpha(@window_bg_color,.96); outline: 3px solid @accent_color; outline-offset: -12px; }
+.filter-preview { border-radius: 6px; }
+.swatch-white { background: #fff; min-width: 20px; min-height: 20px; }
+.swatch-black { background: #151515; min-width: 20px; min-height: 20px; }
+.swatch-red { background: #ed333b; min-width: 20px; min-height: 20px; }
+.swatch-blue { background: #3584e4; min-width: 20px; min-height: 20px; }
+.swatch-yellow { background: #f8e45c; min-width: 20px; min-height: 20px; }
+.login-body { margin: 22px 28px 28px; }
+.login-error { color: @error_color; font-size: 13px; }

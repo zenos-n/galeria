@@ -1,0 +1,289 @@
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk
+from media import PhotoStage
+from panels import text, icon_button, share_sheet
+from editor import build_editor
+
+
+class Viewer(Gtk.Overlay):
+    def __init__(self, window, index, source=None):
+        super().__init__(hexpand=True, vexpand=True)
+        self.window, self.index, self.source = window, index, source
+        self.editing = self.closing = self.immersive = False
+        self.chrome_timer = 0
+        self.chrome_hovered = False
+        self.was_fullscreen = window.is_fullscreen()
+        self.backdrop = Gtk.Box(hexpand=True,vexpand=True)
+        self.backdrop.add_css_class('viewer-backdrop')
+        self.set_child(self.backdrop)
+        self.viewer_split = Adw.OverlaySplitView(sidebar_position=Gtk.PackType.END, show_sidebar=False,
+                                                min_sidebar_width=280,max_sidebar_width=300)
+        self.breakpoint_bin = Adw.BreakpointBin(child=self.viewer_split,width_request=300,height_request=240)
+        self.add_overlay(self.breakpoint_bin)
+        self.photo_overlay = Gtk.Overlay(hexpand=True,vexpand=True)
+        self.media_stack = Gtk.Stack(transition_duration=230, hexpand=True,vexpand=True)
+        self.stage = PhotoStage(source,index)
+        self.media_stack.add_child(self.stage)
+        self.photo_overlay.set_child(self.media_stack)
+        self.viewer_split.set_content(self.photo_overlay)
+        self.header = Adw.HeaderBar(show_start_title_buttons=False,show_end_title_buttons=False)
+        self.header.add_css_class('viewer-header')
+        self.close_button = icon_button('go-previous-symbolic','Back to gallery (Esc)',lambda _:(self.reset_edits(),self.set_editing(False)) if self.editing else self.close())
+        self.header.pack_start(self.close_button)
+        self.title = Adw.WindowTitle(title='Photo preview',subtitle='January 2026')
+        self.header.set_title_widget(self.title)
+        self.favorite = Gtk.ToggleButton(icon_name='non-starred-symbolic',tooltip_text='Favorite')
+        self.favorite.add_css_class('flat')
+        self.favorite.connect('toggled',lambda w:w.set_icon_name('starred-symbolic' if w.get_active() else 'non-starred-symbolic'))
+        self.header.pack_start(self.favorite)
+        self.edit_button = Gtk.Button(label='Edit',tooltip_text='Edit image')
+        self.edit_button.add_css_class('flat')
+        self.edit_button.connect('clicked',lambda _:self.set_editing(not self.editing))
+        self.header.pack_end(self.edit_button)
+        self.info = Gtk.ToggleButton(icon_name='info-outline-symbolic',tooltip_text='Photo details')
+        self.info.add_css_class('flat')
+        self.info.connect('toggled',lambda w:self.viewer_split.set_show_sidebar(w.get_active()))
+        self.header.pack_end(self.info)
+        self.download = icon_button('folder-download-symbolic','Download',lambda _:window.notice('Downloads are not connected in this preview.'))
+        self.share = icon_button('gallery-share-symbolic','Share',lambda _:share_sheet(window))
+        self.fullscreen_button = icon_button('view-fullscreen-symbolic','Fullscreen media',lambda _:self.set_immersive(not self.immersive))
+        for widget in (self.download,self.share,self.fullscreen_button):
+            self.header.pack_end(widget)
+        self.viewing_controls=[self.favorite,self.info,self.download,self.share,self.fullscreen_button]
+        self.header_revealer=Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.CROSSFADE,
+                                         reveal_child=True,valign=Gtk.Align.START)
+        self.header_revealer.set_child(self.header)
+        self.photo_overlay.add_overlay(self.header_revealer)
+        self.arrows=[]
+        for step,icon,align in [(-1,'go-previous-symbolic',Gtk.Align.START),(1,'go-next-symbolic',Gtk.Align.END)]:
+            arrow=icon_button(icon,'Previous photo' if step<0 else 'Next photo',lambda _,n=step:self.move(n))
+            arrow.add_css_class('circular')
+            arrow.add_css_class('viewer-arrow')
+            arrow.set_halign(align)
+            arrow.set_valign(Gtk.Align.CENTER)
+            self.photo_overlay.add_overlay(arrow)
+            self.arrows.append(arrow)
+        self.details=Adw.ToolbarView()
+        self.details.add_css_class('details-sidebar')
+        details_header=Adw.HeaderBar(show_start_title_buttons=False,show_end_title_buttons=False)
+        details_header.set_title_widget(text('Details','heading'))
+        details_header.pack_end(icon_button('window-close-symbolic','Close details',lambda _:self.info.set_active(False)))
+        self.details.add_top_bar(details_header)
+        details_body=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=24,
+                             margin_top=24,margin_bottom=24,margin_start=22,margin_end=22)
+        for heading,value in [('Date','January 2026'),('File','Photo preview'),('Location','No location'),('Camera','No camera information')]:
+            group=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=6)
+            group.append(text(heading,'dim-label',xalign=0))
+            group.append(text(value,xalign=0,wrap=True))
+            details_body.append(group)
+        scroll=Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,child=details_body)
+        self.details.set_content(scroll)
+        self.viewer_split.set_sidebar(self.details)
+        breakpoint=Adw.Breakpoint.new(Adw.BreakpointCondition.parse('max-width: 760sp'))
+        breakpoint.add_setter(self.viewer_split,'collapsed',True)
+        # This is a full-window overlay, so its breakpoint is owned by the window.
+        self.breakpoint_bin.add_breakpoint(breakpoint)
+        self.editor=Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_UP,valign=Gtk.Align.END)
+        self.editor.set_child(self.make_editor())
+        self.editor_categories.connect('notify::active-name', self.sync_editor_inset)
+        self.photo_overlay.add_overlay(self.editor)
+        self.keys=Gtk.EventControllerKey()
+        self.keys.connect('key-pressed',self.on_key)
+        self.add_controller(self.keys)
+        motion=Gtk.EventControllerMotion()
+        motion.connect('motion',self.pointer_motion)
+        self.add_controller(motion)
+        header_motion=Gtk.EventControllerMotion()
+        header_motion.connect('enter',lambda *_:setattr(self,'chrome_hovered',True))
+        header_motion.connect('leave',lambda *_:setattr(self,'chrome_hovered',False))
+        self.header.add_controller(header_motion)
+
+    def show(self):
+        # Block pointer interaction without changing the grid's disabled styling.
+        self.window.split.set_can_target(False)
+        self.window.root_overlay.add_overlay(self)
+        self.source.set_opacity(0)
+        self.backdrop.set_opacity(0)
+        self.header.set_opacity(0)
+        for arrow in self.arrows:
+            arrow.set_opacity(0)
+        self.close_button.grab_focus()
+        self.stage.animate(self.source,False,self.fade,lambda:None)
+
+    def fade(self,progress):
+        self.backdrop.set_opacity(progress)
+        self.header.set_opacity(progress)
+        for arrow in self.arrows:
+            arrow.set_opacity(progress)
+
+    def close(self):
+        if self.closing:
+            return
+        if self.media_stack.get_transition_running():
+            return
+        needs_settle = self.editing or self.immersive or self.viewer_split.get_show_sidebar()
+        self.closing=True
+        if self.immersive:
+            self.set_immersive(False)
+        self.set_editing(False)
+        self.info.set_active(False)
+        self.window.reveal_tile(self.source)
+        def begin():
+            def finish():
+                self.source.set_opacity(1)
+                self.window.root_overlay.remove_overlay(self)
+                self.stage.dispose()
+                self.window.split.set_can_target(True)
+                self.window.viewer=None
+                if self.chrome_timer:
+                    GLib.source_remove(self.chrome_timer)
+                    self.chrome_timer=0
+                self.source.grab_focus()
+            self.stage.animate(self.source,True,self.fade,finish)
+            return GLib.SOURCE_REMOVE
+        # Allow sidebar/editor/fullscreen geometry to settle before measuring the tile.
+        GLib.timeout_add(220,begin) if needs_settle else GLib.idle_add(begin)
+
+    def move(self,step):
+        if self.stage.progress<1 or self.closing or self.media_stack.get_transition_running():
+            return
+        old=self.stage
+        self.source.set_opacity(1)
+        self.index=(self.index+step)%len(self.window.mosaic.tiles)
+        self.source=self.window.mosaic.tiles[self.index]
+        self.stage=PhotoStage(self.source,self.index)
+        self.source.set_opacity(0)
+        self.stage.progress=1
+        self.stage.thumbnail.set_opacity(0)
+        self.stage.material.set_opacity(1)
+        self.stage.symbol.set_opacity(1)
+        self.stage.immersive=self.immersive
+        self.stage.top_inset=0 if self.immersive else 52
+        self.media_stack.add_child(self.stage)
+        self.media_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT if step>0 else Gtk.StackTransitionType.SLIDE_RIGHT)
+        self.media_stack.set_visible_child(self.stage)
+        def cleanup():
+            if self.media_stack.get_transition_running():
+                return GLib.SOURCE_CONTINUE
+            self.media_stack.remove(old)
+            old.dispose()
+            return GLib.SOURCE_REMOVE
+        GLib.timeout_add(40,cleanup)
+        self.title.set_title(f'Photo preview · {self.index+1}')
+
+    def set_immersive(self,active):
+        if self.editing:
+            return
+        self.immersive=active
+        self.stage.immersive=active
+        self.stage.top_inset=0 if active else 52
+        self.stage.queue_allocate()
+        self.info.set_active(False)
+        if active:
+            self.add_css_class('immersive-viewer')
+            self.window.fullscreen()
+            self.fullscreen_button.set_icon_name('view-restore-symbolic')
+            self.fullscreen_button.set_tooltip_text('Exit fullscreen (Esc)')
+            self.show_chrome(False)
+        else:
+            self.remove_css_class('immersive-viewer')
+            if not self.was_fullscreen:
+                self.window.unfullscreen()
+            self.fullscreen_button.set_icon_name('view-fullscreen-symbolic')
+            self.fullscreen_button.set_tooltip_text('Fullscreen media')
+            self.show_chrome(True)
+
+    def show_chrome(self,visible):
+        self.header_revealer.set_reveal_child(visible)
+        for arrow in self.arrows:
+            arrow.set_opacity(1 if visible else 0)
+            arrow.set_can_target(visible)
+
+    def pointer_motion(self,*_):
+        if not self.immersive:
+            return
+        self.show_chrome(True)
+        if self.chrome_timer:
+            GLib.source_remove(self.chrome_timer)
+        def hide():
+            if self.chrome_hovered:
+                return GLib.SOURCE_CONTINUE
+            self.show_chrome(False)
+            self.chrome_timer=0
+            return GLib.SOURCE_REMOVE
+        self.chrome_timer=GLib.timeout_add(1400,hide)
+
+    def on_key(self,_controller,keyval,_keycode=0,state=0):
+        if keyval==Gdk.KEY_Escape:
+            if self.editing:
+                self.set_editing(False)
+            elif self.immersive:
+                self.set_immersive(False)
+            else:
+                self.close()
+            return True
+        if keyval in (Gdk.KEY_f,Gdk.KEY_F11) and not self.editing:
+            self.set_immersive(not self.immersive)
+            return True
+        if keyval in (Gdk.KEY_Left,Gdk.KEY_Right) and not self.editing:
+            self.move(-1 if keyval==Gdk.KEY_Left else 1)
+            return True
+        if keyval==Gdk.KEY_Tab:
+            backwards=bool(state & Gdk.ModifierType.SHIFT_MASK)
+            direction=Gtk.DirectionType.TAB_BACKWARD if backwards else Gtk.DirectionType.TAB_FORWARD
+            if not self.child_focus(direction):
+                self.close_button.grab_focus()
+            return True
+        return False
+
+    def make_editor(self):
+        return build_editor(self)
+
+    def set_editing(self, active):
+        if active and self.immersive:
+            self.set_immersive(False)
+        self.editing = active
+        if active:
+            self.info.set_active(False)
+        for widget in self.viewing_controls + self.arrows:
+            widget.set_visible(not active)
+        self.editor.set_reveal_child(active)
+        self.stage.crop_frame.set_visible(active and self.editor_categories.get_active_name() == 'Crop')
+        self.sync_editor_inset()
+        self.stage.queue_allocate()
+        self.edit_button.set_label('Done' if active else 'Edit')
+        self.title.set_title('Edit photo' if active else 'Photo preview')
+
+    def sync_editor_inset(self, *_):
+        self.stage.bottom_inset = (self.editor.get_child().measure(
+            Gtk.Orientation.VERTICAL, max(300, self.photo_overlay.get_width()))[1] if self.editing else 0)
+        self.stage.queue_allocate()
+
+    def rotate(self, angle):
+        self.stage.rotation = (self.stage.rotation + angle) % 360
+        self.stage.symbol.set_from_icon_name("object-rotate-right-symbolic" if self.stage.rotation else "image-x-generic-symbolic")
+        self.stage.queue_allocate()
+
+    def flip(self):
+        self.stage.flipped = not self.stage.flipped
+        self.stage.symbol.set_from_icon_name("object-flip-horizontal-symbolic" if self.stage.flipped else "image-x-generic-symbolic")
+
+    def change_crop(self, dropdown, *_):
+        self.stage.crop_ratio = [None, 1, 4/3, 16/9][dropdown.get_selected()]
+        self.stage.queue_allocate()
+
+    def reset_edits(self):
+        self.stage.rotation, self.stage.flipped, self.stage.crop_ratio = 0, False, None
+        self.stage.symbol.set_from_icon_name("image-x-generic-symbolic")
+        self.crop_dropdown.set_selected(0)
+        for scale in self.scales:
+            scale.set_value(0)
+        self.stage.queue_allocate()
+
+    def adjust(self):
+        exposure = self.scales[0].get_value() if self.scales else 0
+        self.stage.surface.set_opacity(abs(exposure) / 150)
+        self.stage.surface.remove_css_class("exposure-light")
+        self.stage.surface.remove_css_class("exposure-dark")
+        self.stage.surface.add_css_class("exposure-light" if exposure >= 0 else "exposure-dark")
+
+

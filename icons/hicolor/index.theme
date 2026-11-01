@@ -1,0 +1,10 @@
+[Icon Theme]
+Name=Gallery
+Directories=scalable/actions
+
+[scalable/actions]
+Size=16
+MinSize=8
+MaxSize=512
+Type=Scalable
+Context=Actions
