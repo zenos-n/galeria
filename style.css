@@ -69,7 +69,7 @@
 .photo-tile { background: transparent; }
 .photo-tile.selected { outline: 3px solid @accent_color; outline-offset: -3px; }
 .media-check { background: transparent; padding: 0; min-width: 24px; min-height: 24px; }
-.media-check check { border-radius: 999px; box-shadow: none; min-width: 20px; min-height: 20px; border: 1px solid alpha(@window_fg_color,.4); background: alpha(@window_bg_color,.9); }
+.media-check check { border-radius: 999px; box-shadow: none; min-width: 14px; min-height: 14px; padding: 2px; -gtk-icon-size: 12px; border: 1px solid alpha(@window_fg_color,.4); background: alpha(@window_bg_color,.9); }
 .media-check check:not(:checked):not(:indeterminate):hover { box-shadow: none; }
 .media-check:checked check { background: @accent_bg_color; border-color: @accent_bg_color; color: @accent_fg_color; }
 .filter-chip { min-height: 22px; padding: 3px 9px; border-radius: 99px; background: alpha(@accent_bg_color,.15); font-size: 12px; }

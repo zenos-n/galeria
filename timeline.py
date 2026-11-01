@@ -280,11 +280,11 @@ class Mosaic(Gtk.Widget):
                 # Background is inserted before its contents in the snapshot order.
                 result[panel]=(x,panel_y,width,1,1)
                 if kind=='year':
-                    months=[key for key,_,year,_,_ in MONTHS if year==active]
-                    content_h=self.folder_rows(months,'month',x+14,panel_y+14,width-28,result)
+                    ids=[i for _,_,year,a,b in MONTHS if year==active for i in range(a,b)]
                 else:
                     _,_,_,a,b=next(m for m in MONTHS if m[0]==active)
-                    content_h=self.photo_rows(range(a,b),x+12,panel_y+14,width-24,result)
+                    ids=range(a,b)
+                content_h=self.photo_rows(ids,x+12,panel_y+14,width-24,result)
                 content_h+=28
                 result[panel]=(x,panel_y,width,content_h,1)
                 y=panel_y+content_h+18
