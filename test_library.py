@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Thread
 import unittest
+from unittest.mock import patch
 from library import ImmichClient, LibraryError, scan_folders
 
 
@@ -128,6 +129,13 @@ class LibraryTests(unittest.TestCase):
     def test_url_validation(self):
         for address in ['file:///tmp','https://user:pass@example.invalid','http://example.invalid?token=secret','not-a-url']:
             with self.assertRaises(LibraryError):ImmichClient(address)
+
+    def test_locked_assets_never_enter_gallery_results(self):
+        locked=dict(ASSETS[0],visibility='locked')
+        with patch.object(self.client,'request',return_value={'assets':{'items':[locked],'nextPage':None}}):
+            self.assertEqual(self.client.search(),([],None))
+        with patch.object(self.client,'request',return_value={'assets':[locked]}):
+            self.assertEqual(self.client.album('album'),[])
 
     def test_recursive_local_discovery_deduplicates_and_skips_symlinks(self):
         with TemporaryDirectory() as root:

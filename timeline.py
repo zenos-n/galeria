@@ -9,7 +9,7 @@ MONTHS=[('2026-01','January 2026','2026',0,12),('2025-12','December 2025','2025'
 class Mosaic(Gtk.Widget):
     __gtype_name__='GalleryMosaic'
 
-    def __init__(self,open_photo):
+    def __init__(self,open_photo,items=None):
         super().__init__(hexpand=True,margin_start=10,margin_end=10)
         self.open_photo=open_photo
         self.target=154
@@ -33,6 +33,8 @@ class Mosaic(Gtk.Widget):
         self.year_cards={}
         self.owners={}
         self.members={}
+        self.card_pictures={}
+        self.cover_slots={}
         self.rendered={}
         self.tick=0
         self.p=1
@@ -44,11 +46,21 @@ class Mosaic(Gtk.Widget):
         self.motion_kind='tier'
         self.folder_membership={}
         self.folder_swap=False
+        self.months=MONTHS
+        if items is not None:
+            self.months=[]
+            for i,item in enumerate(items):
+                key=item.created.strftime('%Y-%m')
+                if self.months and self.months[-1][0]==key:
+                    k,title,year,a,_=self.months[-1]
+                    self.months[-1]=(k,title,year,a,i+1)
+                else:
+                    self.months.append((key,item.created.strftime('%B %Y'),item.created.strftime('%Y'),i,i+1))
         self.panel_month=self.parent(Gtk.Box(css_classes=['date-panel']))
         self.panel_year=self.parent(Gtk.Box(css_classes=['date-panel']))
         self.pointer_month=self.pointer()
         self.pointer_year=self.pointer()
-        ratios=RATIOS[:12]+RATIOS[12:]+RATIOS[4:18]
+        ratios=[item.ratio for item in items] if items is not None else RATIOS[:12]+RATIOS[12:]+RATIOS[4:18]
         for index,ratio in enumerate(ratios):
             overlay=Gtk.Overlay()
             block=Gtk.Box(css_classes=['placeholder',f'shade-{index%5}'])
@@ -56,13 +68,20 @@ class Mosaic(Gtk.Widget):
             icon=Gtk.Image(icon_name='image-x-generic-symbolic',pixel_size=23,
                            halign=Gtk.Align.CENTER,valign=Gtk.Align.CENTER,css_classes=['placeholder-icon'])
             overlay.add_overlay(icon)
-            if index in (1,4,9,17,23):
-                duration=Gtk.Label(label='▷ 0:31',halign=Gtk.Align.END,valign=Gtk.Align.START,css_classes=['video-duration'])
+            if items is not None and items[index].kind=='VIDEO' or items is None and index in (1,4,9,17,23):
+                duration=Gtk.Label(label='▷ '+str(items[index].metadata.get('duration','Video') if items is not None else '0:31'),halign=Gtk.Align.END,valign=Gtk.Align.START,css_classes=['video-duration'])
                 overlay.add_overlay(duration)
                 self.badges.append(duration)
             tile=Gtk.Button(child=overlay,tooltip_text='Open photo preview',css_classes=['photo-tile'])
             tile.photo_ratio=ratio
-            tile.filename=f'photo_{index+1:04}.jpg'
+            tile.filename=items[index].filename if items is not None else f'photo_{index+1:04}.jpg'
+            tile.media_item=items[index] if items is not None else None
+            tile.media_texture=None
+            tile.media_icon=icon
+            tile.photo_picture=Gtk.Picture(can_shrink=True,content_fit=Gtk.ContentFit.COVER)
+            tile.photo_picture.set_can_target(False)
+            overlay.set_child(tile.photo_picture)
+            tile.photo_picture.add_css_class(f'shade-{index%5}')
             tile.connect('clicked',self.clicked,index)
             check=Gtk.CheckButton(visible=False,tooltip_text='Select photo',css_classes=['media-check'])
             check.connect('toggled',lambda widget,i=index:self.check_toggled(i,widget.get_active()))
@@ -73,21 +92,26 @@ class Mosaic(Gtk.Widget):
             tile.add_controller(click)
             self.tiles.append(self.parent(tile))
             self.parent(check)
-        for key,title,year,start,stop in MONTHS:
-            heading=self.parent(Gtk.Label(label=['Today','Yesterday','Sunday, 25 January'][len(self.headings)],
+        for key,title,year,start,stop in self.months:
+            heading=self.parent(Gtk.Label(label=title if items is not None else ['Today','Yesterday','Sunday, 25 January'][len(self.headings)],
                                           xalign=0,css_classes=['day-heading']))
             self.headings.append(heading)
             card=self.card(title,lambda _,key=key:self.expand_month(key))
             self.month_cards[key]=card
             self.members[card]=self.tiles[start:stop]
-        for year in ['2026','2025']:
+        for year in dict.fromkeys(month[2] for month in self.months):
             card=self.card(year,lambda _,year=year:self.expand_year(year))
             self.year_cards[year]=card
-            self.members[card]=[tile for _,_,y,a,b in MONTHS if y==year for tile in self.tiles[a:b]]
-        for key,_,year,a,b in MONTHS:
+            self.members[card]=[tile for _,_,y,a,b in self.months if y==year for tile in self.tiles[a:b]]
+        for key,_,year,a,b in self.months:
             for tile in self.tiles[a:b]:
                 self.owners[tile]=(self.month_cards[key],self.year_cards[year])
             self.owners[self.month_cards[key]]=(self.year_cards[year],)
+        for card,members in self.members.items():
+            for i,picture in enumerate(self.card_pictures[card]):
+                if members:
+                    tile=members[min(i,len(members)-1)]
+                    self.cover_slots.setdefault(tile,[]).append(picture)
         motion=Gtk.EventControllerMotion()
         motion.connect('motion',self.pointer_motion)
         motion.connect('leave',lambda *_:self.set_hover(None))
@@ -128,12 +152,16 @@ class Mosaic(Gtk.Widget):
 
     def card(self,title,callback):
         body=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=8)
-        cover=Gtk.Grid(row_spacing=2,column_spacing=2,hexpand=True,vexpand=True,css_classes=['date-cover'])
+        cover=Gtk.Grid(row_spacing=2,column_spacing=2,row_homogeneous=True,column_homogeneous=True,hexpand=True,vexpand=True,css_classes=['date-cover'])
+        pictures=[]
         for i in range(4):
-            cover.attach(Gtk.Box(hexpand=True,vexpand=True,css_classes=[f'shade-{i}']),i%2,i//2,1,1)
+            picture=Gtk.Picture(can_shrink=True,content_fit=Gtk.ContentFit.COVER,hexpand=True,vexpand=True,css_classes=[f'shade-{i}'])
+            cover.attach(picture,i%2,i//2,1,1)
+            pictures.append(picture)
         body.append(cover)
         body.append(Gtk.Label(label=title,xalign=0,margin_start=4,margin_bottom=6,css_classes=['heading']))
         card=Gtk.Button(child=body,css_classes=['date-card'])
+        self.card_pictures[card]=pictures
         card.connect('clicked',callback)
         return self.parent(card)
 
@@ -260,6 +288,8 @@ class Mosaic(Gtk.Widget):
         return max((dy+h for _,_,dy,_,h in rows),default=0)
 
     def folder_rows(self,keys,kind,x,y,width,result):
+        if not keys:
+            return 0
         cols=max(1,int((width+14)/164))
         w=min(150,(width-14*(min(cols,len(keys))-1))/min(cols,len(keys)))
         h=w+32
@@ -280,12 +310,12 @@ class Mosaic(Gtk.Widget):
                 # Background is inserted before its contents in the snapshot order.
                 result[panel]=(x,panel_y,width,1,1)
                 if kind=='year':
-                    ids=[i for _,_,year,a,b in MONTHS if year==active for i in range(a,b)]
+                    ids=[i for _,_,year,a,b in self.months if year==active for i in range(a,b)]
                 else:
-                    _,_,_,a,b=next(m for m in MONTHS if m[0]==active)
+                    _,_,_,a,b=next(m for m in self.months if m[0]==active)
                     ids=range(a,b)
-                content_h=self.photo_rows(ids,x+12,panel_y+14,width-24,result)
-                content_h+=28
+                content_h=self.photo_rows(ids,x+12,panel_y+12,width-24,result)
+                content_h+=24
                 result[panel]=(x,panel_y,width,content_h,1)
                 y=panel_y+content_h+18
         return y-start
@@ -297,12 +327,12 @@ class Mosaic(Gtk.Widget):
         result={}
         if self.mode=='all':
             y=0
-            for heading,(_,_,_,a,b) in zip(self.headings,MONTHS):
+            for heading,(_,_,_,a,b) in zip(self.headings,self.months):
                 result[heading]=(2,y+8,max(1,width-4),28,1)
                 y+=40
                 y+=self.photo_rows(range(a,b),0,y,width,result)+12
         elif self.mode=='months':
-            y=12+self.folder_rows([m[0] for m in MONTHS],'month',4,12,width-8,result)
+            y=12+self.folder_rows([m[0] for m in self.months],'month',4,12,width-8,result)
         else:
             y=12+self.folder_rows(list(self.year_cards),'year',4,12,width-8,result)
         value=(result,max(1,y))
@@ -347,6 +377,13 @@ class Mosaic(Gtk.Widget):
 
     def do_get_request_mode(self):
         return Gtk.SizeRequestMode.HEIGHT_FOR_WIDTH
+
+    def dispose(self):
+        if self.tick:
+            self.remove_tick_callback(self.tick)
+            self.tick=0
+        for widget in self.widgets:
+            if widget.get_parent()==self:widget.unparent()
 
     def do_measure(self,orientation,for_size):
         if orientation==Gtk.Orientation.HORIZONTAL:

@@ -24,11 +24,11 @@ class PhotoStage(Gtk.Widget):
         self.immersive = False
         self.frozen_destination = None
         self.picture = Gtk.Overlay()
-        self.material = Gtk.Box(hexpand=True, vexpand=True)
+        self.material = Gtk.Overlay(hexpand=True, vexpand=True)
         self.material.add_css_class("expanded-photo")
         self.material.add_css_class(f"shade-{index % 5}")
         self.surface = Gtk.Box(hexpand=True, vexpand=True)
-        self.material.append(self.surface)
+        self.material.set_child(self.surface)
         self.picture.set_child(self.material)
         self.symbol = Gtk.Image(icon_name="image-x-generic-symbolic", pixel_size=58,
                                 halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
@@ -45,7 +45,17 @@ class PhotoStage(Gtk.Widget):
         self.picture.add_overlay(self.thumbnail)
         self.material.set_opacity(0)
         self.symbol.set_opacity(0)
+        self.image=Gtk.Picture(can_shrink=True,content_fit=Gtk.ContentFit.CONTAIN)
+        self.material.set_child(self.image)
+        self.material.add_overlay(self.surface)
+        self.surface.set_can_target(False)
+        if getattr(source,'media_texture',None):
+            self.set_texture(source.media_texture)
         self.picture.set_parent(self)
+
+    def set_texture(self,texture):
+        self.image.set_paintable(texture)
+        self.symbol.set_visible(False)
 
     def destination(self, width, height):
         if self.frozen_destination:

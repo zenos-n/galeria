@@ -1,5 +1,7 @@
-"""Search controls for the UI preview; no server requests."""
-from gi.repository import Adw, Gtk
+"""Search controls shared by local filenames and Immich."""
+from datetime import date
+from uuid import UUID
+from gi.repository import Adw, GLib, Gtk
 
 
 class SearchPanel(Gtk.SearchBar):
@@ -8,12 +10,13 @@ class SearchPanel(Gtk.SearchBar):
         self.window=window
         self.mode='immich'
         self.inputs={}
+        self.pending=0
         body=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=6,hexpand=True,
                       margin_start=10,margin_end=10,margin_top=4,margin_bottom=6)
         row=Gtk.Box(spacing=6)
         self.entry=Gtk.SearchEntry(placeholder_text='Search photos, people, places…',hexpand=True)
         self.entry.connect('search-changed',self.changed)
-        self.entry.connect('activate',lambda _:window.notice('Connect Immich to run this search.') if self.mode=='immich' else None)
+        self.entry.connect('activate',lambda _:self.run_search())
         self.connect_entry(self.entry)
         row.append(self.entry)
         self.filter_button=Gtk.MenuButton(icon_name='gallery-filter-symbolic',tooltip_text='Search filters')
@@ -55,6 +58,7 @@ class SearchPanel(Gtk.SearchBar):
         who=group('People and collections')
         for key in ['People','Albums','Tags']:
             entry(who,key)
+            self.inputs[key].set_title(key+' · IDs separated by commas')
         where=group('Location')
         for key in ['City','State','Country']:
             entry(where,key)
@@ -65,7 +69,7 @@ class SearchPanel(Gtk.SearchBar):
         for key in ['Make','Model','Lens']:
             entry(camera,key)
         display=group('Display options')
-        combo(display,'Rating',['Any rating','1 star or more','2 stars or more','3 stars or more','4 stars or more','5 stars'])
+        combo(display,'Rating',['Any rating','1 star','2 stars','3 stars','4 stars','5 stars'])
         combo(display,'Visibility',['Main library','Include archive','Archive only'])
         for key in ['Favorites only','Not in an album']:
             switch(display,key)
@@ -113,6 +117,7 @@ class SearchPanel(Gtk.SearchBar):
             self.tokens.insert(chip,-1)
             count+=1
         self.tokens.set_visible(bool(count) and self.mode=='immich')
+        self.changed()
 
     def remove_filter(self,_button,key):
         widget=self.inputs[key]
@@ -125,14 +130,57 @@ class SearchPanel(Gtk.SearchBar):
         self.update_tokens()
 
     def set_mode(self,mode):
+        if self.pending:
+            GLib.source_remove(self.pending);self.pending=0
         self.mode=mode
         self.entry.set_placeholder_text('Search filenames' if mode=='local' else 'Search photos, people, places…')
         self.filter_button.set_visible(mode=='immich')
         self.tokens.set_visible(mode=='immich' and bool(self.tokens.get_first_child()))
-        self.changed()
 
     def changed(self,*_):
-        if not hasattr(self.window,'mosaic'):
+        if not hasattr(self.window,'load_more'):
             return
-        self.window.mosaic.query=self.entry.get_text() if self.mode=='local' else ''
-        self.window.mosaic.queue_resize()
+        self.window.load_more.set_visible(False)
+        self.window.search_generation+=1
+        if self.pending:GLib.source_remove(self.pending)
+        self.pending=GLib.timeout_add(350,self.run_search)
+
+    def run_search(self):
+        if self.pending:
+            GLib.source_remove(self.pending);self.pending=0
+        self.window.search_library()
+        return False
+
+    def request_filters(self):
+        body={}
+        query=self.entry.get_text().strip()
+        mode=self.inputs['Search in'].get_selected()
+        smart=query if mode==0 else ''
+        if query and mode:
+            body[['','originalFileName','originalPath','description','ocr'][mode]]=query
+        media=self.inputs['Media type'].get_selected()
+        if media:body['type']='IMAGE' if media==1 else 'VIDEO'
+        for key,target in [('People','personIds'),('Albums','albumIds'),('Tags','tagIds')]:
+            value=self.inputs[key].get_text().strip()
+            if value:
+                try:body[target]=[str(UUID(item.strip())) for item in value.split(',')]
+                except ValueError:raise ValueError(f'{key}: enter IDs separated by commas.') from None
+        for key,target in [('City','city'),('State','state'),('Country','country'),('Make','make'),('Model','model'),('Lens','lensModel')]:
+            value=self.inputs[key].get_text().strip()
+            if value:body[target]=value
+        for key,target,suffix in [('From','takenAfter','T00:00:00.000Z'),('Until','takenBefore','T23:59:59.999Z')]:
+            value=self.inputs[key].get_text().strip()
+            if value:
+                try:date.fromisoformat(value)
+                except ValueError:raise ValueError(f'{key}: use YYYY-MM-DD.') from None
+                body[target]=value+suffix
+        if body.get('takenAfter','')>body.get('takenBefore','9999'):
+            raise ValueError('The start date must come before the end date.')
+        rating=self.inputs['Rating'].get_selected()
+        if rating:body['rating']=rating
+        visibility=self.inputs['Visibility'].get_selected()
+        if visibility==1:body['visibility']=None
+        elif visibility==2:body['visibility']='archive'
+        for key,target in [('Favorites only','isFavorite'),('Not in an album','isNotInAlbum')]:
+            if self.inputs[key].get_active():body[target]=True
+        return body,smart

@@ -143,7 +143,7 @@ class ImmichClient:
         return self.request('/albums')
 
     def album(self, album_id):
-        return [media_from_asset(asset) for asset in self.request('/albums/' + quote(album_id, safe='')).get('assets', [])]
+        return [media_from_asset(asset) for asset in self.request('/albums/' + quote(album_id, safe='')).get('assets', []) if asset.get('visibility')!='locked']
 
     def thumbnail(self, asset_id, preview=False):
         return self.request('/assets/' + quote(asset_id, safe='') + '/thumbnail?size=' + ('preview' if preview else 'thumbnail'), binary=True)

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Native, data-free design prototype for Gallery."""
+"""Native GTK gallery for local folders and Immich."""
 from pathlib import Path
 import sys
 
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
+gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gsk, Gtk
 
 from layout import justified_rows
@@ -13,6 +14,9 @@ from panels import AlbumTree, Uploads, import_sheet, preferences, share_sheet, u
 from viewer import Viewer
 from timeline import Mosaic
 from search_ui import SearchPanel
+from data_ui import LibraryUI
+from admin import administration
+from library import ImmichClient, LibraryError
 
 
 def button(icon, tooltip, callback):
@@ -29,7 +33,7 @@ def label(text, css=None, **kwargs):
     return widget
 
 
-class GalleryWindow(Adw.ApplicationWindow):
+class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Gallery", default_width=1280, default_height=820)
         Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(str(Path(__file__).parent / "icons"))
@@ -37,6 +41,7 @@ class GalleryWindow(Adw.ApplicationWindow):
         self.viewer_index = 0
         self.viewer = None
         self.library_mode='immich'
+        self.init_data()
         self.toast = Adw.ToastOverlay()
         self.set_content(self.toast)
         self.split = Adw.OverlaySplitView(min_sidebar_width=220, max_sidebar_width=220)
@@ -101,6 +106,8 @@ class GalleryWindow(Adw.ApplicationWindow):
         header.pack_start(button("system-search-symbolic", "Search", lambda _: self.search.set_search_mode(True)))
         menu = Gio.Menu()
         menu.append("Choose library…", "win.source")
+        menu.append("Refresh library", "win.refresh")
+        menu.append("Administration", "win.admin")
         menu.append("Preferences", "win.preferences")
         menu.append("About Gallery", "win.about")
         menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
@@ -156,6 +163,7 @@ class GalleryWindow(Adw.ApplicationWindow):
         self.rows["library"].get_parent().select_row(self.rows["library"])
         for name, callback in [("source", self.welcome), ("density", self.density),
                                ("appearance", self.appearance), ("about", self.about),
+                               ("admin",lambda:administration(self)),("refresh",self.refresh_library),
                                ("preferences", lambda: preferences(self))]:
             action = Gio.SimpleAction.new(name, None)
             action.connect("activate", lambda _a, _p, cb=callback: cb())
@@ -201,7 +209,7 @@ class GalleryWindow(Adw.ApplicationWindow):
         self.toolbar.set_content(self.stack)
         self.scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
         self.scroller.add_css_class("timeline")
-        self.mosaic = Mosaic(self.open_viewer)
+        self.mosaic = Mosaic(self.open_viewer,[])
         self.scroller.set_child(self.mosaic)
         self.stack.add_named(self.scroller, "library")
         self.status = Adw.StatusPage()
@@ -215,6 +223,15 @@ class GalleryWindow(Adw.ApplicationWindow):
         self.status_actions.append(self.encryption_note)
         self.status.set_child(self.status_actions)
         self.stack.add_named(self.status, "status")
+        self.status.set_icon_name('folder-pictures-symbolic')
+        self.status.set_title('Choose your library')
+        self.status.set_description('Connect Immich or open folders on this device.')
+        self.status_actions.set_visible(False)
+        self.stack.set_visible_child_name('status')
+        self.load_more=Gtk.Button(label='Load more',halign=Gtk.Align.CENTER,visible=False,
+                                  margin_top=6,margin_bottom=6)
+        self.load_more.connect('clicked',lambda _:self.search_library(append=True))
+        self.toolbar.add_bottom_bar(self.load_more)
         self.selection_title=label('Select items','heading')
         self.selection_bar=Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_UP)
         actionbar=Gtk.ActionBar()
@@ -264,6 +281,8 @@ class GalleryWindow(Adw.ApplicationWindow):
         self.sidebar_button.set_visible(self.split.get_collapsed())
 
     def navigate(self, nav, row):
+        self.search_generation+=1
+        self.load_more.set_visible(False)
         self.mosaic.set_selection(False)
         self.current_page = row.key
         if nav != self.album_tree:
@@ -274,7 +293,7 @@ class GalleryWindow(Adw.ApplicationWindow):
         if self.split.get_collapsed():
             self.split.set_show_sidebar(False)
         is_library = row.key == "library"
-        has_grid = is_library or row.key in ("photos", "videos", "screenshots", "live") or row.key.startswith("album-")
+        has_grid = is_library or row.key in ("photos", "videos", "screenshots", "live") or row.key.startswith("album-") or bool(self.client) and row.key in ('favorites','archive','trash')
         self.select_button.set_visible(has_grid)
         self.switcher.set_visible(is_library)
         self.period.set_visible(is_library)
@@ -300,13 +319,17 @@ class GalleryWindow(Adw.ApplicationWindow):
             self.status.set_icon_name(icon)
             self.status.set_title(title)
             self.status.set_description(description)
+        if has_grid:
+            self.search_library()
 
     def change_mode(self, *_):
         if not hasattr(self, "mosaic"):
             return
         self.mosaic.set_mode(self.switcher.get_active_name())
         self.scroller.get_vadjustment().set_value(0)
-        self.period.set_label({"all": "January 2026", "months": "2026", "years": "Library"}[self.mosaic.mode])
+        newest=self.media_items[0].created if self.media_items else None
+        self.period.set_label({'all':newest.strftime('%B %Y') if newest else 'Library',
+                               'months':newest.strftime('%Y') if newest else 'Library','years':'Library'}[self.mosaic.mode])
 
     def density(self):
         self.set_density({154: 210, 210: 112, 112: 154}[self.mosaic.target])
@@ -325,8 +348,8 @@ class GalleryWindow(Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Gallery", application_icon="folder-pictures-symbolic",
-                                 version="0.1 · Design preview", developer_name="Gallery",
-                                 comments="A native libadwaita gallery. This preview uses layout placeholders only.")
+                                 version="0.2", developer_name="Gallery",
+                                 comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 
     def welcome(self):
@@ -355,12 +378,8 @@ class GalleryWindow(Adw.ApplicationWindow):
 
     def welcome_response(self, _dialog, response):
         if response == "immich":
-            self.library_mode='immich'
-            self.search.set_mode('immich')
             self.login()
         elif response == "local":
-            self.library_mode='local'
-            self.search.set_mode('local')
             self.choose_folders()
 
     def choose_folders(self):
@@ -383,13 +402,14 @@ class GalleryWindow(Adw.ApplicationWindow):
             folders = dialog.select_multiple_folders_finish(result)
         except GLib.Error:
             return
-        names = [folders.get_item(i).get_basename() for i in range(folders.get_n_items())]
-        if names:
-            self.source_label.set_label(names[0] if len(names) == 1 else f"{len(names)} folders")
-            self.notice("Folders selected. This preview does not load photos yet.")
+        paths = [folders.get_item(i).get_path() for i in range(folders.get_n_items())]
+        if paths and all(paths):
+            self.connect_local(paths)
 
     def login(self):
         dialog = Adw.Dialog(title="Sign in to Immich", content_width=440, content_height=490)
+        active={'value':True}
+        dialog.connect('closed',lambda *_:active.update(value=False))
         toolbar = Adw.ToolbarView()
         toolbar.add_top_bar(Adw.HeaderBar())
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
@@ -409,7 +429,28 @@ class GalleryWindow(Adw.ApplicationWindow):
         sign_in.add_css_class("suggested-action")
         sign_in.add_css_class("pill")
         message = label("", "dim-label", wrap=True, justify=Gtk.Justification.CENTER)
-        sign_in.connect("clicked", lambda _: message.set_label("Sign-in is not connected in this design preview."))
+        def submit(_):
+            try:
+                client=ImmichClient(self.server_entry.get_text())
+                email=self.email_entry.get_text().strip()
+                password=self.password_entry.get_text()
+                if not email or not password:
+                    raise LibraryError('Enter your email and password.')
+            except LibraryError as error:
+                message.set_label(str(error));return
+            sign_in.set_sensitive(False)
+            message.set_label('Signing in…')
+            self.password_entry.set_text('')
+            def connected(_user):
+                if not active['value'] or self.dialog!=dialog:return
+                dialog.close()
+                self.connect_immich(client)
+            def failed(error):
+                if not active['value'] or self.dialog!=dialog:return
+                sign_in.set_sensitive(True)
+                message.set_label(error)
+            self.background(lambda:client.login(email,password),connected,failed)
+        sign_in.connect('clicked',submit)
         body.append(sign_in)
         body.append(message)
         toolbar.set_content(body)

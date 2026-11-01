@@ -1,4 +1,4 @@
-"""UI-only panels. All media, uploads and editing use neutral preview state."""
+"""Native album navigation and utility panels; writes remain preview controls."""
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -96,12 +96,9 @@ class AlbumNode(GObject.Object):
 
 class AlbumTree(Gtk.ListView):
     def __init__(self, window):
+        self.window=window
         children = Gio.ListStore.new(AlbumNode)
-        for i in range(3):
-            node = AlbumNode(f"album-{i}", f"Album {i+1}")
-            children.append(node)
-            window.rows[node.key] = node
-            window.page_titles[node.key] = node.name
+        self.children=children
         root = AlbumNode("albums", "Albums", children)
         window.rows[root.key] = root
         window.page_titles[root.key] = root.name
@@ -118,6 +115,18 @@ class AlbumTree(Gtk.ListView):
         self.add_css_class("album-tree")
         self.connect("activate", lambda view, position: window.navigate(view, tree.get_item(position).get_item()))
 
+    def set_albums(self,albums):
+        for key in list(self.window.rows):
+            if key.startswith('album-'):
+                self.window.rows.pop(key,None)
+                self.window.page_titles.pop(key,None)
+        self.children.remove_all()
+        for album in albums:
+            node=AlbumNode('album-'+album['id'],album.get('albumName') or 'Untitled album')
+            self.children.append(node)
+            self.window.rows[node.key]=node
+            self.window.page_titles[node.key]=node.name
+
     def setup(self, _factory, item):
         expander = Gtk.TreeExpander()
         expander.set_indent_for_icon(False)
@@ -133,7 +142,7 @@ class AlbumTree(Gtk.ListView):
         row = item.get_item()
         node = row.get_item()
         item.get_child().set_list_row(row)
-        item.icon.set_from_icon_name("folder-pictures-symbolic" if node.children else "gallery-image-symbolic")
+        item.icon.set_from_icon_name("folder-pictures-symbolic" if node.key=='albums' else "gallery-image-symbolic")
         item.title.set_label(node.name)
 
 

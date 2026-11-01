@@ -83,6 +83,11 @@ class Viewer(Gtk.Overlay):
             details_body.append(group)
         scroll=Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,child=details_body)
         self.details.set_content(scroll)
+        self.detail_labels=[]
+        child=details_body.get_first_child()
+        while child:
+            self.detail_labels.append(child.get_last_child())
+            child=child.get_next_sibling()
         self.viewer_split.set_sidebar(self.details)
         breakpoint=Adw.Breakpoint.new(Adw.BreakpointCondition.parse('max-width: 760sp'))
         breakpoint.add_setter(self.viewer_split,'collapsed',True)
@@ -102,6 +107,21 @@ class Viewer(Gtk.Overlay):
         header_motion.connect('enter',lambda *_:setattr(self,'chrome_hovered',True))
         header_motion.connect('leave',lambda *_:setattr(self,'chrome_hovered',False))
         self.header.add_controller(header_motion)
+        self.update_metadata()
+
+    def update_metadata(self):
+        item=getattr(self.source,'media_item',None)
+        if not item:return
+        exif=item.metadata.get('exifInfo') or {}
+        self.title.set_title(item.filename)
+        self.title.set_subtitle(item.created.strftime('%d %B %Y'))
+        values=[item.created.strftime('%d %B %Y, %H:%M'),item.filename,
+                ', '.join(str(exif[key]) for key in ('city','state','country') if exif.get(key)) or 'No location',
+                ' '.join(str(exif[key]) for key in ('make','model') if exif.get(key)) or 'No camera information']
+        for widget,value in zip(self.detail_labels,values):widget.set_label(value)
+        self.edit_button.set_sensitive(item.kind=='IMAGE')
+        self.favorite.set_active(bool(item.metadata.get('isFavorite')))
+        self.favorite.set_sensitive(False)
 
     def show(self):
         # Block pointer interaction without changing the grid's disabled styling.
@@ -114,6 +134,7 @@ class Viewer(Gtk.Overlay):
             arrow.set_opacity(0)
         self.close_button.grab_focus()
         self.stage.animate(self.source,False,self.fade,lambda:None)
+        self.window.load_preview(self.stage,self.source)
 
     def fade(self,progress):
         self.backdrop.set_opacity(progress)
@@ -155,7 +176,8 @@ class Viewer(Gtk.Overlay):
             return
         old=self.stage
         self.window.mosaic.hide_tile(None)
-        self.index=(self.index+step)%len(self.window.mosaic.tiles)
+        visible=[i for i,tile in enumerate(self.window.mosaic.tiles) if tile in self.window.mosaic.rendered]
+        self.index=visible[(visible.index(self.index)+step)%len(visible)]
         self.source=self.window.mosaic.tiles[self.index]
         self.stage=PhotoStage(self.source,self.index)
         self.window.mosaic.hide_tile(self.source)
@@ -177,6 +199,8 @@ class Viewer(Gtk.Overlay):
             return GLib.SOURCE_REMOVE
         GLib.timeout_add(40,cleanup)
         self.title.set_title(f'Photo preview · {self.index+1}')
+        self.update_metadata()
+        self.window.load_preview(self.stage,self.source)
 
     def set_immersive(self,active):
         if self.editing or self.stage.progress<1:
@@ -282,7 +306,7 @@ class Viewer(Gtk.Overlay):
         self.sync_editor_inset()
         self.stage.queue_allocate()
         self.edit_button.set_label('Done' if active else 'Edit')
-        self.title.set_title('Edit photo' if active else 'Photo preview')
+        self.title.set_title('Edit photo' if active else getattr(self.source,'filename','Photo preview'))
 
     def sync_editor_inset(self, *_):
         before=self.stage.last_rect
