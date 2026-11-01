@@ -39,6 +39,7 @@ class Mosaic(Gtk.Widget):
         self.from_height=0
         self.last_width=900
         self.last_height=0
+        self._target_cache=None
         self.panel_month=self.parent(Gtk.Box(css_classes=['date-panel']))
         self.panel_year=self.parent(Gtk.Box(css_classes=['date-panel']))
         self.pointer_month=self.pointer()
@@ -253,6 +254,9 @@ class Mosaic(Gtk.Widget):
         return y-start
 
     def target_layout(self,width):
+        key=(width,self.mode,self.expanded_month,self.expanded_year,self.target,self.query)
+        if self._target_cache and self._target_cache[0]==key:
+            return self._target_cache[1]
         result={}
         if self.mode=='all':
             y=0
@@ -264,7 +268,9 @@ class Mosaic(Gtk.Widget):
             y=12+self.folder_rows([m[0] for m in MONTHS],'month',4,12,width-8,result)
         else:
             y=12+self.folder_rows(list(self.year_cards),'year',4,12,width-8,result)
-        return result,max(1,y)
+        value=(result,max(1,y))
+        self._target_cache=(key,value)
+        return value
 
     def anchor(self,widget,other,fallback):
         owners=self.owners.get(widget,())
