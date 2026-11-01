@@ -131,10 +131,10 @@ class LibraryTests(unittest.TestCase):
             with self.assertRaises(LibraryError):ImmichClient(address)
 
     def test_locked_assets_never_enter_gallery_results(self):
-        locked=dict(ASSETS[0],visibility='locked')
-        with patch.object(self.client,'request',return_value={'assets':{'items':[locked],'nextPage':None}}):
+        private=[dict(ASSETS[0],visibility=visibility) for visibility in ('locked','hidden')]
+        with patch.object(self.client,'request',return_value={'assets':{'items':private,'nextPage':None}}):
             self.assertEqual(self.client.search(),([],None))
-        with patch.object(self.client,'request',return_value={'assets':[locked]}):
+        with patch.object(self.client,'request',return_value={'assets':private}):
             self.assertEqual(self.client.album('album'),[])
 
     def test_recursive_local_discovery_deduplicates_and_skips_symlinks(self):

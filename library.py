@@ -136,14 +136,14 @@ class ImmichClient:
             body['query'] = query
         response = self.request(path, body)
         assets = response.get('assets', {})
-        items=[media_from_asset(asset) for asset in assets.get('items', []) if asset.get('visibility')!='locked']
+        items=[media_from_asset(asset) for asset in assets.get('items', []) if asset.get('visibility') not in ('locked','hidden')]
         return items, assets.get('nextPage')
 
     def albums(self):
         return self.request('/albums')
 
     def album(self, album_id):
-        return [media_from_asset(asset) for asset in self.request('/albums/' + quote(album_id, safe='')).get('assets', []) if asset.get('visibility')!='locked']
+        return [media_from_asset(asset) for asset in self.request('/albums/' + quote(album_id, safe='')).get('assets', []) if asset.get('visibility') not in ('locked','hidden')]
 
     def thumbnail(self, asset_id, preview=False):
         return self.request('/assets/' + quote(asset_id, safe='') + '/thumbnail?size=' + ('preview' if preview else 'thumbnail'), binary=True)
