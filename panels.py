@@ -133,7 +133,7 @@ class AlbumTree(Gtk.ListView):
         item.title.set_label(node.name)
 
 
-def share_sheet(window):
+def share_sheet(window,count=1):
     dialog = Adw.Dialog(title="Share photo", content_width=460, content_height=570)
     toolbar = Adw.ToolbarView()
     toolbar.add_top_bar(Adw.HeaderBar())
@@ -143,7 +143,7 @@ def share_sheet(window):
     image = Gtk.Image(icon_name="gallery-image-symbolic", pixel_size=44, width_request=100, height_request=75)
     image.add_css_class("share-preview")
     preview.append(image)
-    preview.append(text("1 photo selected", "dim-label"))
+    preview.append(text(f"{count} {'photo' if count==1 else 'photos'} selected", "dim-label"))
     body.append(preview)
     group = Adw.PreferencesGroup(title="Share with people")
     group.add(Adw.EntryRow(title="Name or email"))

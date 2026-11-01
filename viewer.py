@@ -101,7 +101,7 @@ class Viewer(Gtk.Overlay):
         # Block pointer interaction without changing the grid's disabled styling.
         self.window.split.set_can_target(False)
         self.window.root_overlay.add_overlay(self)
-        self.source.set_opacity(0)
+        self.window.mosaic.hide_tile(self.source)
         self.backdrop.set_opacity(0)
         self.header.set_opacity(0)
         for arrow in self.arrows:
@@ -129,7 +129,7 @@ class Viewer(Gtk.Overlay):
         self.window.reveal_tile(self.source)
         def begin():
             def finish():
-                self.source.set_opacity(1)
+                self.window.mosaic.hide_tile(None)
                 self.window.root_overlay.remove_overlay(self)
                 self.stage.dispose()
                 self.window.split.set_can_target(True)
@@ -147,11 +147,11 @@ class Viewer(Gtk.Overlay):
         if self.stage.progress<1 or self.closing or self.media_stack.get_transition_running():
             return
         old=self.stage
-        self.source.set_opacity(1)
+        self.window.mosaic.hide_tile(None)
         self.index=(self.index+step)%len(self.window.mosaic.tiles)
         self.source=self.window.mosaic.tiles[self.index]
         self.stage=PhotoStage(self.source,self.index)
-        self.source.set_opacity(0)
+        self.window.mosaic.hide_tile(self.source)
         self.stage.progress=1
         self.stage.set_opacity(1)
         self.stage.thumbnail.set_opacity(0)

@@ -9,8 +9,10 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gsk, Gtk
 
 from layout import justified_rows
-from panels import AlbumTree, Uploads, import_sheet, preferences, unlock_folder
+from panels import AlbumTree, Uploads, import_sheet, preferences, share_sheet, unlock_folder
 from viewer import Viewer
+from timeline import Mosaic
+from search_ui import SearchPanel
 
 
 def button(icon, tooltip, callback):
@@ -27,118 +29,6 @@ def label(text, css=None, **kwargs):
     return widget
 
 
-# The blocks show layout only; no local files or network requests are involved.
-RATIOS = [1.2, 1.78, 1, .72, .56, 1.6, .48, .55, 1.35, .8, 1.7, .6,
-          1, 1.8, .65, .5, 1.3, 1.5, .8, 1.65, .6, 1, .7, 1.6, .6, 1.8]
-
-
-class Mosaic(Gtk.Widget):
-    """Height-for-width layout with native, keyboard-focusable photo buttons."""
-    __gtype_name__ = "GalleryMosaic"
-
-    def __init__(self, open_photo):
-        super().__init__()
-        self.open_photo = open_photo
-        self.groups = []
-        self.widgets = []
-        self.target = 154
-        self.mode = "all"
-        self.show_durations = True
-        self.tiles = []
-        self.set_hexpand(True)
-        self.set_margin_start(10)
-        self.set_margin_end(10)
-        self.rebuild()
-
-    def clear(self):
-        for widget in self.widgets:
-            widget.unparent()
-        self.widgets.clear()
-        self.groups.clear()
-        self.tiles.clear()
-
-    def rebuild(self):
-        self.clear()
-        if self.mode == "years":
-            sections = [("2026", RATIOS[:6]), ("2025", RATIOS[6:12]), ("2024", RATIOS[12:18])]
-        elif self.mode == "months":
-            sections = [("January 2026", RATIOS[:7]), ("December 2025", RATIOS[7:14]), ("November 2025", RATIOS[14:21])]
-        else:
-            sections = [("Today", RATIOS[:12]), ("Yesterday", RATIOS[12:]), ("Sunday, 25 January", RATIOS[4:18])]
-        index = 0
-        for title, ratios in sections:
-            heading = label(title, "day-heading", xalign=0)
-            heading.set_parent(self)
-            self.widgets.append(heading)
-            tiles = []
-            for ratio in ratios:
-                overlay = Gtk.Overlay()
-                placeholder = Gtk.Box(halign=Gtk.Align.FILL, valign=Gtk.Align.FILL)
-                placeholder.add_css_class("placeholder")
-                placeholder.add_css_class(f"shade-{index % 5}")
-                overlay.set_child(placeholder)
-                symbol = Gtk.Image.new_from_icon_name("image-x-generic-symbolic")
-                symbol.set_pixel_size(23)
-                symbol.set_halign(Gtk.Align.CENTER)
-                symbol.set_valign(Gtk.Align.CENTER)
-                symbol.add_css_class("placeholder-icon")
-                overlay.add_overlay(symbol)
-                if self.show_durations and index in (1, 4, 9, 17, 23):
-                    duration = label("▷ 0:31", "video-duration", halign=Gtk.Align.END, valign=Gtk.Align.START)
-                    overlay.add_overlay(duration)
-                tile = Gtk.Button(child=overlay, tooltip_text="Open photo preview")
-                tile.photo_ratio = ratio
-                tile.add_css_class("photo-tile")
-                tile.connect("clicked", self.clicked, index)
-                tile.set_parent(self)
-                tiles.append(tile)
-                self.widgets.append(tile)
-                self.tiles.append(tile)
-                index += 1
-            self.groups.append((heading, ratios, tiles))
-        self.queue_resize()
-
-    def clicked(self, _button, index):
-        self.open_photo(index, _button)
-
-    def positions(self, width):
-        result, y = [], 0
-        target = {"all": self.target, "months": 210, "years": 280}[self.mode]
-        for heading, ratios, tiles in self.groups:
-            result.append((heading, 2, y + 8, max(1, width - 4), 28))
-            y += 40
-            positions = justified_rows(ratios, width, target=target)
-            for index, x, dy, w, h in positions:
-                result.append((tiles[index], x, y + dy, w, h))
-            y += max((dy + h for _, _, dy, _, h in positions), default=0) + 12
-        return result, y
-
-    def do_get_request_mode(self):
-        return Gtk.SizeRequestMode.HEIGHT_FOR_WIDTH
-
-    def do_measure(self, orientation, for_size):
-        if orientation == Gtk.Orientation.HORIZONTAL:
-            return 200, 900, -1, -1
-        _, height = self.positions(max(200, for_size))
-        return height, height, -1, -1
-
-    def do_size_allocate(self, width, height, baseline):
-        for widget, x, y, w, h in self.positions(width)[0]:
-            widget.measure(Gtk.Orientation.HORIZONTAL, -1)
-            widget.measure(Gtk.Orientation.VERTICAL, w)
-            point = Graphene.Point()
-            point.init(x, y)
-            transform = Gsk.Transform.new().translate(point)
-            widget.allocate(w, h, -1, transform)
-
-    def do_snapshot(self, snapshot):
-        for widget in self.widgets:
-            self.snapshot_child(widget, snapshot)
-
-    def do_dispose(self):
-        self.clear()
-
-
 class GalleryWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Gallery", default_width=1280, default_height=820)
@@ -146,6 +36,7 @@ class GalleryWindow(Adw.ApplicationWindow):
         self.current_page = "library"
         self.viewer_index = 0
         self.viewer = None
+        self.library_mode='immich'
         self.toast = Adw.ToastOverlay()
         self.set_content(self.toast)
         self.split = Adw.OverlaySplitView(min_sidebar_width=220, max_sidebar_width=220)
@@ -298,12 +189,12 @@ class GalleryWindow(Adw.ApplicationWindow):
         header.pack_end(Gtk.AspectFrame(child=account,ratio=1,obey_child=False,
                                        halign=Gtk.Align.CENTER,valign=Gtk.Align.CENTER))
         header.pack_end(button("gallery-upload-arrow-symbolic", "Upload files", lambda _: self.choose_uploads()))
+        self.select_button=Gtk.ToggleButton(icon_name='object-select-symbolic',tooltip_text='Select items')
+        self.select_button.add_css_class('flat')
+        self.select_button.connect('toggled',lambda w:self.mosaic.set_selection(w.get_active()))
+        header.pack_end(self.select_button)
         self.toolbar.add_top_bar(header)
-        self.search = Gtk.SearchBar()
-        entry = Gtk.SearchEntry(placeholder_text="Search your photos", hexpand=True)
-        self.search.set_child(entry)
-        self.search.connect_entry(entry)
-        entry.connect("search-changed", lambda _: self.notice("Search will be available when a library is connected.") if entry.get_text() else None)
+        self.search = SearchPanel(self)
         self.search.set_key_capture_widget(self)
         self.toolbar.add_top_bar(self.search)
         self.stack = Gtk.Stack()
@@ -324,6 +215,25 @@ class GalleryWindow(Adw.ApplicationWindow):
         self.status_actions.append(self.encryption_note)
         self.status.set_child(self.status_actions)
         self.stack.add_named(self.status, "status")
+        self.selection_title=label('Select items','heading')
+        self.selection_bar=Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_UP)
+        actionbar=Gtk.ActionBar()
+        select_all=Gtk.Button(label='Select all')
+        select_all.connect('clicked',lambda _:self.mosaic.select_all())
+        actionbar.pack_start(select_all)
+        cancel=Gtk.Button(label='Cancel')
+        cancel.connect('clicked',lambda _:self.mosaic.set_selection(False))
+        actionbar.pack_start(cancel)
+        for icon,title,callback in [
+            ('gallery-share-symbolic','Share selected',lambda _:share_sheet(self,len(self.mosaic.selected))),
+            ('list-add-symbolic','Add to album',lambda _:self.notice('Album actions are not connected in this preview.')),
+            ('starred-symbolic','Favorite selected',lambda _:self.notice('Favorites are not connected in this preview.')),
+            ('user-trash-symbolic','Move selected to trash',lambda _:self.notice('Trash is not connected in this preview.')),
+        ]:
+            actionbar.pack_end(button(icon,title,callback))
+        self.selection_bar.set_child(actionbar)
+        self.toolbar.add_bottom_bar(self.selection_bar)
+        self.mosaic.on_selection=self.selection_changed
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.key_pressed)
         self.add_controller(keys)
@@ -334,12 +244,27 @@ class GalleryWindow(Adw.ApplicationWindow):
         if keyval == Gdk.KEY_f and state & Gdk.ModifierType.CONTROL_MASK:
             self.search.set_search_mode(True)
             return True
+        if keyval == Gdk.KEY_a and state & Gdk.ModifierType.CONTROL_MASK and not isinstance(self.get_focus(),Gtk.Editable):
+            self.mosaic.select_all()
+            return True
+        if keyval == Gdk.KEY_Escape and self.mosaic.selection_mode:
+            self.mosaic.set_selection(False)
+            return True
         return False
+
+    def selection_changed(self):
+        active=self.mosaic.selection_mode
+        self.select_button.set_active(active)
+        self.selection_bar.set_reveal_child(active)
+        self.selection_title.set_label(f'{len(self.mosaic.selected)} selected' if self.mosaic.selected else 'Select items')
+        self.period.set_visible(not active and self.current_page=='library')
+        self.header.set_title_widget(self.selection_title if active else self.switcher if self.current_page=='library' else self.page_title)
 
     def collapsed(self, *_):
         self.sidebar_button.set_visible(self.split.get_collapsed())
 
     def navigate(self, nav, row):
+        self.mosaic.set_selection(False)
         self.current_page = row.key
         if nav != self.album_tree:
             self.album_tree.get_model().unselect_all()
@@ -350,6 +275,7 @@ class GalleryWindow(Adw.ApplicationWindow):
             self.split.set_show_sidebar(False)
         is_library = row.key == "library"
         has_grid = is_library or row.key in ("photos", "videos", "screenshots", "live") or row.key.startswith("album-")
+        self.select_button.set_visible(has_grid)
         self.switcher.set_visible(is_library)
         self.period.set_visible(is_library)
         self.page_title.set_label(self.page_titles[row.key])
@@ -378,8 +304,7 @@ class GalleryWindow(Adw.ApplicationWindow):
     def change_mode(self, *_):
         if not hasattr(self, "mosaic"):
             return
-        self.mosaic.mode = self.switcher.get_active_name()
-        self.mosaic.rebuild()
+        self.mosaic.set_mode(self.switcher.get_active_name())
         self.scroller.get_vadjustment().set_value(0)
         self.period.set_label({"all": "January 2026", "months": "2026", "years": "Library"}[self.mosaic.mode])
 
@@ -423,8 +348,12 @@ class GalleryWindow(Adw.ApplicationWindow):
 
     def welcome_response(self, _dialog, response):
         if response == "immich":
+            self.library_mode='immich'
+            self.search.set_mode('immich')
             self.login()
         elif response == "local":
+            self.library_mode='local'
+            self.search.set_mode('local')
             self.choose_folders()
 
     def choose_folders(self):

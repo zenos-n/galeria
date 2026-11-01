@@ -2,7 +2,7 @@
 pkgs.stdenv.mkDerivation {
   pname = "gallery";
   version = "0.1.0";
-  src = ./.;
+  src = pkgs.lib.cleanSource ./.;
   nativeBuildInputs = with pkgs; [ wrapGAppsHook4 gobject-introspection makeWrapper ];
   buildInputs = with pkgs; [ gtk4 libadwaita ];
   dontBuild = true;

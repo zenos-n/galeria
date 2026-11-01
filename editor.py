@@ -36,8 +36,8 @@ def build_editor(viewer):
 
     def choices(names,key,previews=False,icon='gallery-magic-wand-symbolic'):
         flow=Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,homogeneous=True,
-                         min_children_per_line=2,max_children_per_line=8,
-                         row_spacing=6,column_spacing=6,halign=Gtk.Align.FILL)
+                         min_children_per_line=2,max_children_per_line=min(8,len(names)),
+                         row_spacing=6,column_spacing=6,halign=Gtk.Align.CENTER)
         first=None
         controls=[]
         for i,name in enumerate(names):
@@ -62,7 +62,9 @@ def build_editor(viewer):
             controls.append(choice)
             flow.insert(choice,-1)
         viewer.editor_choices[key]=controls
-        return flow
+        container=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,hexpand=True)
+        container.append(flow)
+        return container
 
     add_page('Suggestions',choices(['Original','Enhance','Dynamic','AI Enhance'],'Suggestions',True))
     crop=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=18)
