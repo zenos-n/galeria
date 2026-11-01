@@ -22,6 +22,10 @@ Search exposes the [Immich search modes and metadata filters](https://docs.immic
 
 Locked folder has an unlock form but does not authenticate, encrypt, cache or sync anything. Before real locked-folder sync is enabled, files **and thumbnails** must be encrypted on this device, plaintext caches must be excluded, and key storage, session locking and recovery must be designed and verified. The preview never claims that a vault has been unlocked or protected.
 
-The welcome question has an illustration slot for a user-supplied graphic. Recently added is removed. The upload button uses a tray-and-arrow symbol from the same GNOME icon kit.
+The welcome question has an illustration slot above the text for a user-supplied graphic. Recently added is removed. The upload button uses GNOME's cloud-deploy-symbolic. Empty upload progress is hidden.
 
-Check the layout geometry with `python3 -m unittest -v test_layout.py`.
+Date folders reveal their contents downward at the media's normal size. Tier geometry is cached and intermediate frames reuse stable child sizes; measured CPU results and limits are in PERF.md. Fullscreen animates media bounds, the black backdrop and control visibility.
+
+The crop tool has draggable corners, a movable crop area, locked/free aspect ratios and guides reaching the media edges. It previews crop bounds in the placeholder editor; image processing and saving remain unconnected. Hover checkboxes are independent circular controls, so clicking one selects rather than opening the viewer.
+
+Check layout and crop geometry with `python3 -m unittest -v test_layout.py test_crop_geometry.py`.

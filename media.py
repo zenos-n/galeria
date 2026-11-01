@@ -1,5 +1,6 @@
 """Thumbnail-to-viewer morph using the source thumbnail's actual rendering."""
 from gi.repository import Gdk, GLib, Graphene, Gsk, Gtk
+from crop_ui import CropOverlay
 
 
 class PhotoStage(Gtk.Widget):
@@ -33,13 +34,14 @@ class PhotoStage(Gtk.Widget):
                                 halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
         self.symbol.add_css_class("placeholder-icon")
         self.picture.add_overlay(self.symbol)
-        self.crop_frame = Gtk.Box(halign=Gtk.Align.FILL, valign=Gtk.Align.FILL)
-        self.crop_frame.add_css_class("crop-frame")
+        self.crop_frame = CropOverlay()
+        self.crop_frame.aspect=self.ratio
         self.crop_frame.set_visible(False)
         self.picture.add_overlay(self.crop_frame)
         # Capture before hiding the grid tile; this is the exact endpoint image.
         paintable = Gtk.WidgetPaintable.new(source.get_child()).get_current_image()
         self.thumbnail = Gtk.Picture(paintable=paintable, can_shrink=True, content_fit=Gtk.ContentFit.FILL)
+        self.thumbnail.set_can_target(False)
         self.picture.add_overlay(self.thumbnail)
         self.material.set_opacity(0)
         self.symbol.set_opacity(0)
@@ -120,15 +122,16 @@ class PhotoStage(Gtk.Widget):
 
         self.tick = self.add_tick_callback(frame)
 
-    def animate_geometry(self, previous=None):
+    def animate_geometry(self, previous=None, duration_ms=260, dynamic=False):
         if self.progress < 1 or self.tick:
             return
         if self.geometry_tick:
             self.remove_tick_callback(self.geometry_tick)
         start = previous or self.last_rect or self.destination(self.get_width(),self.get_height())
         end = self.destination(self.get_width(),self.get_height())
+        self.geometry_rect=start
         started = None
-        duration = 260000 if Gtk.Settings.get_default().get_property('gtk-enable-animations') else 1
+        duration = duration_ms*1000 if Gtk.Settings.get_default().get_property('gtk-enable-animations') else 1
         def frame(_widget, clock):
             nonlocal started
             now = clock.get_frame_time()
@@ -136,7 +139,8 @@ class PhotoStage(Gtk.Widget):
                 started = now
             t = min(1,(now-started)/duration)
             p = t*t*(3-2*t)
-            self.geometry_rect = tuple(a+(b-a)*p for a,b in zip(start,end))
+            target=self.destination(self.get_width(),self.get_height()) if dynamic else end
+            self.geometry_rect = tuple(a+(b-a)*p for a,b in zip(start,target))
             self.queue_allocate()
             if t>=1:
                 self.geometry_tick=0

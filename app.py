@@ -188,7 +188,7 @@ class GalleryWindow(Adw.ApplicationWindow):
         self.account_button = account
         header.pack_end(Gtk.AspectFrame(child=account,ratio=1,obey_child=False,
                                        halign=Gtk.Align.CENTER,valign=Gtk.Align.CENTER))
-        header.pack_end(button("gallery-upload-arrow-symbolic", "Upload files", lambda _: self.choose_uploads()))
+        header.pack_end(button("cloud-deploy-symbolic", "Upload files", lambda _: self.choose_uploads()))
         self.select_button=Gtk.ToggleButton(icon_name='object-select-symbolic',tooltip_text='Select items')
         self.select_button.add_css_class('flat')
         self.select_button.connect('toggled',lambda w:self.mosaic.set_selection(w.get_active()))
@@ -330,19 +330,26 @@ class GalleryWindow(Adw.ApplicationWindow):
         dialog.present(self)
 
     def welcome(self):
-        dialog = Adw.AlertDialog(heading="Do you want to use Immich?",
-                                body="Connect to your Immich library, or choose folders on this device.")
-        self.welcome_illustration = Gtk.Picture(can_shrink=True,content_fit=Gtk.ContentFit.CONTAIN,
-                                               height_request=140)
+        dialog=Adw.Dialog(title='Welcome to Gallery',content_width=360)
+        body=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=20,
+                     margin_top=24,margin_bottom=24,margin_start=24,margin_end=24)
+        self.welcome_illustration=Gtk.Picture(can_shrink=True,content_fit=Gtk.ContentFit.CONTAIN,
+                                             height_request=140)
         self.welcome_illustration.add_css_class('illustration-slot')
-        dialog.set_extra_child(self.welcome_illustration)
-        dialog.add_response("local", "No, choose folders")
-        dialog.add_response("immich", "Yes, use Immich")
-        dialog.set_response_appearance("immich", Adw.ResponseAppearance.SUGGESTED)
-        dialog.set_default_response("immich")
-        dialog.set_close_response("cancel")
-        dialog.connect("response", self.welcome_response)
-        self.dialog = dialog
+        body.append(self.welcome_illustration)
+        body.append(label('Do you want to use Immich?','title-2',wrap=True,justify=Gtk.Justification.CENTER))
+        body.append(label('Connect to your Immich library, or choose folders on this device.',
+                          wrap=True,justify=Gtk.Justification.CENTER))
+        actions=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=10)
+        for response,title in [('immich','Yes, use Immich'),('local','No, choose folders')]:
+            choice=Gtk.Button(label=title,height_request=44)
+            if response=='immich':
+                choice.add_css_class('suggested-action')
+            choice.connect('clicked',lambda _,value=response:(dialog.close(),self.welcome_response(dialog,value)))
+            actions.append(choice)
+        body.append(actions)
+        dialog.set_child(body)
+        self.dialog=dialog
         dialog.present(self)
         return GLib.SOURCE_REMOVE
 

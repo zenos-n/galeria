@@ -48,6 +48,10 @@ def build_editor(viewer):
                 image.add_css_class('filter-preview')
                 image.add_css_class(f'shade-{i%5}')
                 column.append(image)
+            elif key=='Markup':
+                icons={'Pen':'gallery-pencil-symbolic','Highlight':'gallery-marker-symbolic',
+                       'Redact':'gallery-redact-symbolic','Text':'gallery-text-symbolic'}
+                column.append(Gtk.Image(icon_name=icons[name],pixel_size=22,margin_top=4))
             elif key=='Actions':
                 column.append(Gtk.Image(icon_name=icon,pixel_size=22,margin_top=4))
             column.append(text(name,wrap=True,justify=Gtk.Justification.CENTER))
@@ -73,7 +77,8 @@ def build_editor(viewer):
     tools.append(icon_button('gallery-rotate-cw-symbolic','Rotate right',lambda _:viewer.rotate(90)))
     tools.append(icon_button('gallery-flip-h-symbolic','Mirror',lambda _:viewer.flip()))
     tools.append(text('Aspect ratio',margin_start=8))
-    dropdown=Gtk.DropDown.new_from_strings(['Original','Square','4:3','16:9'])
+    dropdown=Gtk.DropDown.new_from_strings(['Free','Original','Square','4:3','16:9'])
+    dropdown.set_selected(1)
     viewer.crop_dropdown=dropdown
     dropdown.connect('notify::selected',viewer.change_crop)
     tools.append(dropdown)

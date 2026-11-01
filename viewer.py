@@ -12,9 +12,13 @@ class Viewer(Gtk.Overlay):
         self.chrome_timer = 0
         self.chrome_hovered = False
         self.was_fullscreen = window.is_fullscreen()
+        self.fullscreen_mix=0.
+        self.fullscreen_tick=0
         self.backdrop = Gtk.Box(hexpand=True,vexpand=True)
         self.backdrop.add_css_class('viewer-backdrop')
         self.set_child(self.backdrop)
+        self.blackout=Gtk.Box(hexpand=True,vexpand=True,opacity=0,css_classes=['fullscreen-black'])
+        self.add_overlay(self.blackout)
         self.viewer_split = Adw.OverlaySplitView(sidebar_position=Gtk.PackType.END, show_sidebar=False,
                                                 min_sidebar_width=280,max_sidebar_width=300)
         self.breakpoint_bin = Adw.BreakpointBin(child=self.viewer_split,width_request=300,height_request=240)
@@ -50,18 +54,20 @@ class Viewer(Gtk.Overlay):
             self.header.pack_end(widget)
         self.viewing_controls=[self.favorite,self.info,self.download,self.share,self.fullscreen_button]
         self.header_revealer=Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.CROSSFADE,
-                                         reveal_child=True,valign=Gtk.Align.START)
+                                         transition_duration=300,reveal_child=True,valign=Gtk.Align.START)
         self.header_revealer.set_child(self.header)
         self.photo_overlay.add_overlay(self.header_revealer)
         self.arrows=[]
+        self.arrow_revealers=[]
         for step,icon,align in [(-1,'go-previous-symbolic',Gtk.Align.START),(1,'go-next-symbolic',Gtk.Align.END)]:
             arrow=icon_button(icon,'Previous photo' if step<0 else 'Next photo',lambda _,n=step:self.move(n))
             arrow.add_css_class('circular')
             arrow.add_css_class('viewer-arrow')
-            arrow.set_halign(align)
-            arrow.set_valign(Gtk.Align.CENTER)
-            self.photo_overlay.add_overlay(arrow)
+            reveal=Gtk.Revealer(child=arrow,transition_type=Gtk.RevealerTransitionType.CROSSFADE,
+                                transition_duration=300,reveal_child=True,halign=align,valign=Gtk.Align.CENTER)
+            self.photo_overlay.add_overlay(reveal)
             self.arrows.append(arrow)
+            self.arrow_revealers.append(reveal)
         self.details=Adw.ToolbarView()
         self.details.add_css_class('details-sidebar')
         details_header=Adw.HeaderBar(show_start_title_buttons=False,show_end_title_buttons=False)
@@ -121,6 +127,7 @@ class Viewer(Gtk.Overlay):
         if self.media_stack.get_transition_running():
             return
         needs_settle = self.editing or self.immersive or self.viewer_split.get_show_sidebar()
+        was_immersive=self.immersive
         self.closing=True
         if self.immersive:
             self.set_immersive(False)
@@ -141,7 +148,7 @@ class Viewer(Gtk.Overlay):
             self.stage.animate(self.source,True,self.fade,finish)
             return GLib.SOURCE_REMOVE
         # Allow sidebar/editor/fullscreen geometry to settle before measuring the tile.
-        GLib.timeout_add(220,begin) if needs_settle else GLib.idle_add(begin)
+        GLib.timeout_add(350 if was_immersive else 220,begin) if needs_settle else GLib.idle_add(begin)
 
     def move(self,step):
         if self.stage.progress<1 or self.closing or self.media_stack.get_transition_running():
@@ -172,31 +179,49 @@ class Viewer(Gtk.Overlay):
         self.title.set_title(f'Photo preview · {self.index+1}')
 
     def set_immersive(self,active):
-        if self.editing:
+        if self.editing or self.stage.progress<1:
             return
+        before=self.stage.last_rect
         self.immersive=active
         self.stage.immersive=active
         self.stage.top_inset=0 if active else 52
         self.stage.queue_allocate()
         self.info.set_active(False)
         if active:
-            self.add_css_class('immersive-viewer')
             self.window.fullscreen()
             self.fullscreen_button.set_icon_name('view-restore-symbolic')
             self.fullscreen_button.set_tooltip_text('Exit fullscreen (Esc)')
             self.show_chrome(False)
         else:
-            self.remove_css_class('immersive-viewer')
             if not self.was_fullscreen:
                 self.window.unfullscreen()
             self.fullscreen_button.set_icon_name('view-fullscreen-symbolic')
             self.fullscreen_button.set_tooltip_text('Fullscreen media')
             self.show_chrome(True)
+        self.stage.animate_geometry(before,duration_ms=320,dynamic=True)
+        if self.fullscreen_tick:
+            self.remove_tick_callback(self.fullscreen_tick)
+        start=self.fullscreen_mix
+        started=None
+        duration=320000 if Gtk.Settings.get_default().get_property('gtk-enable-animations') else 1
+        def frame(_widget,clock):
+            nonlocal started
+            now=clock.get_frame_time()
+            if started is None:started=now
+            t=min(1,(now-started)/duration)
+            p=t*t*(3-2*t)
+            self.fullscreen_mix=start+((1 if active else 0)-start)*p
+            self.blackout.set_opacity(self.fullscreen_mix)
+            if t>=1:
+                self.fullscreen_tick=0
+                return GLib.SOURCE_REMOVE
+            return GLib.SOURCE_CONTINUE
+        self.fullscreen_tick=self.add_tick_callback(frame)
 
     def show_chrome(self,visible):
         self.header_revealer.set_reveal_child(visible)
-        for arrow in self.arrows:
-            arrow.set_opacity(1 if visible else 0)
+        for arrow,reveal in zip(self.arrows,self.arrow_revealers):
+            reveal.set_reveal_child(visible)
             arrow.set_can_target(visible)
 
     def pointer_motion(self,*_):
@@ -240,6 +265,11 @@ class Viewer(Gtk.Overlay):
         return build_editor(self)
 
     def set_editing(self, active):
+        if active:
+            self.stage.crop_ratio=None
+        elif self.editing:
+            x0,y0,x1,y1=self.stage.crop_frame.bounds
+            self.stage.crop_ratio=self.stage.ratio*(x1-x0)/max(.001,y1-y0)
         if active and self.immersive:
             self.set_immersive(False)
         self.editing = active
@@ -271,13 +301,13 @@ class Viewer(Gtk.Overlay):
         self.stage.symbol.set_from_icon_name("object-flip-horizontal-symbolic" if self.stage.flipped else "image-x-generic-symbolic")
 
     def change_crop(self, dropdown, *_):
-        self.stage.crop_ratio = [None, 1, 4/3, 16/9][dropdown.get_selected()]
-        self.stage.queue_allocate()
+        self.stage.crop_frame.set_aspect([None,self.stage.ratio,1,4/3,16/9][dropdown.get_selected()])
 
     def reset_edits(self):
         self.stage.rotation, self.stage.flipped, self.stage.crop_ratio = 0, False, None
         self.stage.symbol.set_from_icon_name("image-x-generic-symbolic")
-        self.crop_dropdown.set_selected(0)
+        self.stage.crop_frame.reset()
+        self.crop_dropdown.set_selected(1)
         for scale in self.scales:
             scale.set_value(0)
         self.stage.queue_allocate()

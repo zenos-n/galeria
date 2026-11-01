@@ -23,6 +23,7 @@ def icon_button(icon, title, callback):
 class Uploads(Gtk.MenuButton):
     def __init__(self, window):
         super().__init__()
+        self.set_visible(False)
         self.window = window
         self.add_css_class("upload-indicator")
         self.set_direction(Gtk.ArrowType.RIGHT)
@@ -58,6 +59,8 @@ class Uploads(Gtk.MenuButton):
         self.set_popover(popover)
 
     def cancel(self):
+        self.popdown()
+        self.set_visible(False)
         self.title.set_label("No uploads in progress")
         self.progress.set_fraction(0)
         self.count.set_label("0 / 0")
@@ -74,6 +77,7 @@ class Uploads(Gtk.MenuButton):
         context.stroke()
 
     def preview(self, count=4, popup=True):
+        self.set_visible(count>0)
         self.title.set_label(f"Uploading {count} items")
         self.progress.set_fraction(.25)
         self.count.set_label(f"1 / {count}")
