@@ -28,9 +28,10 @@ def edit_name(window,kind,value=None):
     dialog.connect('response',save);dialog.present(window)
 
 
-def collection_view(window,kind):
+def collection_view(window,kind,refresh=False):
     if window.current_page!=kind:return
-    window.busy_library('Loading '+window.page_titles.get(kind,kind).lower()+'…')
+    cached=window.collection_cache.get(kind)
+    if not cached and not window.media_items:window.busy_library('Loading '+window.page_titles.get(kind,kind).lower()+'…')
     generation=window.search_generation
     client=window.client
     if not client:
@@ -39,6 +40,7 @@ def collection_view(window,kind):
         return
     def loaded(data):
         if window.current_page!=kind or generation!=window.search_generation:return
+        window.collection_cache[kind]=data
         query=window.search.entry.get_text().strip().casefold()
         if query:data=[value for value in data if query in str(value.get('albumName') or value.get('value') or value.get('name') or '').casefold()]
         if kind=='map':
@@ -63,4 +65,7 @@ def collection_view(window,kind):
             window.status.set_icon_name('folder-pictures-symbolic')
             window.status.set_title('No '+window.page_titles.get(kind,kind).lower()+' found')
             window.status.set_description('')
-    window.background(lambda:client.collection(kind),loaded,window.library_failed)
+    if cached is not None and not refresh:loaded(cached)
+    def updated(data):
+        if data!=cached or cached is None:loaded(data)
+    window.background(lambda:client.collection(kind),updated,window.library_failed)

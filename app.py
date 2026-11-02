@@ -417,7 +417,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
             return
         self.mosaic.set_mode(self.switcher.get_active_name())
         if self.client and self.bucket_scope:
-            self.bucket_scope={};self.search_library()
+            self.bucket_scope={};self.search_library(preserve_folder=True)
         self.scroller.get_vadjustment().set_value(0)
         newest=self.media_items[0].created if self.media_items else None
         self.period.set_label({'all':newest.strftime('%B %Y') if newest else 'Library',

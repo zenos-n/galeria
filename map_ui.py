@@ -93,7 +93,7 @@ class PhotoMap(Gtk.Overlay):
             marker=Shumate.Marker.new();marker.set_location(group['latitude'],group['longitude'])
             count=len(group['ids'])
             if count==1:
-                image=Gtk.Picture(can_shrink=True,content_fit=Gtk.ContentFit.COVER,width_request=50,height_request=50)
+                image=Adw.Avatar(size=50,show_initials=False)
                 button=Gtk.Button(child=image,tooltip_text='Open photo',css_classes=['map-photo','circular'],width_request=56,height_request=56)
                 cover(self.window,self.client,group['ids'][0],image,lambda generation=generation:self.alive() and generation==self.generation)
             else:

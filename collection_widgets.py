@@ -36,6 +36,13 @@ class SquareCover(Gtk.Widget):
 
 
 def cover(window,client,asset_id,picture,alive,person=None):
+    key=('person',person['id'],person.get('updatedAt','')) if person else ('asset',asset_id)
+    def apply(texture):
+        if isinstance(picture,Adw.Avatar):picture.set_custom_image(texture)
+        else:picture.set_paintable(texture)
+    if key in window.collection_textures:
+        if alive():apply(window.collection_textures[key])
+        return
     def load():
         if not alive():return None
         if person:
@@ -49,8 +56,9 @@ def cover(window,client,asset_id,picture,alive,person=None):
     def ready(pixels):
         if pixels and alive():
             texture=window.texture_from_pixels(pixels)
-            if isinstance(picture,Adw.Avatar):picture.set_custom_image(texture)
-            else:picture.set_paintable(texture)
+            window.collection_textures[key]=texture;window.collection_textures.move_to_end(key)
+            while len(window.collection_textures)>256:window.collection_textures.popitem(last=False)
+            apply(texture)
     window.background(load,ready,lambda _:None,images=True)
 
 

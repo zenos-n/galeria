@@ -29,6 +29,8 @@ class LibraryUI:
         self.data_generation=0
         self.search_generation=0
         self.texture_cache=OrderedDict()
+        self.page_cache=OrderedDict();self.collection_cache={};self.date_cover_cache=OrderedDict();self.collection_textures=OrderedDict()
+        self.refresh_timer=GLib.timeout_add_seconds(15,self.refresh_remote)
         self.pending_images=set()
         self.loading_more=False
         self.pending_media=None
@@ -57,6 +59,7 @@ class LibraryUI:
     def stop_data(self,*_):
         if self.data_stopped:return False
         self.data_stopped=True
+        if self.refresh_timer:GLib.source_remove(self.refresh_timer);self.refresh_timer=0
         self.data_generation+=1
         self.io.shutdown(wait=False,cancel_futures=True)
         self.images.shutdown(wait=False,cancel_futures=True)
@@ -106,7 +109,7 @@ class LibraryUI:
         self.data_generation+=1
         self.client=None;self.media_items=[];self.local_items=[];self.local_roots=[]
         self.timeline_buckets=[];self.bucket_scope={};self.dates_ready=True
-        self.texture_cache.clear();self.pending_images.clear()
+        self.page_cache.clear();self.collection_cache.clear();self.date_cover_cache.clear();self.collection_textures.clear();self.texture_cache.clear();self.pending_images.clear()
         self.preferences.update(mode=None,remember=False);self.save_preferences()
         self.album_tree.set_albums([]);self.source_label.set_label('No library connected')
         self.update_account_ui();self.set_searching(False)
@@ -204,7 +207,7 @@ class LibraryUI:
         client=self.client
         self.sync_cancel.set();self.vault=None
         self.data_generation+=1
-        self.texture_cache.clear();self.pending_images.clear()
+        self.page_cache.clear();self.collection_cache.clear();self.date_cover_cache.clear();self.collection_textures.clear();self.texture_cache.clear();self.pending_images.clear()
         self.lock_button.set_visible(False)
         if client:
             client.locked_until=0
@@ -225,12 +228,25 @@ class LibraryUI:
         if not self.client:self.notice('Local files are read-only.');return
         ids=[self.mosaic.tiles[i].media_item.id for i in self.mosaic.selected]
         if not ids:return
+        mosaic=self.mosaic
         restore=action=='trash' and self.current_page=='trash'
         def perform():
             if action=='favorite':return self.client.update_assets(ids,{'isFavorite':True})
             return self.client.restore_assets(ids) if restore else self.client.trash_assets(ids)
         def done(_):
-            self.mosaic.set_selection(False);self.refresh_library()
+            self.page_cache.clear();self.collection_cache.clear()
+            self.client.refresh_serial=getattr(self.client,'refresh_serial',0)+1
+            if self.mosaic==mosaic:
+                def remove():
+                    if self.mosaic==mosaic:self.set_library_items([item for item in self.media_items if item.id not in ids],append=True,reflow=True)
+                if action=='trash' and not restore:
+                    from trash_motion import TrashMotion
+                    TrashMotion(self,[tile for tile in mosaic.tiles if tile.media_item.id in ids],remove)
+                elif restore:remove()
+                else:
+                    for item in self.media_items:
+                        if item.id in ids:item.metadata['isFavorite']=True
+                self.mosaic.set_selection(False)
             self.notice('Items restored.' if restore else 'Favorites updated.' if action=='favorite' else 'Items moved to trash.')
         if action=='trash' and not restore:
             confirm=Adw.AlertDialog(heading=f'Move {len(ids)} items to trash?',body='You can restore them from Trash.')
@@ -306,7 +322,7 @@ class LibraryUI:
         self.local_roots=paths
         self.preferences.update(mode='local',folders=paths)
         self.save_preferences()
-        self.texture_cache.clear()
+        self.page_cache.clear();self.collection_cache.clear();self.date_cover_cache.clear();self.collection_textures.clear();self.texture_cache.clear()
         self.pending_images.clear()
         self.disk_cache=MediaCache('local')
         self.search.set_mode('local')
@@ -341,7 +357,7 @@ class LibraryUI:
         client.media_cache()
         self.library_mode='immich'
         self.local_items=[]
-        self.texture_cache.clear()
+        self.page_cache.clear();self.collection_cache.clear();self.date_cover_cache.clear();self.collection_textures.clear();self.texture_cache.clear()
         self.pending_images.clear()
         self.preferences.update(mode='immich',server=client.base,user_id=client.user['id'],email=client.user.get('email',''))
         self.save_preferences()
@@ -369,6 +385,7 @@ class LibraryUI:
         self.search_library(preserve_folder=True)
 
     def refresh_library(self):
+        self.page_cache.clear();self.collection_cache.clear();self.date_cover_cache.clear();self.collection_textures.clear()
         if self.client:
             self.client.media_cache().remove('albums')
             # Clear short-lived query snapshots while keeping expensive images.
@@ -380,7 +397,7 @@ class LibraryUI:
         else:
             self.welcome()
 
-    def search_library(self,append=False,preserve_folder=False):
+    def search_library(self,append=False,preserve_folder=False,force=False):
         if self.viewer:
             return
         if self.client and self.current_page=='library' and not self.dates_ready:
@@ -431,22 +448,50 @@ class LibraryUI:
         if page=='archive':filters['visibility']='archive'
         if page=='locked':filters['visibility']='locked'
         if page=='trash':filters.pop('visibility',None);filters['isTrashed']=True
+        cache_key=json.dumps([page,filters,query],sort_keys=True)
+        if not append and not force and page!='locked' and cache_key in self.page_cache:
+            items,self.next_page=self.page_cache[cache_key];self.page_cache.move_to_end(cache_key)
+            self.set_library_items(items);return
         next_page=self.next_page if append and self.next_page else 1
-        if not append and not preserve_folder:self.busy_library('Loading your photos…')
+        if not append and not preserve_folder and not self.media_items:self.busy_library('Loading your photos…')
         self.load_more.set_sensitive(False)
         def loaded(value):
             if request_id!=self.search_generation:return
             items,self.next_page=value
             result=self.media_items+items if append else items
+            if page!='locked':
+                self.page_cache[cache_key]=(result,self.next_page);self.page_cache.move_to_end(cache_key)
+                while len(self.page_cache)>24:self.page_cache.popitem(last=False)
+            if force and result==self.media_items:
+                self.loading_more=False;self.load_more.set_sensitive(True);return
             if self.viewer:
                 self.pending_media=(result,append)
                 self.loading_more=False
-            else:self.set_library_items(result,append=append)
+            else:self.set_library_items(result,append=append or force)
         def failed(message):
             if request_id==self.search_generation:self.library_failed(message)
-        self.background(lambda:client.search(filters,query,next_page),loaded,failed)
+        count=len(self.media_items) if force else 0
+        def load():
+            items,cursor=client.search(filters,query,next_page)
+            while force and cursor and len(items)<count:
+                batch,cursor=client.search(filters,query,cursor);items.extend(batch)
+            return items,cursor
+        self.background(load,loaded,failed)
 
-    def set_library_items(self,items,append=False):
+    def refresh_remote(self,*_):
+        if self.data_stopped:return False
+        if not self.client or self.viewer or self.loading_more or not self.get_visible() or not self.is_active():return True
+        if self.current_page in ('albums','people','tags','duplicates','sharing','map'):
+            if self.current_page!='map':
+                from collections_ui import collection_view
+                collection_view(self,self.current_page,refresh=True)
+            return True
+        if self.current_page not in ('library','photos','videos','favorites','archive','trash') and not self.current_page.startswith('album-'):return True
+        self.client.refresh_serial=getattr(self.client,'refresh_serial',0)+1
+        self.search_library(preserve_folder=True,force=True)
+        return True
+
+    def set_library_items(self,items,append=False,reflow=False):
         position=self.scroller.get_vadjustment().get_value() if append or self.bucket_scope else 0
         self.loading_more=True
         self.media_items=sorted({item.id:item for item in items}.values(),key=lambda item:item.created,reverse=True)
@@ -463,6 +508,7 @@ class LibraryUI:
         mosaic.expanded_month=old.expanded_month
         mosaic.expanded_year=old.expanded_year
         mosaic.rebuild()
+        if reflow or old.tick or mosaic.mode!='all' and (mosaic.expanded_month or mosaic.expanded_year):mosaic.continue_from(old,'reflow' if reflow else None)
         mosaic.on_selection=self.selection_changed
         self.mosaic=mosaic
         self.pending_images.clear()
@@ -499,6 +545,7 @@ class LibraryUI:
         adjustment=self.scroller.get_vadjustment()
         top=adjustment.get_value();height=adjustment.get_page_size()
         mosaic=self.mosaic
+        if self.client and mosaic.mode!='all':self.load_date_covers(mosaic,top,height)
         for tile in mosaic.tiles:
             rect=mosaic.rendered.get(tile)
             wanted=bool(rect and rect[1]+rect[3]>=max(0,top-height*2) and rect[1]<=top+height*3)
@@ -508,6 +555,39 @@ class LibraryUI:
                 if key not in self.pending_images:
                     self.pending_images.add(key);self.load_thumbnail(tile,mosaic,key)
             if wanted and tile.media_item.kind=='VIDEO':self.preload_video(tile.media_item)
+
+    def load_date_covers(self,mosaic,top,height):
+        from datetime import datetime,timedelta
+        client=self.client
+        cards=mosaic.year_cards if mosaic.mode=='years' else mosaic.month_cards
+        for key,card in cards.items():
+            rect=mosaic.rendered.get(card)
+            if not rect or rect[1]+rect[3]<max(0,top-height*2) or rect[1]>top+height*3:continue
+            if getattr(card,'covers_requested',False):continue
+            card.covers_requested=True
+            cache_key=(mosaic.mode,key)
+            if cache_key in self.date_cover_cache:
+                values=self.date_cover_cache[cache_key]
+                for i,picture in enumerate(mosaic.card_pictures[card]):
+                    if values:
+                        picture.media_id,texture=values[min(i,len(values)-1)];picture.set_paintable(texture)
+                continue
+            start=datetime.strptime(key,'%Y' if mosaic.mode=='years' else '%Y-%m')
+            end=datetime(start.year+1,1,1) if mosaic.mode=='years' or start.month==12 else datetime(start.year,start.month+1,1)
+            filters={'takenAfter':start.isoformat(timespec='milliseconds')+'Z','takenBefore':(end-timedelta(milliseconds=1)).isoformat(timespec='milliseconds')+'Z'}
+            def load(filters=filters):
+                if self.mosaic!=mosaic:return []
+                items,_=client.search(filters,size=4)
+                return [(item.id,decode_image(client.image_bytes(item),240)) for item in items]
+            def ready(values,card=card,cache_key=cache_key):
+                if self.mosaic!=mosaic:return
+                values=[(asset,self.texture_from_pixels(value)) for asset,value in values]
+                self.date_cover_cache[cache_key]=values;self.date_cover_cache.move_to_end(cache_key)
+                while len(self.date_cover_cache)>96:self.date_cover_cache.popitem(last=False)
+                for i,picture in enumerate(mosaic.card_pictures[card]):
+                    if values:
+                        picture.media_id,texture=values[min(i,len(values)-1)];picture.set_paintable(texture)
+            self.background(load,ready,lambda _:None,images=True)
 
     def scroll_changed(self,*_):
         self.load_visible_thumbnails()
@@ -544,7 +624,7 @@ class LibraryUI:
             key=self.texture_key(item)
             self.texture_cache[key]=texture
             self.texture_cache.move_to_end(key)
-            while len(self.texture_cache)>256:self.texture_cache.popitem(last=False)
+            while len(self.texture_cache)>768:self.texture_cache.popitem(last=False)
             self.apply_texture(tile,texture)
         def failed(message):
             tile.set_tooltip_text(item.filename+' · '+message)
@@ -563,7 +643,8 @@ class LibraryUI:
         tile.photo_picture.set_paintable(texture)
         tile.media_icon.set_visible(False)
         tile.set_tooltip_text(tile.filename)
-        for picture in self.mosaic.cover_slots.get(tile,[]):picture.set_paintable(texture)
+        for picture in self.mosaic.cover_slots.get(tile,[]):
+            picture.media_id=tile.media_item.id;picture.set_paintable(texture)
 
     def load_preview(self,stage,source):
         item=source.media_item

@@ -169,7 +169,7 @@ class ImmichClient:
             else:result[key]={'eq':value}
         return result
 
-    def search(self, filters=None, query='', page=1):
+    def search(self, filters=None, query='', page=1, size=100):
         values={'visibility':'timeline',**(filters or {})}
         if values.get('id')==[]:return [],None
         if isinstance(values.get('id'),list) and not self.modern_search:
@@ -178,7 +178,7 @@ class ImmichClient:
             return [item for item in items if item is not None],str(int(page)+1) if offset+100<len(ids) else None
         if values.get('isTrashed'):values['visibility']=None
         structured=self.modern_search and not query
-        body={'size':100,'withExif':True}
+        body={'size':size,'withExif':True}
         if structured:
             body['filter']=self.search_filter(values)
             body['orderBy']={'field':'fileCreatedAt','direction':'desc'}

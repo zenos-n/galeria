@@ -46,6 +46,8 @@ class Mosaic(Gtk.Widget):
         self.last_width=900
         self.last_height=0
         self._target_cache=None
+        self.measure_cache={}
+        self.tier_images=[];self.tier_sources=None
         self.motion_kind='tier'
         self.folder_membership={}
         self.folder_swap=False
@@ -244,7 +246,24 @@ class Mosaic(Gtk.Widget):
         if mode==self.mode:
             return
         self.set_selection(False)
-        self.change(lambda:setattr(self,'mode',mode))
+        def update():
+            self.mode=mode
+            self.expanded_month=self.expanded_year=None
+        self.change(update)
+
+    def continue_from(self,old,kind=None):
+        pairs=[(old.panel_month,self.panel_month),(old.panel_year,self.panel_year),
+               (old.pointer_month,self.pointer_month),(old.pointer_year,self.pointer_year),(old.loading,self.loading)]
+        for previous,current in [(old.month_cards,self.month_cards),(old.year_cards,self.year_cards)]:
+            pairs.extend((widget,current[key]) for key,widget in previous.items() if key in current)
+        headings={month[0]:heading for month,heading in zip(self.months,self.headings)}
+        pairs.extend((heading,headings[month[0]]) for month,heading in zip(old.months,old.headings) if month[0] in headings)
+        tiles={tile.media_item.id:tile for tile in self.tiles if tile.media_item}
+        pairs.extend((tile,tiles[tile.media_item.id]) for tile in old.tiles if tile.media_item and tile.media_item.id in tiles)
+        self.rendered={new:old.rendered[previous] for previous,new in pairs if previous in old.rendered}
+        self.last_width=old.last_width;self.last_height=old.last_height
+        self.tier_sources=old.image_occurrences(old.rendered)
+        self.change(lambda:None,kind or old.motion_kind)
 
     def expand_month(self,key):
         self.change(lambda:setattr(self,'expanded_month',None if self.expanded_month==key else key),'folder')
@@ -255,6 +274,8 @@ class Mosaic(Gtk.Widget):
         if self.expanded_year and self.on_bucket:self.on_bucket('year',year)
 
     def change(self,update,kind='tier'):
+        sources=self.tier_sources if self.tier_sources is not None else self.image_occurrences(self.rendered)
+        self.tier_sources=None;self.tier_images=[];self.measure_cache.clear()
         if self.tick:
             self.remove_tick_callback(self.tick)
         self.from_map=dict(self.rendered)
@@ -265,6 +286,16 @@ class Mosaic(Gtk.Widget):
         self.motion_kind=kind
         self.folder_swap=any(a and b and a!=b for a,b in zip(before,(self.expanded_month,self.expanded_year)))
         target,_=self.target_layout(self.last_width)
+        if kind=='tier':
+            destinations=self.image_occurrences(target)
+            used=set()
+            for key,paintable,end in destinations:
+                match=next((i for i,(asset,_,_) in enumerate(sources) if asset==key and i not in used),None)
+                if match is not None:
+                    used.add(match);start=sources[match][2]
+                else:start=(*end[:4],0)
+                self.tier_images.append((paintable,start,end))
+            self.tier_images.extend((paintable,start,(*start[:4],0)) for i,(_,paintable,start) in enumerate(sources) if i not in used)
         self.folder_membership={}
         if kind=='folder':
             for widget in dict.fromkeys([*self.from_map,*target]):
@@ -293,6 +324,25 @@ class Mosaic(Gtk.Widget):
             return GLib.SOURCE_CONTINUE
         self.tick=self.add_tick_callback(frame)
         self.queue_resize()
+
+    def image_occurrences(self,layout):
+        result=[]
+        for tile in self.tiles:
+            if tile in layout and tile.media_texture:
+                result.append((tile.media_item.id,tile.media_texture,layout[tile]))
+        for card,pictures in self.card_pictures.items():
+            if card not in layout:continue
+            x,y,w,h,opacity=layout[card]
+            for i,picture in enumerate(pictures):
+                paintable=picture.get_paintable();asset=getattr(picture,'media_id',None)
+                if not paintable or asset is None:continue
+                ok,bounds=picture.compute_bounds(card)
+                if ok and card.get_width() and bounds.get_width()>0:
+                    rect=(x+bounds.get_x()*w/card.get_width(),y+bounds.get_y()*h/card.get_height(),bounds.get_width()*w/card.get_width(),bounds.get_height()*h/card.get_height(),opacity)
+                else:
+                    size=(w-12)/2;rect=(x+5+(i%2)*(size+2),y+5+(i//2)*(size+2),size,size,opacity)
+                result.append((asset,paintable,rect))
+        return result
 
     def photo_rows(self,ids,x,y,width,result):
         ids=[i for i in ids if self.query.casefold() in self.tiles[i].filename.casefold()]
@@ -345,6 +395,7 @@ class Mosaic(Gtk.Widget):
         if self.mode=='all':
             y=0
             for heading,(_,_,_,a,b) in zip(self.headings,self.months):
+                if a==b:continue
                 result[heading]=(2,y+8,max(1,width-4),28,1)
                 y+=40
                 y+=self.photo_rows(range(a,b),0,y,width,result)+12
@@ -357,12 +408,13 @@ class Mosaic(Gtk.Widget):
         return value
 
     def anchor(self,widget,other,fallback):
+        if widget in self.card_pictures:return (*fallback[:4],0)
         owners=self.owners.get(widget,())
         owners=sorted(owners,key=lambda node:0 if (self.mode=='years' and node in self.year_cards.values()) else 1)
         for owner in owners:
             if owner in other:
                 x,y,w,h,_=other[owner]
-                return x+w/2-8,y+h/2-8,16,16,0
+                return x,y,w,h,0
         for member in self.members.get(widget,[]):
             if member in other:
                 return (*other[member][:4],0)
@@ -418,10 +470,13 @@ class Mosaic(Gtk.Widget):
         for widget,(x,y,w,h,opacity) in rects.items():
             widget.set_opacity(0 if widget==self.hidden_tile else max(0,min(1,opacity)))
             reference=stable.get(widget,self.from_map.get(widget,(x,y,w,h,opacity)))
-            min_w=widget.measure(Gtk.Orientation.HORIZONTAL,-1)[0]
-            allocated_w=max(1,round(reference[2]),min_w)
-            min_h=widget.measure(Gtk.Orientation.VERTICAL,allocated_w)[0]
-            allocated_h=max(1,round(reference[3]),min_h)
+            cache_key=(widget,round(reference[2]),round(reference[3]))
+            if cache_key not in self.measure_cache:
+                min_w=widget.measure(Gtk.Orientation.HORIZONTAL,-1)[0]
+                allocated_w=max(1,round(reference[2]),min_w)
+                min_h=widget.measure(Gtk.Orientation.VERTICAL,allocated_w)[0]
+                self.measure_cache[cache_key]=(allocated_w,max(1,round(reference[3]),min_h))
+            allocated_w,allocated_h=self.measure_cache[cache_key]
             point=Graphene.Point();point.init(x,y)
             transform=Gsk.Transform.new().translate(point).scale(w/allocated_w,h/allocated_h)
             widget.allocate(allocated_w,allocated_h,-1,transform)
@@ -432,14 +487,28 @@ class Mosaic(Gtk.Widget):
             check.set_child_visible(active)
             if active:
                 x,y,_,_,_=rects[tile]
-                size=max(28,check.measure(Gtk.Orientation.HORIZONTAL,-1)[0])
+                size=check.measure(Gtk.Orientation.HORIZONTAL,-1)[0]
                 size=max(size,check.measure(Gtk.Orientation.VERTICAL,size)[0])
                 point=Graphene.Point();point.init(x+6,y+6)
                 check.allocate(size,size,-1,Gsk.Transform.new().translate(point))
 
     def do_snapshot(self,snapshot):
+        tier=self.motion_kind=='tier' and self.p<1 and bool(self.tier_images)
+        for pictures in self.card_pictures.values():
+            for picture in pictures:picture.set_opacity(0 if tier else 1)
         for widget in self.rendered:
+            if tier and widget in self.tiles:continue
             self.snapshot_clipped(widget,snapshot)
+        if tier:
+            for paintable,start,end in self.tier_images:
+                x,y,w,h,opacity=(a+(b-a)*self.p for a,b in zip(start,end))
+                if w<=0 or h<=0 or opacity<=0:continue
+                clip=Graphene.Rect();clip.init(x,y,w,h)
+                snapshot.save();snapshot.push_clip(clip);snapshot.push_opacity(opacity)
+                iw=max(1,paintable.get_intrinsic_width());ih=max(1,paintable.get_intrinsic_height());scale=max(w/iw,h/ih)
+                point=Graphene.Point();point.init(x+(w-iw*scale)/2,y+(h-ih*scale)/2);snapshot.translate(point)
+                paintable.snapshot(snapshot,iw*scale,ih*scale)
+                snapshot.pop();snapshot.pop();snapshot.restore()
         for i,check in enumerate(self.checks):
             if check.get_visible() and check.get_child_visible():
                 self.snapshot_clipped(check,snapshot,self.tiles[i])
