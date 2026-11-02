@@ -60,6 +60,8 @@ class LibraryUI:
 
     def stop_data(self,*_):
         if self.data_stopped:return False
+        from copy_ui import clear_locked_clipboard
+        clear_locked_clipboard(self)
         self.data_stopped=True
         if self.refresh_timer:GLib.source_remove(self.refresh_timer);self.refresh_timer=0
         self.data_generation+=1
@@ -101,6 +103,8 @@ class LibraryUI:
         self.background(store,lambda _:None,lambda message:self.notice(message))
 
     def sign_out(self):
+        from copy_ui import clear_locked_clipboard
+        clear_locked_clipboard(self)
         client=self.client
         if not client:return
         from sync_service import disable_account
@@ -230,6 +234,8 @@ class LibraryUI:
         return True
 
     def lock_folder(self,refresh=True):
+        from copy_ui import clear_locked_clipboard
+        clear_locked_clipboard(self)
         self.timeline_pending=set()
         client=self.client
         self.sync_cancel.set();self.vault=None
@@ -251,31 +257,36 @@ class LibraryUI:
             self.status.set_description('A private space for your photos.')
             self.status_actions.set_visible(True)
 
-    def selected_action(self,action):
+    def selected_action(self,action,items=None):
         if not self.client:self.notice('Local files are read-only.');return
-        ids=[self.mosaic.tiles[i].media_item.id for i in self.mosaic.selected]
+        ids=[item.id for item in items] if items is not None else [self.mosaic.tiles[i].media_item.id for i in self.mosaic.selected]
         if not ids:return
         mosaic=self.mosaic
         restore=action=='trash' and self.current_page=='trash'
+        unarchive=action=='archive' and self.current_page=='archive'
         def perform():
             if action=='favorite':return self.client.update_assets(ids,{'isFavorite':True})
+            if action=='archive':return self.client.update_assets(ids,{'visibility':'timeline' if unarchive else 'archive'})
             return self.client.restore_assets(ids) if restore else self.client.trash_assets(ids)
         def done(_):
             self.page_cache.clear();self.collection_cache.clear()
-            if action=='trash':self.remove_from_timeline(ids)
+            if action=='trash' or action=='archive' and not unarchive:self.remove_from_timeline(ids)
             self.client.refresh_serial=getattr(self.client,'refresh_serial',0)+1
             if self.mosaic==mosaic:
                 def remove():
                     if self.mosaic==mosaic:self.set_library_items(self.timeline_index.items if self.timeline_index and mosaic.indexed else [item for item in self.media_items if item.id not in ids],append=True,reflow=True)
-                if action=='trash' and not restore:
+                if action in ('trash','archive') and self.viewer:
+                    self.pending_media=([item for item in self.media_items if item.id not in ids],True)
+                    self.viewer.close()
+                elif action=='trash' and not restore:
                     from trash_motion import TrashMotion
                     TrashMotion(self,[tile for tile in mosaic.tiles if tile.media_item.id in ids],remove)
-                elif restore:remove()
+                elif restore or action=='archive':remove()
                 else:
                     for item in self.media_items:
                         if item.id in ids:item.metadata['isFavorite']=True
                 self.mosaic.set_selection(False)
-            self.notice('Items restored.' if restore else 'Favorites updated.' if action=='favorite' else 'Items moved to trash.')
+            self.notice('Items restored.' if restore else 'Favorites updated.' if action=='favorite' else 'Items removed from archive.' if unarchive else 'Items archived.' if action=='archive' else 'Items moved to trash.')
         if action=='trash' and not restore:
             confirm=Adw.AlertDialog(heading=f'Move {len(ids)} items to trash?',body='You can restore them from Trash.')
             confirm.add_response('cancel','Cancel');confirm.add_response('trash','Move to trash')
@@ -367,6 +378,8 @@ class LibraryUI:
         self.notice(message)
 
     def connect_local(self,paths,focus_first=False):
+        from copy_ui import clear_locked_clipboard
+        clear_locked_clipboard(self)
         self.timeline_index=None;self.timeline_pending=set()
         self.sync_cancel.set();self.vault=None;self.pending_media=None
         self.lock_button.set_visible(False)
@@ -406,6 +419,8 @@ class LibraryUI:
         self.background(lambda:scan_folders(paths,probe),loaded,self.library_failed)
 
     def connect_immich(self,client):
+        from copy_ui import clear_locked_clipboard
+        clear_locked_clipboard(self)
         self.timeline_index=None;self.timeline_pending=set()
         self.sync_cancel.set();self.vault=None;self.pending_media=None
         self.lock_button.set_visible(False)
@@ -661,6 +676,9 @@ class LibraryUI:
         old=self.mosaic
         buckets=self.timeline_buckets if self.current_page=='library' and not self.search.entry.get_text() else None
         mosaic=Mosaic(self.open_viewer,self.media_items,buckets,self.open_date_bucket if buckets else None)
+        mosaic.cached_texture=lambda item:self.texture_cache.get(self.texture_key(item))
+        from copy_ui import media_menu
+        mosaic.on_context=lambda item,x,y:media_menu(self,mosaic,item,x,y)
         if append:
             selected={old.tiles[i].media_item.id for i in old.selected}
             mosaic.selection_mode=old.selection_mode

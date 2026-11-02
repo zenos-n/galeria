@@ -53,7 +53,10 @@ class Viewer(Gtk.Overlay):
         self.fullscreen_button = icon_button('view-fullscreen-symbolic','Fullscreen media',lambda _:self.set_immersive(not self.immersive))
         for widget in (self.download,self.share,self.fullscreen_button):
             self.header.pack_end(widget)
-        self.viewing_controls=[self.favorite,self.info,self.download,self.share,self.fullscreen_button]
+        self.archive=icon_button('folder-symbolic','Remove from archive' if window.current_page=='archive' else 'Archive',lambda _:window.selected_action('archive',[self.source.media_item]))
+        self.trash=icon_button('user-trash-symbolic','Restore from trash' if window.current_page=='trash' else 'Move to trash',lambda _:window.selected_action('trash',[self.source.media_item]))
+        for widget in (self.archive,self.trash):self.header.pack_end(widget)
+        self.viewing_controls=[self.favorite,self.info,self.download,self.share,self.fullscreen_button,self.archive,self.trash]
         self.header_revealer=Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.CROSSFADE,
                                          transition_duration=300,reveal_child=True,valign=Gtk.Align.START)
         self.header_revealer.set_child(self.header)
@@ -112,6 +115,12 @@ class Viewer(Gtk.Overlay):
         background=Gtk.GestureClick(button=1)
         background.connect('released',self.background_released)
         self.add_controller(background)
+        context=Gtk.GestureClick(button=3);context.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        def context_pressed(gesture,_count,x,y):
+            if self.editing:return
+            from copy_ui import media_menu
+            media_menu(window,self,self.source.media_item,x,y);gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        context.connect('pressed',context_pressed);self.add_controller(context)
 
     def background_released(self,gesture,_count,x,y):
         if self.editing or self.stage.progress<1:return
@@ -307,6 +316,11 @@ class Viewer(Gtk.Overlay):
         self.chrome_timer=GLib.timeout_add(1400,hide)
 
     def on_key(self,_controller,keyval,_keycode=0,state=0):
+        if keyval==Gdk.KEY_space and self.editing and getattr(self,'video_editor',None) and not isinstance(self.window.get_focus(),Gtk.Editable):
+            self.video_editor.toggle_playback();return True
+        if keyval==Gdk.KEY_c and state & Gdk.ModifierType.CONTROL_MASK and not self.editing:
+            from copy_ui import copy_media
+            copy_media(self.window,self.source.media_item);return True
         if keyval==Gdk.KEY_Escape:
             if self.editing:
                 self.set_editing(False)

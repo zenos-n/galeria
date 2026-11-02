@@ -41,6 +41,13 @@ class MediaTests(unittest.TestCase):
                 results=list(pool.map(lambda _:cache.fetch('same',load),range(4)))
             self.assertEqual(results,[b'image']*4);self.assertEqual(len(calls),1)
 
+    def test_clear_removes_app_owned_clipboard_originals(self):
+        with TemporaryDirectory() as root:
+            cache=MediaCache('account',root)
+            copies=cache.root/'clipboard'/'asset';copies.mkdir(parents=True)
+            (copies/'original.mp4').write_bytes(b'copy')
+            cache.clear();self.assertFalse((cache.root/'clipboard').exists())
+
     def test_cache_writes_scan_once_and_keep_eviction_accounting(self):
         with TemporaryDirectory() as root:
             cache=MediaCache('account',root,budget=100)

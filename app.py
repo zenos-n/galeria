@@ -276,6 +276,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
             ('gallery-share-symbolic','Share selected',lambda _:share_sheet(self,len(self.mosaic.selected))),
             ('list-add-symbolic','Add to album',lambda _:self.add_selected_to_album()),
             ('starred-symbolic','Favorite selected',lambda _:self.selected_action('favorite')),
+            ('folder-symbolic','Archive or unarchive selected',lambda _:self.selected_action('archive')),
             ('changes-prevent-symbolic','Move to locked folder',lambda _:self.move_selected_to_locked()),
             ('user-trash-symbolic','Trash or restore selected',lambda _:self.selected_action('trash')),
         ]:
@@ -488,7 +489,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.10.3", developer_name="Negative Zero",
+                                 version="0.11.0", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 

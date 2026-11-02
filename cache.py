@@ -3,6 +3,7 @@ import hashlib
 import heapq
 import json
 import os
+import shutil
 from pathlib import Path
 import tempfile
 import threading
@@ -118,6 +119,7 @@ class MediaCache:
     def clear(self):
         with self.lock:
             self.epoch+=1
+            shutil.rmtree(self.root/'clipboard',ignore_errors=True)
             for path in self.root.iterdir():
                 if path.is_file():path.unlink(missing_ok=True)
             self.inventory={};self.eviction=[];self.total_bytes=0;self.scanned_at=time.monotonic()

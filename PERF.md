@@ -275,3 +275,27 @@ performance under every concurrent game load. No input was automated on the
 user's displays. Evidence: /tmp/gallery-app-identification/bench-resize.py,
 resize-baseline.log, resize-profile.log, resize-row-index.log,
 resize-row-index-repeat.log, resize-unit-final.log, resize-timeline-native.log.
+
+## Galeria0.11 transition/action/editor regressions
+
+Detached photo cells correctly released their texture references, but tier
+planning captured placeholders before RAM cache rehydration. A cache lookup now
+resolves source/target textures before sprite creation. Folder clipping previously
+inferred membership from full containment in the current shrinking rectangle;
+interrupted closing/rebuild could lose that relation and draw rows over cards.
+Use logical photo/spinner membership and retain clipping panels outside the
+visible band. Separately, changing a viewport band during motion could leave a
+widget absent from both layouts, raising TypeError in anchor(None) and aborting
+GTK allocation. Skip that obsolete motion entry.
+
+64unit tests pass. Native motion_actions regression verifies month/year-to-all
+sprites have actual RAM pixels, scrolled/interrupted close plus model rebuild
+keeps every photo clipped, completed closing has no photo children, clipboard
+image/original-file formats, locked payload/tempfile cleanup, bulk/viewer Archive
+and confirmed viewer Trash. Native generated-video test verifies two handles,
+playback and seeking while editing, paused frame preview, crop/rotation/filters,
+export and rendered preview. Standalone range screenshot visually confirms two
+white thumbs and the accent span. Existing10kLOD and cache/account/export/sync/
+unfocused-update tests also pass with fatal GTK warnings. No synthetic production
+media changes or automated physical-display input.0.10.3 resize measurements and
+remaining ratio-scan limit are unchanged; live GPU performance is not remeasured.

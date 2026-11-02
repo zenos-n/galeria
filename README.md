@@ -173,3 +173,26 @@ heights and photo geometry remain exact; rectangles are produced only around the
 viewport. A45,000-item private-display resize benchmark reduced frame p95 from
 83ms to33ms. These are frame-clock measurements, not a universal GPU framerate
 claim. Exact tests and limits are recorded in PERF.md.
+
+Galeria0.11 restores RAM textures before building month/year-to-photo transition
+sprites. Folder clipping follows logical photo membership through interrupted
+closing and grid rebuilds; panels remain clipping anchors outside the viewport.
+Widgets absent from both transition layouts are skipped rather than raising an
+allocation exception. The compact row-index resize fix remains in place.
+
+Selection and focused media both offer Archive (unarchive from Archive) and Trash
+(restore from Trash), using the real Immich asset APIs and the existing Trash
+confirmation. Right-click a grid item or focused media for Copy media, Download,
+Archive and Trash; Ctrl+C copies focused media. Clipboard formats include the
+original file and, when decodable, image pixels up to4096px. Remote originals use
+one private per-account clipboard directory, replaced on the next copy or Clear
+cache. Locked images use in-memory pixels; locked video export files and the
+app-owned clipboard provider are cleared on lock, sign-out, library switch or
+shutdown. Other applications' clipboard histories are outside Galeria's control.
+
+Video editing has separate trim and playback controls: two draggable start/end
+handles with an accent-colored selected span, numeric times, and a playhead with
+Play/Pause and seeking. Space toggles playback. Playback uses the original inside
+the selected trim interval; Preview5seconds renders crop/rotation/filters, and
+Save a copy exports all edits. Numeric fields and keyboard handle adjustment
+remain available. Tests use generated media, local clipboard and fixture accounts.

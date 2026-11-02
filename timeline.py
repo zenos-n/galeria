@@ -17,6 +17,8 @@ class Mosaic(Gtk.Widget):
         super().__init__(hexpand=True,margin_start=10,margin_end=10)
         self.open_photo=open_photo
         self.on_bucket=on_bucket
+        self.cached_texture=lambda item:None
+        self.on_context=lambda *args:None
         self.bucket_counts={}
         self.indexed=bool(buckets and any(item.metadata.get('timeline_slot') for item in (items or [])))
         self.items=items
@@ -116,6 +118,13 @@ class Mosaic(Gtk.Widget):
         motion.connect('motion',self.pointer_motion)
         motion.connect('leave',lambda *_:self.set_hover(None))
         self.add_controller(motion)
+        context=Gtk.GestureClick(button=3)
+        def context_pressed(gesture,_count,x,y):
+            for tile in self.active_widgets & self.tile_set:
+                rect=self.rendered.get(tile)
+                if rect and rect[0]<=x<=rect[0]+rect[2] and rect[1]<=y<=rect[1]+rect[3] and not tile.media_item.metadata.get('placeholder'):
+                    self.on_context(tile.media_item,x,y);gesture.set_state(Gtk.EventSequenceState.CLAIMED);break
+        context.connect('pressed',context_pressed);self.add_controller(context)
         self.update_selection()
 
     def pointer_motion(self,_controller,x,y):
@@ -306,6 +315,9 @@ class Mosaic(Gtk.Widget):
         if self.tick:
             self.remove_tick_callback(self.tick)
         self.from_map=visible_layout(self.rendered)
+        if kind=='folder':
+            for panel in (self.panel_month,self.panel_year):
+                if panel in self.rendered:self.from_map[panel]=self.rendered[panel]
         self.from_height=self.last_height
         before=(self.expanded_month,self.expanded_year);old_mode=self.mode
         self.set_hover(None)
@@ -343,8 +355,7 @@ class Mosaic(Gtk.Widget):
                         continue
                     for layout in (self.from_map,target):
                         if widget in layout and panel in layout:
-                            x,y,w,h,_=layout[widget];px,py,pw,ph,_=layout[panel]
-                            if x>=px and y>=py and x+w<=px+pw+1 and y+h<=py+ph+1:
+                            if widget in self.tile_set or widget==self.loading:
                                 self.folder_membership.setdefault(widget,set()).add(panel)
         self.p=0
         started=None
@@ -371,7 +382,10 @@ class Mosaic(Gtk.Widget):
                 if getattr(picture,'media_id',None):self.asset_months[picture.media_id]=key
         for tile in layout.keys() & self.tile_set:
             if tile.media_item:
-                result.append((tile.media_item.id,tile.media_texture or self.placeholder_paintable,layout[tile]))
+                texture=tile.media_texture or self.cached_texture(tile.media_item)
+                if texture:
+                    tile.photo_picture.set_paintable(texture);tile.media_icon.set_visible(False)
+                result.append((tile.media_item.id,texture or self.placeholder_paintable,layout[tile]))
         for card,pictures in self.card_pictures.items():
             if card not in layout:continue
             for i,picture in enumerate(pictures):
@@ -485,6 +499,7 @@ class Mosaic(Gtk.Widget):
             if self.motion_kind=='tier' and self.tier_groups and widget in self.tile_set:continue
             old=self.from_map.get(widget)
             new=target.get(widget)
+            if old is None and new is None:continue
             if old is None:
                 old=self.folder_endpoint(widget,new,True) if self.motion_kind=='folder' else self.anchor(widget,self.from_map,new)
             if new is None:
@@ -504,6 +519,13 @@ class Mosaic(Gtk.Widget):
         return Gtk.SizeRequestMode.HEIGHT_FOR_WIDTH
 
     def dispose(self):
+        child=self.get_first_child()
+        while child:
+            following=child.get_next_sibling()
+            if isinstance(child,Gtk.Popover):
+                child.popdown()
+                if child.get_parent():child.unparent()
+            child=following
         if self.tick:
             self.remove_tick_callback(self.tick)
             self.tick=0
