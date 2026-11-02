@@ -78,3 +78,7 @@
 .login-body { margin: 22px 28px 28px; }
 .login-error { color: @error_color; font-size: 13px; }
 .collection-cover { background: alpha(@window_fg_color,.07); border-radius: 8px; }
+.collection-grid { background: transparent; }
+.collection-grid > child { padding: 0; border-radius: 10px; }
+.collection-open { padding: 0; border-radius: 10px; }
+.duplicate-group { background: @view_bg_color; border-radius: 12px; }

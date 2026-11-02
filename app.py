@@ -212,6 +212,8 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         header.pack_end(self.account_wrapper)
         self.upload_button=button("cloud-deploy-symbolic", "Upload files", lambda _: self.choose_uploads())
         header.pack_end(self.upload_button)
+        self.album_share_button=button('gallery-share-symbolic','Share album',lambda _:self.share_current_album())
+        self.album_share_button.set_visible(False);header.pack_end(self.album_share_button)
         self.select_button=Gtk.ToggleButton(icon_name='object-select-symbolic',tooltip_text='Select items')
         self.select_button.add_css_class('flat')
         self.select_button.connect('toggled',lambda w:self.mosaic.set_selection(w.get_active()))
@@ -305,6 +307,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.switcher.set_visible(not self.searching and not active and is_library)
         self.account_wrapper.set_visible(not self.searching)
         self.upload_button.set_visible(not self.searching)
+        self.album_share_button.set_visible(not self.searching and bool(self.client) and self.current_page.startswith('album-'))
         self.select_button.set_visible(not self.searching and self.grid_page)
         self.lock_button.set_visible(not self.searching and bool(self.client and self.client.locked_until>time.monotonic()))
         self.sidebar_button.set_visible(not self.searching and self.split.get_collapsed())
@@ -345,6 +348,12 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
     def show_folder_sync(self):
         from sync_ui import folder_sync
         folder_sync(self)
+
+    def share_current_album(self):
+        from sharing_ui import share_album
+        album_id=self.current_page.removeprefix('album-')
+        album=next((album for album in getattr(self.album_tree,'albums',[]) if album['id']==album_id),None)
+        if album:share_album(self,album)
 
     def collapsed(self, *_):
         self.update_header()

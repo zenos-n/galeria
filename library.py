@@ -206,6 +206,29 @@ class ImmichClient:
     def share_album(self,album_id,options):
         return self.request('/shared-links',dict(options,type='ALBUM',albumId=album_id))
 
+    def share_assets(self,ids,options):
+        if not ids:raise LibraryError('Select at least one item to share.')
+        return self.request('/shared-links',dict(options,type='INDIVIDUAL',assetIds=ids))
+
+    def shared_links(self,album_id=None):
+        return self.request('/shared-links'+('?'+urlencode({'albumId':album_id}) if album_id else ''))
+
+    def revoke_link(self,link_id):return self.request('/shared-links/'+quote(link_id,safe=''),method='DELETE')
+
+    def share_url(self,link):
+        key=link.get('slug') or link.get('key')
+        if not isinstance(key,str) or not key:raise LibraryError('Immich did not return a share URL.')
+        return self.base.removesuffix('/api')+'/share/'+quote(key,safe='')
+
+    def album_info(self,album_id):return self.request('/albums/'+quote(album_id,safe=''))
+
+    def album_member(self,album_id,user_id,role=None,remove=False):
+        path='/albums/'+quote(album_id,safe='')+'/user/'+quote(user_id,safe='')
+        return self.request(path,None if remove else {'role':role},method='DELETE' if remove else 'PUT')
+
+    def invite_album(self,album_id,user_id,role):
+        return self.request('/albums/'+quote(album_id,safe='')+'/users',{'albumUsers':[{'userId':user_id,'role':role}]},method='PUT')
+
     def albums(self):
         return self.media_cache().json('albums',lambda:self.request('/albums'),30)
 

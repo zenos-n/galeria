@@ -43,88 +43,16 @@ def collection_view(window,kind):
         if query:data=[value for value in data if query in str(value.get('albumName') or value.get('value') or value.get('name') or '').casefold()]
         if kind=='map':
             data=[dict(marker,name=f"{marker.get('lat',marker.get('latitude',0)):.4f}, {marker.get('lon',marker.get('longitude',0)):.4f}") for marker in data]
-        flow=Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,min_children_per_line=1,max_children_per_line=20,
-                          row_spacing=18,column_spacing=18,margin_start=24,margin_end=24,margin_top=24,margin_bottom=24,
-                          homogeneous=True,valign=Gtk.Align.START)
-        for value in data:
-            body=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=8,width_request=160)
-            picture=Gtk.Picture(can_shrink=True,content_fit=Gtk.ContentFit.COVER)
-            cover_box=Gtk.Overlay(child=Gtk.Box(width_request=170,height_request=130),css_classes=['collection-cover'])
-            cover_box.add_overlay(Gtk.Image(icon_name='gallery-tag-symbolic' if kind=='tags' else 'gallery-image-symbolic',pixel_size=32))
-            cover_box.add_overlay(picture)
-            body.append(cover_box)
-            if kind in ('albums','sharing','pinned'):
-                name=value.get('albumName') or 'Untitled album'
-                detail=f"{value.get('assetCount',0)} items"
-                cover=value.get('albumThumbnailAssetId')
-                action=lambda _,value=value:window.activate_album(value['id'])
-            elif kind=='people':
-                name=value.get('name') or 'Unnamed person';detail='View photos';cover=None
-                action=lambda _,value=value:window.open_collection(name,{'personIds':[value['id']]})
-            elif kind=='tags':
-                name=value.get('value') or value.get('name','Tag');detail='View photos';cover=None
-                action=lambda _,value=value:window.open_collection(name,{'tagIds':[value['id']]})
-            elif kind=='duplicates':
-                assets=[asset for asset in value.get('assets',[]) if asset.get('visibility') not in ('locked','hidden')]
-                if not assets:continue
-                name=f'{len(assets)} similar items';detail='Review group';cover=assets[0]['id']
-                action=lambda _,assets=assets:window.open_collection('Review duplicates',items=[media_from_asset(asset) for asset in assets])
-            else:
-                name=value['name'];detail='View photo';cover=value.get('id')
-                action=lambda _,value=value:window.open_collection('Location',{'id':value['id']})
-            body.append(Gtk.Label(label=name,xalign=0,ellipsize=3,max_width_chars=24,tooltip_text=name))
-            body.append(Gtk.Label(label=detail,xalign=0,css_classes=['dim-label','caption']))
-            button=Gtk.Button(child=body,css_classes=['flat','collection-card'],valign=Gtk.Align.START,halign=Gtk.Align.START)
-            button.connect('clicked',action)
-            card_overlay=Gtk.Overlay(child=button,halign=Gtk.Align.START,valign=Gtk.Align.START)
-            flow.insert(card_overlay,-1)
-            if kind in ('albums','people','tags','duplicates'):
-                popover=Gtk.Popover()
-                actions=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=4,margin_top=6,margin_bottom=6,margin_start=6,margin_end=6)
-                if kind!='duplicates':
-                    rename=Gtk.Button(label='Rename',css_classes=['flat'])
-                    rename.connect('clicked',lambda _,value=value,popover=popover:(popover.popdown(),edit_name(window,kind,value)))
-                    actions.append(rename)
-                if kind in ('people','duplicates','tags'):
-                    label='Hide person' if kind=='people' else 'Dismiss duplicate group' if kind=='duplicates' else 'Delete tag'
-                    remove=Gtk.Button(label=label,css_classes=['flat'])
-                    def remove_item(_,value=value,popover=popover):
-                        popover.popdown()
-                        confirm=Adw.AlertDialog(heading=label+'?')
-                        confirm.add_response('cancel','Cancel');confirm.add_response('apply',label)
-                        confirm.set_response_appearance('apply',Adw.ResponseAppearance.DESTRUCTIVE)
-                        path='/people/'+quote(value['id'],safe='') if kind=='people' else '/duplicates/'+quote(value['duplicateId'],safe='') if kind=='duplicates' else '/tags/'+quote(value['id'],safe='')
-                        confirm.connect('response',lambda _,response:window.background(
-                            lambda:client.request(path,{'isHidden':True} if kind=='people' else None,method='PUT' if kind=='people' else 'DELETE'),
-                            lambda _:collection_view(window,kind)) if response=='apply' else None)
-                        confirm.present(window)
-                    remove.connect('clicked',remove_item);actions.append(remove)
-                popover.set_child(actions)
-                menu=Gtk.MenuButton(icon_name='view-more-symbolic',popover=popover,tooltip_text='Collection actions',
-                                    halign=Gtk.Align.END,valign=Gtk.Align.START,margin_top=6,margin_end=6,css_classes=['osd'])
-                card_overlay.add_overlay(menu)
-                context=Gtk.GestureClick(button=3)
-                context.connect('pressed',lambda gesture,*_,menu=menu:(menu.popup(),gesture.set_state(Gtk.EventSequenceState.CLAIMED)))
-                button.add_controller(context)
-            if cover or kind=='people':
-                def image(value=value,cover=cover):
-                    if window.current_page!=kind or generation!=window.search_generation:return None
-                    if kind=='people':
-                        blob=client.media_cache().fetch('person:'+value['id']+str(value.get('updatedAt','')),
-                            lambda:client.request('/people/'+value['id']+'/thumbnail',binary=True))
-                    else:
-                        item=client.collection_cover(cover)
-                        if item is None:return None
-                        blob=client.image_bytes(item)
-                    return decode_image(blob)
-                window.background(image,lambda pixels,picture=picture:picture.set_paintable(window.texture_from_pixels(pixels)) if pixels else None,lambda _:None,images=True)
+        from collection_widgets import collection_grid,tag_list,location_list
+        refresh=lambda:collection_view(window,kind)
+        view=tag_list(window,data,refresh) if kind=='tags' else location_list(window,data) if kind=='map' else collection_grid(window,client,kind,data,generation,refresh)
         previous=window.stack.get_child_by_name('collections')
         if previous:window.stack.remove(previous)
         wrapper=Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         if kind in ('tags','albums'):
             create=Gtk.Button(label='New tag' if kind=='tags' else 'New album',halign=Gtk.Align.END,margin_top=12,margin_end=24)
             create.connect('clicked',lambda _:edit_name(window,kind));wrapper.append(create)
-        wrapper.append(Gtk.ScrolledWindow(child=flow,hscrollbar_policy=Gtk.PolicyType.NEVER,vexpand=True))
+        wrapper.append(Gtk.ScrolledWindow(child=view,hscrollbar_policy=Gtk.PolicyType.NEVER,vexpand=True))
         window.stack.add_named(wrapper,'collections')
         if data or kind in ('tags','albums'):window.stack.set_visible_child_name('collections')
         else:

@@ -159,38 +159,8 @@ class AlbumTree(Gtk.ListView):
 
 
 def share_sheet(window,count=1):
-    dialog = Adw.Dialog(title="Share photo", content_width=460, content_height=570)
-    toolbar = Adw.ToolbarView()
-    toolbar.add_top_bar(Adw.HeaderBar())
-    body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=22,
-                   margin_top=16, margin_bottom=24, margin_start=24, margin_end=24)
-    preview = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, halign=Gtk.Align.CENTER)
-    image = Gtk.Image(icon_name="gallery-image-symbolic", pixel_size=44, width_request=100, height_request=75)
-    image.add_css_class("share-preview")
-    preview.append(image)
-    preview.append(text(f"{count} {'photo' if count==1 else 'photos'} selected", "dim-label"))
-    body.append(preview)
-    group = Adw.PreferencesGroup(title="Share with people")
-    group.add(Adw.EntryRow(title="Name or email"))
-    album = Adw.ComboRow(title="Add to shared album", model=Gtk.StringList.new(["Choose an album", "Album 1", "Album 2", "Album 3"]))
-    group.add(album)
-    body.append(group)
-    link = Adw.PreferencesGroup(title="Link options")
-    link.add(Adw.SwitchRow(title="Allow downloads", active=True))
-    link.add(Adw.ComboRow(title="Expires", model=Gtk.StringList.new(["Never", "In 1 day", "In 7 days", "In 30 days"])))
-    body.append(link)
-    message = text("", "dim-label", wrap=True, justify=Gtk.Justification.CENTER)
-    create = Gtk.Button(label="Create share link", height_request=42)
-    create.add_css_class("suggested-action")
-    create.add_css_class("pill")
-    create.connect("clicked", lambda _: message.set_label("Connect Immich to create a share link."))
-    body.append(create)
-    body.append(message)
-    scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, child=body)
-    toolbar.set_content(scroll)
-    dialog.set_child(toolbar)
-    window.dialog = dialog
-    dialog.present(window)
+    from sharing_ui import share_media
+    share_media(window)
 
 
 def import_sheet(window, files):
