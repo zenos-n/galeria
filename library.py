@@ -215,20 +215,27 @@ class ImmichClient:
         items=[media_from_asset(asset) for asset in assets.get('items', []) if asset.get('visibility')!='hidden' and (locked or asset.get('visibility')!='locked')]
         return items, assets.get('nextCursor') if structured else assets.get('nextPage')
 
-    def time_buckets(self,filters=None,fresh=False):
+    def time_buckets(self,filters=None,fresh=False,cached=False):
         options={'visibility':'timeline','order':'desc'}
         for key,value in (filters or {}).items():
             if key in ('visibility','isFavorite','isTrashed'):options[key]=str(value).lower() if isinstance(value,bool) else value
             elif key in ('albumIds','personIds','tagIds') and len(value)==1:options[key[:-1]]=value[0]
         path='/timeline/buckets?'+urlencode({key:value for key,value in options.items() if value is not None})
+        if cached:
+            data=self.media_cache().get('buckets:'+path)
+            return json.loads(data) if data else None
         if fresh:self.media_cache().remove('buckets:'+path)
         return self.media_cache().json('buckets:'+path,lambda:self.request(path),30)
 
-    def time_bucket(self,key,fresh=False):
-        if self.server_lock_pending:self.lock_session()
+    def time_bucket(self,key,fresh=False,cached=False):
+        if self.server_lock_pending and not cached:self.lock_session()
         path='/timeline/bucket?'+urlencode({'timeBucket':key[:7]+'-01T00:00:00.000Z','visibility':'timeline','order':'desc'})
         if fresh:self.media_cache().remove('compact:'+path)
-        data=self.media_cache().json('compact:'+path,lambda:self.request(path),60)
+        if cached:
+            blob=self.media_cache().get('compact:'+path)
+            if blob is None:return None
+            data=json.loads(blob)
+        else:data=self.media_cache().json('compact:'+path,lambda:self.request(path),60)
         fields=('id','ratio','fileCreatedAt','isImage','visibility')
         if not isinstance(data,dict) or any(not isinstance(data.get(field),list) for field in fields):raise LibraryError('The server returned an invalid timeline index.')
         count=len(data['id'])
@@ -315,6 +322,38 @@ class ImmichClient:
             if not next_page:break
             page=next_page
         return items
+
+    def profile_image(self,cached=False):
+        id=self.user['id'];revision=str(self.user.get('profileChangedAt',''))
+        if cached:return self.media_cache().get('profile:'+id+':'+revision)
+        return self.media_cache().fetch('profile:'+id+':'+revision,
+            lambda:self.request('/users/'+quote(id,safe='')+'/profile-image',binary=True))
+
+    def upload_profile_image(self,data,name):
+        import secrets,mimetypes
+        boundary='galeria-'+secrets.token_hex(16)
+        safe_name=Path(name).name.replace('"','').replace('\r','').replace('\n','')
+        body=(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{safe_name}"\r\n'
+              f'Content-Type: {mimetypes.guess_type(safe_name)[0] or "application/octet-stream"}\r\n\r\n').encode()+data+f'\r\n--{boundary}--\r\n'.encode()
+        try:
+            with self.http.open(Request(self.base+'/users/profile-image',data=body,
+                headers={'Authorization':'Bearer '+self.token,'Content-Type':'multipart/form-data; boundary='+boundary},method='POST'),timeout=30) as response:
+                result=json.loads(response.read(1024*1024));self.user.update(result)
+                return result
+        except (HTTPError,URLError,OSError,ValueError):raise LibraryError('Could not update your profile photo. Check the image and try again.') from None
+
+    def check_original_access(self,item):
+        if not self.token:raise LibraryError('Sign in again to download this file.')
+        if item.metadata.get('visibility')=='locked' and self.locked_until<=time.monotonic():
+            raise LibraryError('Unlock the locked folder again to download this file.')
+
+    def open_original(self,item):
+        self.check_original_access(item)
+        try:return self.http.open(Request(self.base+'/assets/'+quote(item.id,safe='')+'/original',
+            headers={'Authorization':'Bearer '+self.token}),timeout=30)
+        except HTTPError as error:
+            status=error.code;error.close();raise LibraryError('The original could not be downloaded. Check your access and try again.',status) from None
+        except (URLError,OSError):raise LibraryError('Could not reach Immich to download the original.') from None
 
     def thumbnail(self, asset_id, preview=False):
         blob=self.request('/assets/' + quote(asset_id, safe='') + '/thumbnail?size=' + ('preview' if preview else 'thumbnail'), binary=True)

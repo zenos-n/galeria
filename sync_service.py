@@ -64,6 +64,17 @@ def install_service():
 
 
 def wake_service():return command(['systemctl','--user','kill','-s','USR1',UNIT],check=False)
+def request_sync():
+    unit=Path(os.environ.get('XDG_CONFIG_HOME',Path.home()/'.config'))/'systemd'/'user'/UNIT
+    try:outdated=runtime_command()[0] not in unit.read_text()
+    except OSError:outdated=True
+    active=command(['systemctl','--user','is-active','--quiet',UNIT],check=False).returncode==0
+    if outdated or not active:
+        install_service()
+        if outdated and active:command(['systemctl','--user','restart',UNIT])
+    elif wake_service().returncode:raise LibraryError('Could not wake the folder sync service.')
+
+
 def stop_service():return command(['systemctl','--user','disable','--now',UNIT],check=False)
 
 
@@ -76,11 +87,14 @@ def disable_account(identity):
 
 
 def run_cycle(config,journal,cancel,client_factory=ImmichClient,token_lookup=secret_get,valid_rule=None):
-    status={'running':True,'pid':os.getpid(),'updated':time.time(),'accounts':{}}
+    status={'running':True,'active':True,'pid':os.getpid(),'updated':time.time(),'accounts':{}}
     for identity,account in config.get('accounts',{}).items():
         if cancel.is_set():break
         if not account.get('enabled'):continue
-        current={'folders':[],'error':''};status['accounts'][identity]=current
+        current={'folders':[],'error':'','busy':True};status['accounts'][identity]=current
+        def publish():
+            status['updated']=time.time();atomic_write(state_dir()/'sync-status.json',json.dumps(status).encode())
+        publish()
         try:
             client=client_factory(account['server'])
             client.token=token_lookup(identity,'session')
@@ -88,15 +102,21 @@ def run_cycle(config,journal,cancel,client_factory=ImmichClient,token_lookup=sec
             client.user=client.request('/users/me')
             if client.identity!=identity:raise LibraryError('The saved session belongs to another account.')
             client.detect_version()
-            engine=SyncEngine(client,journal,cancel,valid_rule=(lambda rule:valid_rule(identity,rule)) if valid_rule else None)
+            last_progress=[0]
+            def progress(counts):
+                current['progress']=counts
+                if time.monotonic()-last_progress[0]>.2:last_progress[0]=time.monotonic();publish()
+            engine=SyncEngine(client,journal,cancel,progress=progress,valid_rule=(lambda rule:valid_rule(identity,rule)) if valid_rule else None)
             for rule in account.get('folders',[]):
                 if cancel.is_set():break
                 if rule.get('enabled',True):
-                    current['folders'].append(engine.run_folder(rule))
+                    current['current_folder']=rule['path'];current['progress']={};publish()
+                    current['folders'].append(engine.run_folder(rule));current['progress']={}
                     status['updated']=time.time();atomic_write(state_dir()/'sync-status.json',json.dumps(status).encode())
         except Exception as error:
             current['error']=str(error) if isinstance(error,LibraryError) else 'Sync could not run; check the account and folders.'
-    status['updated']=time.time()
+        current['busy']=False
+    status['active']=False;status['updated']=time.time()
     atomic_write(state_dir()/'sync-status.json',json.dumps(status).encode())
     return status
 
