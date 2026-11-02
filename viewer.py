@@ -211,7 +211,7 @@ class Viewer(Gtk.Overlay):
         old=self.stage
         if old.video_player:old.video_player.pause()
         self.window.mosaic.hide_tile(None)
-        visible=[i for i,tile in enumerate(self.window.mosaic.tiles) if tile in self.window.mosaic.rendered]
+        visible=[i for i,tile in enumerate(self.window.mosaic.tiles) if tile in self.window.mosaic.rendered and not tile.media_item.metadata.get('placeholder')]
         self.index=visible[(visible.index(self.index)+step)%len(visible)]
         self.source=self.window.mosaic.tiles[self.index]
         self.stage=PhotoStage(self.source,self.index)

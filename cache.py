@@ -30,6 +30,7 @@ class MediaCache:
         self.key=key
         self.lock=threading.RLock()
         self.key_locks=weakref.WeakValueDictionary()
+        self.epoch=0;self.forbidden=set()
 
     def path(self,key):return self.root/hashlib.sha256(key.encode()).hexdigest()
 
@@ -47,6 +48,7 @@ class MediaCache:
 
     def put(self,key,data):
         with self.lock:
+            if any(key.startswith(prefix) for prefix in self.forbidden):return
             if self.key:
                 nonce=os.urandom(12)
                 data=nonce+AESGCM(self.key).encrypt(nonce,data,key.encode())
@@ -57,9 +59,12 @@ class MediaCache:
         with self.lock:
             lock=self.key_locks.setdefault(key,threading.Lock())
         with lock:
+            epoch=self.epoch
             data=self.get(key,max_age)
             if data is None:
-                data=loader();self.put(key,data)
+                data=loader()
+                with self.lock:
+                    if epoch==self.epoch:self.put(key,data)
             return data
 
     def json(self,key,loader,ttl=60):
@@ -77,8 +82,12 @@ class MediaCache:
 
     def clear(self):
         with self.lock:
+            self.epoch+=1
             for path in self.root.iterdir():
                 if path.is_file():path.unlink(missing_ok=True)
+
+    def forbid(self,prefixes):
+        with self.lock:self.forbidden.update(prefixes);self.clear()
 
     def sync_encrypted(self,key,response,cancel):
         """Stream an original to authenticated ciphertext; never create plaintext files."""

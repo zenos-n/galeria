@@ -3,6 +3,8 @@ from gi.repository import Gdk, GLib, Graphene, Gsk, Gtk
 from layout import justified_rows
 from imaging import duration_label
 from collections import defaultdict,deque
+from bisect import bisect_left,bisect_right
+from date_motion import groups as motion_groups,cover_slot
 
 RATIOS=[1.2,1.78,1,.72,.56,1.6,.48,.55,1.35,.8,1.7,.6,1,1.8,.65,.5,1.3,1.5,.8,1.65,.6,1,.7,1.6,.6,1.8]
 MONTHS=[('2026-01','January 2026','2026',0,12),('2025-12','December 2025','2025',12,26),('2025-11','November 2025','2025',26,40)]
@@ -16,6 +18,8 @@ class Mosaic(Gtk.Widget):
         self.open_photo=open_photo
         self.on_bucket=on_bucket
         self.bucket_counts={}
+        self.indexed=bool(buckets and any(item.metadata.get('timeline_slot') for item in (items or [])))
+        self.items=items
         self.target=154
         self.mode='all'
         self.show_durations=True
@@ -47,7 +51,9 @@ class Mosaic(Gtk.Widget):
         self.last_width=900
         self.last_height=0
         self._target_cache=None
-        self.tier_images=[];self.tier_sources=None
+        self.on_window=lambda:None;self.window_signature=None
+        self.tier_images=[];self.tier_groups=[];self.tier_sources=None
+        self.asset_months={item.id:item.created.strftime('%Y-%m') for item in (items or [])}
         self.motion_kind='tier'
         self.folder_membership={}
         self.folder_swap=False
@@ -75,37 +81,12 @@ class Mosaic(Gtk.Widget):
         self.pointer_month=self.pointer()
         self.pointer_year=self.pointer()
         ratios=[item.ratio for item in items] if items is not None else RATIOS[:12]+RATIOS[12:]+RATIOS[4:18]
+        from timeline_cells import Cell,Check
+        self.active_widgets=set()
         for index,ratio in enumerate(ratios):
-            overlay=Gtk.Overlay()
-            block=Gtk.Box(css_classes=['placeholder',f'shade-{index%5}'])
-            overlay.set_child(block)
-            icon=Gtk.Image(icon_name='image-x-generic-symbolic',pixel_size=23,
-                           halign=Gtk.Align.CENTER,valign=Gtk.Align.CENTER,css_classes=['placeholder-icon'])
-            overlay.add_overlay(icon)
-            if items is not None and items[index].kind=='VIDEO' or items is None and index in (1,4,9,17,23):
-                duration=Gtk.Label(label='▷ '+duration_label(items[index].metadata.get('duration') if items is not None else '0:31'),halign=Gtk.Align.END,valign=Gtk.Align.START,css_classes=['video-duration'])
-                overlay.add_overlay(duration)
-                self.badges.append(duration)
-            tile=Gtk.Button(child=overlay,tooltip_text='Open photo preview',css_classes=['photo-tile'])
-            tile.photo_ratio=ratio
-            tile.filename=items[index].filename if items is not None else f'photo_{index+1:04}.jpg'
-            tile.media_item=items[index] if items is not None else None
-            tile.media_texture=None
-            tile.media_icon=icon
-            tile.photo_picture=Gtk.Picture(can_shrink=True,content_fit=Gtk.ContentFit.COVER)
-            tile.photo_picture.set_can_target(False)
-            overlay.set_child(tile.photo_picture)
-            tile.photo_picture.add_css_class(f'shade-{index%5}')
-            tile.connect('clicked',self.clicked,index)
-            check=Gtk.CheckButton(visible=False,tooltip_text='Select photo',css_classes=['media-check'])
-            check.connect('toggled',lambda widget,i=index:self.check_toggled(i,widget.get_active()))
-            self.checks.append(check)
-            click=Gtk.GestureClick(button=1)
-            click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-            click.connect('pressed',self.modifier_click,index)
-            tile.add_controller(click)
+            tile=Cell(self,index,items[index] if items is not None else None,ratio)
             self.tiles.append(self.parent(tile))
-            self.parent(check)
+            self.checks.append(Check(self,index))
         for key,title,year,start,stop in self.months:
             heading=self.parent(Gtk.Label(label=title if items is not None else ['Today','Yesterday','Sunday, 25 January'][len(self.headings)],
                                           xalign=0,css_classes=['day-heading']))
@@ -136,7 +117,8 @@ class Mosaic(Gtk.Widget):
     def pointer_motion(self,_controller,x,y):
         hit=None
         if not self.tick:
-            for i,tile in enumerate(self.tiles):
+            for tile in self.active_widgets & self.tile_set:
+                i=tile.index
                 if tile in self.rendered:
                     px,py,w,h,opacity=self.rendered[tile]
                     if opacity>.5 and px<=x<=px+w and py<=y<=py+h:
@@ -148,11 +130,12 @@ class Mosaic(Gtk.Widget):
             return
         self.hovered_index=index
         for i,check in enumerate(self.checks):
-            check.set_visible(self.selection_mode or i==index)
+            check.set_visible((self.selection_mode or i==index) and not (self.tiles[i].media_item and self.tiles[i].media_item.metadata.get('placeholder')))
         self.queue_allocate()
 
     def parent(self,widget):
         widget.set_parent(self)
+        widget.set_child_visible(False)
         self.widgets.append(widget)
         return widget
 
@@ -183,6 +166,7 @@ class Mosaic(Gtk.Widget):
     def clicked(self,tile,index):
         if self.tick:
             return
+        if tile.media_item and tile.media_item.metadata.get('placeholder'):return
         if self.selection_mode:
             self.toggle(index)
         else:
@@ -194,13 +178,14 @@ class Mosaic(Gtk.Widget):
             self.selection_mode=True
             if state & Gdk.ModifierType.SHIFT_MASK and self.anchor_index is not None:
                 a,b=sorted((self.anchor_index,index))
-                self.selected.update(i for i in range(a,b+1) if self.tiles[i] in self.rendered)
+                self.selected.update(i for i in range(a,b+1) if self.tiles[i] in self.rendered and not self.tiles[i].media_item.metadata.get('placeholder'))
                 self.update_selection()
             else:
                 self.toggle(index)
             gesture.set_state(Gtk.EventSequenceState.CLAIMED)
 
     def check_toggled(self,index,active):
+        if self.tiles[index].media_item and self.tiles[index].media_item.metadata.get('placeholder'):return
         if active==(index in self.selected):
             return
         self.selection_mode=True
@@ -216,8 +201,8 @@ class Mosaic(Gtk.Widget):
     def update_selection(self):
         for i,(tile,check) in enumerate(zip(self.tiles,self.checks)):
             check.set_active(i in self.selected)
-            check.set_visible(self.selection_mode or i==self.hovered_index)
-            tile.add_css_class('selected') if i in self.selected else tile.remove_css_class('selected')
+            check.set_visible((self.selection_mode or i==self.hovered_index) and not (tile.media_item and tile.media_item.metadata.get('placeholder')))
+            if tile in self.active_widgets:tile.add_css_class('selected') if i in self.selected else tile.remove_css_class('selected')
         self.on_selection()
 
     def set_selection(self,active):
@@ -228,7 +213,7 @@ class Mosaic(Gtk.Widget):
 
     def select_all(self):
         self.selection_mode=True
-        self.selected={i for i,tile in enumerate(self.tiles) if tile in self.rendered and self.rendered[tile][4]>.5}
+        self.selected={i for i,tile in enumerate(self.tiles) if tile in self.rendered and self.rendered[tile][4]>.5 and not (tile.media_item and tile.media_item.metadata.get('placeholder'))}
         self.update_selection()
 
     def hide_tile(self,tile):
@@ -241,6 +226,28 @@ class Mosaic(Gtk.Widget):
     def rebuild(self):
         for badge in self.badges:
             badge.set_visible(self.show_durations)
+        self.queue_resize()
+
+    def update_bucket(self,key,items):
+        month=next((month for month in self.months if month[0]==key),None)
+        if not month:return
+        _,_,_,start,end=month
+        if end-start!=len(items):return
+        top,page=self.visible_range()
+        anchor=next((tile for tile in self.active_widgets & self.tile_set if tile in self.rendered and self.rendered[tile][1]<=top<=self.rendered[tile][1]+self.rendered[tile][3]),None)
+        offset=top-self.rendered[anchor][1] if anchor else 0
+        for i,item in enumerate(items,start):
+            tile=self.tiles[i];tile.media_item=item;tile.photo_ratio=item.ratio;tile.filename=item.filename
+            self.asset_months[item.id]=key
+            if tile.button:tile.release()
+            self.items[i]=item
+        self._target_cache=None
+        self.update_selection()
+        if anchor:
+            rect=self.target_layout(self.last_width)[0].get(anchor)
+            parent=self.get_parent()
+            while parent and not isinstance(parent,Gtk.ScrolledWindow):parent=parent.get_parent()
+            if rect and parent:GLib.idle_add(lambda:(parent.get_vadjustment().set_value(rect[1]+offset),False)[1])
         self.queue_resize()
 
     def set_mode(self,mode):
@@ -276,28 +283,30 @@ class Mosaic(Gtk.Widget):
 
     def change(self,update,kind='tier'):
         sources=self.tier_sources if self.tier_sources is not None else self.image_occurrences(self.rendered)
-        self.tier_sources=None;self.tier_images=[]
+        self.tier_sources=None;self.tier_images=[];self.tier_groups=[]
         if self.tick:
             self.remove_tick_callback(self.tick)
         self.from_map=dict(self.rendered)
         self.from_height=self.last_height
-        before=(self.expanded_month,self.expanded_year)
+        before=(self.expanded_month,self.expanded_year);old_mode=self.mode
         self.set_hover(None)
         update()
         self.motion_kind=kind
         self.folder_swap=any(a and b and a!=b for a,b in zip(before,(self.expanded_month,self.expanded_year)))
         target,_=self.target_layout(self.last_width)
         if kind=='tier':
-            destinations=self.image_occurrences(target)
-            used=set()
-            available=defaultdict(deque)
-            for i,(asset,_,rect) in enumerate(sources):available[asset].append((i,rect))
-            for key,paintable,end in destinations:
-                if available[key]:
-                    match,start=available[key].popleft();used.add(match)
-                else:start=(*end[:4],0)
-                self.tier_images.append((paintable,start,end))
-            self.tier_images.extend((paintable,start,(*start[:4],0)) for i,(_,paintable,start) in enumerate(sources) if i not in used)
+            top,page=self.visible_range()
+            sources=[(id,paintable,(rect[0],rect[1]-top,*rect[2:])) for id,paintable,rect in sources if rect[1]+rect[3]>=top and rect[1]<=top+page]
+            destinations=[value for value in self.image_occurrences(target) if value[2][1]<=page and value[2][1]+value[2][3]>=0]
+            cards={key:target[card] for key,card in (self.year_cards if self.mode=='years' else self.month_cards if self.mode=='months' else {}).items() if card in target}
+            previous_cards=self.year_cards if old_mode=='years' else self.month_cards if old_mode=='months' else {}
+            for id,_,_ in destinations:
+                month=self.asset_months.get(id,'');card=previous_cards.get(month[:4] if old_mode=='years' else month)
+                if card in self.from_map:
+                    rect=self.from_map[card];cards[('source',id)]=(rect[0],rect[1]-top,*rect[2:])
+            self.tier_groups=motion_groups(sources,destinations,self.asset_months,self.mode,cards)
+            self.tier_images=[(paintable,start,end) for _,images,_,_ in self.tier_groups for _,paintable,start,end in images]
+            self.from_map={widget:(rect[0],rect[1]-top,*rect[2:]) for widget,rect in self.from_map.items()}
         self.folder_membership={}
         if kind=='folder':
             for widget in dict.fromkeys([*self.from_map,*target]):
@@ -329,20 +338,18 @@ class Mosaic(Gtk.Widget):
 
     def image_occurrences(self,layout):
         result=[]
+        for key,card in self.month_cards.items():
+            for picture in self.card_pictures[card]:
+                if getattr(picture,'media_id',None):self.asset_months[picture.media_id]=key
         for tile in self.tiles:
             if tile in layout and tile.media_texture:
                 result.append((tile.media_item.id,tile.media_texture,layout[tile]))
         for card,pictures in self.card_pictures.items():
             if card not in layout:continue
-            x,y,w,h,opacity=layout[card]
             for i,picture in enumerate(pictures):
                 paintable=picture.get_paintable();asset=getattr(picture,'media_id',None)
                 if not paintable or asset is None:continue
-                ok,bounds=picture.compute_bounds(card)
-                if ok and card.get_width() and bounds.get_width()>0:
-                    rect=(x+bounds.get_x()*w/card.get_width(),y+bounds.get_y()*h/card.get_height(),bounds.get_width()*w/card.get_width(),bounds.get_height()*h/card.get_height(),opacity)
-                else:
-                    size=(w-12)/2;rect=(x+5+(i%2)*(size+2),y+5+(i//2)*(size+2),size,size,opacity)
+                rect=cover_slot(layout[card],i)
                 result.append((asset,paintable,rect))
         return result
 
@@ -429,6 +436,7 @@ class Mosaic(Gtk.Widget):
             return target,height
         result={}
         for widget in dict.fromkeys([*self.from_map,*target]):
+            if self.motion_kind=='tier' and self.tier_groups and widget in self.tile_set:continue
             old=self.from_map.get(widget)
             new=target.get(widget)
             if old is None:
@@ -453,6 +461,8 @@ class Mosaic(Gtk.Widget):
         if self.tick:
             self.remove_tick_callback(self.tick)
             self.tick=0
+        for check in self.checks:check.dispose()
+        for tile in self.tiles:tile.release()
         for widget in self.widgets:
             if widget.get_parent()==self:widget.unparent()
 
@@ -471,12 +481,26 @@ class Mosaic(Gtk.Widget):
         tier=self.motion_kind=='tier' and self.p<1 and bool(self.tier_images)
         for pictures in self.card_pictures.values():
             for picture in pictures:picture.set_opacity(0 if tier else 1)
-        for widget in self.widgets:
-            rect=rects.get(widget)
-            widget.set_child_visible(bool(rect and not (tier and widget in self.tile_set) and rect[1]+rect[3]>=max(0,top-page*2) and rect[1]<=top+page*3))
-        for widget,(x,y,w,h,opacity) in rects.items():
-            if not widget.get_child_visible():continue
-            widget.set_opacity(0 if widget==self.hidden_tile else max(0,min(1,opacity)))
+        if not hasattr(self,'_visible_index') or self._visible_index[0] is not rects:
+            order={widget:i for i,widget in enumerate(rects)}
+            entries=sorted((rect[1],order[widget],widget) for widget,rect in rects.items() if widget not in (self.panel_month,self.panel_year))
+            self._visible_index=(rects,[row[0] for row in entries],entries,order,max((rect[3] for widget,rect in rects.items() if widget not in (self.panel_month,self.panel_year)),default=1))
+        _,ys,entries,order,max_h=self._visible_index
+        lo=bisect_left(ys,max(0,top-page*2)-max_h);hi=bisect_right(ys,top+page*3)
+        active={widget for _,_,widget in entries[lo:hi] if rects[widget][1]+rects[widget][3]>=max(0,top-page*2) and not (tier and widget in self.tile_set)}
+        active.update(panel for panel in (self.panel_month,self.panel_year) if panel in rects and rects[panel][1]+rects[panel][3]>=top-page*2 and rects[panel][1]<=top+page*3)
+        for widget in self.active_widgets-active:
+            widget.set_child_visible(False)
+            if widget in self.tile_set:widget.release();self.checks[widget.index].set_child_visible(False)
+        self.active_widgets=active
+        self.snapshot_widgets=sorted(active,key=order.__getitem__)
+        for widget in self.snapshot_widgets:
+            widget.set_child_visible(True)
+            if widget in self.tile_set:
+                widget.add_css_class('selected') if widget.index in self.selected else widget.remove_css_class('selected')
+            x,y,w,h,opacity=rects[widget]
+            if widget in self.tile_set:widget.ensure()
+            widget.set_opacity(0 if widget==self.hidden_tile or tier and widget in self.card_pictures else max(0,min(1,opacity)))
             reference=stable.get(widget,self.from_map.get(widget,(x,y,w,h,opacity)))
             min_w=widget.measure(Gtk.Orientation.HORIZONTAL,-1)[0]
             allocated_w=max(1,round(reference[2]),min_w)
@@ -486,8 +510,8 @@ class Mosaic(Gtk.Widget):
             transform=Gsk.Transform.new().translate(point).scale(w/allocated_w,h/allocated_h)
             widget.allocate(allocated_w,allocated_h,-1,transform)
 
-        for i,check in enumerate(self.checks):
-            tile=self.tiles[i]
+        for tile in active & self.tile_set:
+            i=tile.index;check=self.checks[i]
             active=tile in rects and tile.get_child_visible() and check.get_visible()
             check.set_child_visible(active)
             if active:
@@ -496,6 +520,8 @@ class Mosaic(Gtk.Widget):
                 size=max(size,check.measure(Gtk.Orientation.VERTICAL,size)[0])
                 point=Graphene.Point();point.init(x+6,y+6)
                 check.allocate(size,size,-1,Gsk.Transform.new().translate(point))
+        signature=(width,top,page,self.mode,self.expanded_month,self.expanded_year,id(stable))
+        if signature!=self.window_signature:self.window_signature=signature;self.on_window()
 
     def visible_range(self):
         parent=self.get_parent()
@@ -508,22 +534,27 @@ class Mosaic(Gtk.Widget):
     def do_snapshot(self,snapshot):
         tier=self.motion_kind=='tier' and self.p<1 and bool(self.tier_images)
         top,page=self.visible_range()
-        for widget in self.rendered:
+        for widget in getattr(self,'snapshot_widgets',[]):
             _,y,_,h,_=self.rendered[widget]
             if not widget.get_child_visible() or y+h<top or y>top+page:continue
             if tier and widget in self.tile_set:continue
             self.snapshot_clipped(widget,snapshot)
         if tier:
-            for paintable,start,end in self.tier_images:
-                x,y,w,h,opacity=(a+(b-a)*self.p for a,b in zip(start,end))
-                if w<=0 or h<=0 or opacity<=0 or y+h<top or y>top+page:continue
-                clip=Graphene.Rect();clip.init(x,y,w,h)
-                snapshot.save();snapshot.push_clip(clip);snapshot.push_opacity(opacity)
-                iw=max(1,paintable.get_intrinsic_width());ih=max(1,paintable.get_intrinsic_height());scale=max(w/iw,h/ih)
-                point=Graphene.Point();point.init(x+(w-iw*scale)/2,y+(h-ih*scale)/2);snapshot.translate(point)
-                paintable.snapshot(snapshot,iw*scale,ih*scale)
-                snapshot.pop();snapshot.pop();snapshot.restore()
-        for i,check in enumerate(self.checks):
+            for _,images,old_clip,new_clip in self.tier_groups:
+                x,y,w,h,_=(a+(b-a)*self.p for a,b in zip(old_clip,new_clip))
+                group_clip=Graphene.Rect();group_clip.init(x,y,w,h);snapshot.push_clip(group_clip)
+                for _,paintable,start,end in images:
+                    x,y,w,h,opacity=(a+(b-a)*self.p for a,b in zip(start,end))
+                    if w<=0 or h<=0 or opacity<=0 or y+h<top or y>top+page:continue
+                    clip=Graphene.Rect();clip.init(x,y,w,h)
+                    snapshot.save();snapshot.push_clip(clip);snapshot.push_opacity(opacity)
+                    iw=max(1,paintable.get_intrinsic_width());ih=max(1,paintable.get_intrinsic_height());scale=max(w/iw,h/ih)
+                    point=Graphene.Point();point.init(x+(w-iw*scale)/2,y+(h-ih*scale)/2);snapshot.translate(point)
+                    paintable.snapshot(snapshot,iw*scale,ih*scale)
+                    snapshot.pop();snapshot.pop();snapshot.restore()
+                snapshot.pop()
+        for tile in self.active_widgets & self.tile_set:
+            i=tile.index;check=self.checks[i]
             if check.get_visible() and check.get_child_visible():
                 self.snapshot_clipped(check,snapshot,self.tiles[i])
 
@@ -535,6 +566,6 @@ class Mosaic(Gtk.Widget):
                     x,y,w,h,_=self.rendered[panel]
                     clip=Graphene.Rect();clip.init(x,y,w,max(0,h))
                     snapshot.push_clip(clip);count+=1
-        self.snapshot_child(widget,snapshot)
+        self.snapshot_child(widget if isinstance(widget,Gtk.Widget) else widget.widget,snapshot)
         for _ in range(count):
             snapshot.pop()

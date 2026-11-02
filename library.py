@@ -1,6 +1,7 @@
 """Read-only local media discovery and Immich's HTTP API; no GTK dependency."""
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime,timedelta
+import math
 import json
 import os
 import time
@@ -205,21 +206,49 @@ class ImmichClient:
         if cached:
             response=json.loads(cached)
         else:
+            epoch=cache.epoch
             response = self.request(path, body)
             if not locked:
                 response['assets']['items']=[asset for asset in response.get('assets',{}).get('items',[]) if asset.get('visibility') not in ('locked','hidden')]
-                cache.put(cache_key,json.dumps(response).encode())
+                if cache.epoch==epoch:cache.put(cache_key,json.dumps(response).encode())
         assets = response.get('assets', {})
         items=[media_from_asset(asset) for asset in assets.get('items', []) if asset.get('visibility')!='hidden' and (locked or asset.get('visibility')!='locked')]
         return items, assets.get('nextCursor') if structured else assets.get('nextPage')
 
-    def time_buckets(self,filters=None):
+    def time_buckets(self,filters=None,fresh=False):
         options={'visibility':'timeline','order':'desc'}
         for key,value in (filters or {}).items():
             if key in ('visibility','isFavorite','isTrashed'):options[key]=str(value).lower() if isinstance(value,bool) else value
             elif key in ('albumIds','personIds','tagIds') and len(value)==1:options[key[:-1]]=value[0]
         path='/timeline/buckets?'+urlencode({key:value for key,value in options.items() if value is not None})
+        if fresh:self.media_cache().remove('buckets:'+path)
         return self.media_cache().json('buckets:'+path,lambda:self.request(path),30)
+
+    def time_bucket(self,key,fresh=False):
+        if self.server_lock_pending:self.lock_session()
+        path='/timeline/bucket?'+urlencode({'timeBucket':key[:7]+'-01T00:00:00.000Z','visibility':'timeline','order':'desc'})
+        if fresh:self.media_cache().remove('compact:'+path)
+        data=self.media_cache().json('compact:'+path,lambda:self.request(path),60)
+        fields=('id','ratio','fileCreatedAt','isImage','visibility')
+        if not isinstance(data,dict) or any(not isinstance(data.get(field),list) for field in fields):raise LibraryError('The server returned an invalid timeline index.')
+        count=len(data['id'])
+        if any(len(data[field])!=count for field in fields):raise LibraryError('The server returned an incomplete timeline index.')
+        items=[]
+        for i,id in enumerate(data['id']):
+            if data['visibility'][i] in ('locked','hidden') or not isinstance(id,str):continue
+            ratio=float(data['ratio'][i] or 1.5)
+            if not math.isfinite(ratio):ratio=1.5
+            created=datetime.fromisoformat(data['fileCreatedAt'][i].replace('Z','+00:00')).replace(tzinfo=None)
+            offsets=data.get('localOffsetHours',[])
+            if i<len(offsets) and offsets[i] is not None:created+=timedelta(hours=float(offsets[i]))
+            metadata={'id':id,'visibility':data['visibility'][i],'timeline_stub':True,'fileCreatedAt':data['fileCreatedAt'][i]}
+            for field in ('duration','isFavorite','createdAt','livePhotoVideoId'):
+                if i<len(data.get(field,[])):metadata[field]=data[field][i]
+            kind='IMAGE' if data['isImage'][i] else 'VIDEO';metadata['type']=kind
+            items.append(MediaItem(id,('Photo' if kind=='IMAGE' else 'Video')+' · '+created.strftime('%d %B %Y'),created,max(.1,min(10,ratio)),kind,metadata=metadata))
+        return items
+
+    def asset(self,id):return media_from_asset(self.request('/assets/'+quote(id,safe='')))
 
     def map_style(self,dark):
         config=self.media_cache().json('public-config',lambda:self.request('/server/config'),300)

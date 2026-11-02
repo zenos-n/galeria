@@ -12,6 +12,7 @@ from timeline import Mosaic
 from cache import MediaCache
 from imaging import decode_image,image_ratio,thumbnail_bytes
 from session_store import preferences_read,preferences_write,secret_get,secret_put,secret_clear
+from image_queue import ImageQueue
 
 
 class LibraryUI:
@@ -38,10 +39,11 @@ class LibraryUI:
         self.sync_cancel=threading.Event()
         self.scope_filters={}
         self.timeline_buckets=[]
+        self.timeline_index=None;self.timeline_pending=set()
         self.dates_ready=True
         self.bucket_scope={}
         self.io=ThreadPoolExecutor(max_workers=3,thread_name_prefix='gallery-io')
-        self.images=ThreadPoolExecutor(max_workers=4,thread_name_prefix='gallery-images')
+        self.images=ImageQueue(4);self.image_wanted={}
         self.previews=ThreadPoolExecutor(max_workers=2,thread_name_prefix='gallery-preview')
         self.video_io=ThreadPoolExecutor(max_workers=2,thread_name_prefix='gallery-video')
         self.video_proxy=None;self.video_prefetch=set()
@@ -80,13 +82,14 @@ class LibraryUI:
             self.video_proxy=VideoProxy()
         return self.video_proxy
 
-    def preload_video(self,item):
+    def preload_video(self,item,job_key=None):
         key=self.texture_key(item)
         if key in self.video_prefetch:return
         self.video_prefetch.add(key)
         client=self.client;vault=self.vault
         proxy=self.get_video_proxy() if client else None
         def work():
+            if job_key is not None and job_key not in self.image_wanted:self.video_prefetch.discard(key);return
             if item.path:
                 with open(item.path,'rb') as stream:stream.read(2*1024*1024)
             else:proxy.preload(client,item,vault)
@@ -109,6 +112,7 @@ class LibraryUI:
         self.data_generation+=1
         self.client=None;self.media_items=[];self.local_items=[];self.local_roots=[]
         self.timeline_buckets=[];self.bucket_scope={};self.dates_ready=True
+        self.timeline_index=None;self.timeline_pending=set()
         self.page_cache.clear();self.collection_cache.clear();self.date_cover_cache.clear();self.collection_textures.clear();self.texture_cache.clear();self.pending_images.clear()
         self.preferences.update(mode=None,remember=False);self.save_preferences()
         self.album_tree.set_albums([]);self.source_label.set_label('No library connected')
@@ -235,10 +239,11 @@ class LibraryUI:
             return self.client.restore_assets(ids) if restore else self.client.trash_assets(ids)
         def done(_):
             self.page_cache.clear();self.collection_cache.clear()
+            if action=='trash':self.remove_from_timeline(ids)
             self.client.refresh_serial=getattr(self.client,'refresh_serial',0)+1
             if self.mosaic==mosaic:
                 def remove():
-                    if self.mosaic==mosaic:self.set_library_items([item for item in self.media_items if item.id not in ids],append=True,reflow=True)
+                    if self.mosaic==mosaic:self.set_library_items(self.timeline_index.items if self.timeline_index and mosaic.indexed else [item for item in self.media_items if item.id not in ids],append=True,reflow=True)
                 if action=='trash' and not restore:
                     from trash_motion import TrashMotion
                     TrashMotion(self,[tile for tile in mosaic.tiles if tile.media_item.id in ids],remove)
@@ -278,24 +283,33 @@ class LibraryUI:
             if self.client!=client:return
             def done(_):
                 self.data_generation+=1
+                self.remove_from_timeline(ids)
                 self.page_cache.clear();self.collection_cache.clear();self.date_cover_cache.clear();self.collection_textures.clear();self.texture_cache.clear();self.pending_images.clear()
-                self.background(client.media_cache().clear,lambda _:None)
                 if self.mosaic==mosaic:
-                    self.mosaic.set_selection(False);self.set_library_items([item for item in self.media_items if item.id not in ids],append=True,reflow=True)
+                    self.mosaic.set_selection(False);self.set_library_items(self.timeline_index.items if self.timeline_index and mosaic.indexed else [item for item in self.media_items if item.id not in ids],append=True,reflow=True)
                 self.notice('Items moved to the locked folder.')
-            self.background(lambda:client.update_assets(ids,{'visibility':'locked'}),done)
+            def work():
+                result=client.update_assets(ids,{'visibility':'locked'})
+                client.media_cache().forbid(id+':' for id in ids)
+                return result
+            self.background(work,done)
         if client.locked_until<=time.monotonic():
             from vault_ui import unlock_folder
             unlock_folder(self,after=move)
         else:move()
 
-    def background(self,work,done,failed=None,images=False):
+    def remove_from_timeline(self,ids):
+        if self.timeline_index:
+            self.timeline_index=self.timeline_index.without(ids);self.timeline_pending=set()
+            self.timeline_buckets=[{'timeBucket':key+'-01','count':b-a} for key,(a,b) in self.timeline_index.ranges.items()]
+
+    def background(self,work,done,failed=None,images=False,priority=10):
         generation=self.data_generation
         def execute():
             if generation!=self.data_generation:
                 return None
             return work()
-        future=(self.video_io if images=='video' else self.previews if images=='preview' else self.images if images else self.io).submit(execute)
+        future=self.images.submit(execute,priority) if images is True else (self.video_io if images=='video' else self.previews if images=='preview' else self.io).submit(execute)
         def completed(result):
             if result.cancelled():
                 return
@@ -330,6 +344,7 @@ class LibraryUI:
         self.notice(message)
 
     def connect_local(self,paths,focus_first=False):
+        self.timeline_index=None;self.timeline_pending=set()
         self.sync_cancel.set();self.vault=None;self.pending_media=None
         self.lock_button.set_visible(False)
         self.data_generation+=1
@@ -368,6 +383,7 @@ class LibraryUI:
         self.background(lambda:scan_folders(paths,probe),loaded,self.library_failed)
 
     def connect_immich(self,client):
+        self.timeline_index=None;self.timeline_pending=set()
         self.sync_cancel.set();self.vault=None;self.pending_media=None
         self.lock_button.set_visible(False)
         self.data_generation+=1
@@ -391,6 +407,9 @@ class LibraryUI:
         self.navigate(self.rows['library'].get_parent(),self.rows['library'])
         def dates_loaded(buckets):
             self.timeline_buckets=buckets;self.dates_ready=True
+            if hasattr(client,'time_bucket') and client.modern_search:
+                from timeline_index import TimelineIndex
+                self.timeline_index=TimelineIndex(buckets)
             if self.current_page=='library':self.search_library()
         def dates_failed(message):
             self.dates_ready=True;self.notice('Date index unavailable: '+message)
@@ -400,6 +419,8 @@ class LibraryUI:
     def open_date_bucket(self,kind,key):
         from datetime import datetime,timedelta
         if not self.client:return
+        if self.timeline_index and self.mosaic.indexed:
+            self.request_timeline_metadata();return
         start=datetime.strptime(key,'%Y' if kind=='year' else '%Y-%m')
         end=datetime(start.year+1,1,1) if kind=='year' or start.month==12 else datetime(start.year,start.month+1,1)
         self.bucket_scope={'takenAfter':start.isoformat(timespec='milliseconds')+'Z',
@@ -458,6 +479,10 @@ class LibraryUI:
         except ValueError as error:
             self.notice(str(error));return
         page=self.current_page
+        if page=='library' and not filters and not query and not self.bucket_scope and self.timeline_index:
+            self.next_page=None
+            self.set_library_items(self.timeline_index.items,append=preserve_folder or force)
+            self.request_timeline_metadata();return
         if page.startswith('album-'):
             filters['albumIds']=[page.removeprefix('album-')]
             filters['visibility']=None
@@ -513,6 +538,27 @@ class LibraryUI:
         if self.current_page not in ('library','photos','videos','favorites','archive','trash') and not self.current_page.startswith('album-'):return True
         self.client.refresh_serial=getattr(self.client,'refresh_serial',0)+1
         if self.current_page=='library':
+            if self.timeline_index and self.mosaic.indexed:
+                index=self.timeline_index
+                def refresh(buckets):
+                    if self.timeline_index is not index:return
+                    if buckets!=self.timeline_buckets:
+                        from timeline_index import TimelineIndex
+                        replacement=TimelineIndex(buckets)
+                        counts={key:b-a for key,(a,b) in index.ranges.items()}
+                        for key,(a,b) in list(replacement.ranges.items()):
+                            if key in index.loaded and counts.get(key)==b-a:
+                                start,end=index.ranges[key];replacement.apply(key,index.items[start:end])
+                        self.timeline_index=replacement;self.timeline_pending=set();self.timeline_buckets=buckets
+                        self.set_library_items(replacement.items,append=True)
+                    else:
+                        top,height=self.mosaic.visible_range()
+                        key=next((key for key,_,_,a,b in self.mosaic.months if a<b and self.mosaic.tiles[a] in self.mosaic.rendered and self.mosaic.rendered[self.mosaic.tiles[b-1]][1]>=top),next(iter(index.ranges),None))
+                        if key:
+                            index.loaded.discard(key);self.timeline_refresh_key=key
+                    self.request_timeline_metadata()
+                self.background(lambda:self.client.time_buckets(fresh=True),refresh,lambda _:None)
+                return True
             def dates(buckets):
                 if buckets!=self.timeline_buckets:
                     self.timeline_buckets=buckets
@@ -520,6 +566,42 @@ class LibraryUI:
             self.background(self.client.time_buckets,dates,lambda _:None)
         self.search_library(preserve_folder=True,force=True)
         return True
+
+    def request_timeline_metadata(self):
+        index=self.timeline_index;client=self.client
+        if not index or not client or self.current_page!='library' or not self.mosaic.indexed:return
+        preferred=[]
+        if self.mosaic.indexed:
+            top,height=self.mosaic.visible_range()
+            if self.mosaic.mode=='all':
+                preferred=[key for key,_,_,a,b in self.mosaic.months if a<b and self.mosaic.tiles[a] in self.mosaic.rendered and self.mosaic.rendered[self.mosaic.tiles[b-1]][1]+self.mosaic.rendered[self.mosaic.tiles[b-1]][3]>=top-height*2 and self.mosaic.rendered[self.mosaic.tiles[a]][1]<=top+height*3]
+            elif self.mosaic.expanded_month:preferred=[self.mosaic.expanded_month]
+            elif self.mosaic.expanded_year:preferred=[key for key in index.ranges if key.startswith(self.mosaic.expanded_year)]
+        for key in dict.fromkeys([*preferred,*index.ranges]):
+            if len(self.timeline_pending)>=3:break
+            if key in index.loaded or key in self.timeline_pending or time.monotonic()<index.failed.get(key,0):continue
+            self.timeline_pending.add(key)
+            def loaded(items,key=key):
+                if self.timeline_index is not index:return
+                self.timeline_pending.discard(key)
+                a,b=index.ranges[key];previous=index.items[a:b];changed=index.apply(key,items)
+                if self.mosaic.indexed and self.current_page=='library':
+                    if self.viewer:self.pending_media=(index.items,True)
+                    elif changed:self.set_library_items(index.items,append=True)
+                    elif previous!=index.items[index.ranges[key][0]:index.ranges[key][1]]:
+                        a,b=index.ranges[key];self.media_items[a:b]=index.items[a:b]
+                        self.mosaic.update_bucket(key,index.items[a:b])
+                self.request_timeline_metadata();self.load_visible_thumbnails()
+            def failed(_message,key=key):
+                if self.timeline_index is index:
+                    self.timeline_pending.discard(key);index.failed[key]=time.monotonic()+60;self.request_timeline_metadata()
+            fresh=getattr(self,'timeline_refresh_key',None)==key
+            if fresh:self.timeline_refresh_key=None
+            expected=index.ranges[key][1]-index.ranges[key][0]
+            def load(key=key,fresh=fresh,expected=expected):
+                items=client.time_bucket(key,fresh=fresh)
+                return client.time_bucket(key,fresh=True) if len(items)!=expected and not fresh else items
+            self.background(load,loaded,failed)
 
     def set_library_items(self,items,append=False,reflow=False):
         position=self.scroller.get_vadjustment().get_value() if append or self.bucket_scope else 0
@@ -541,6 +623,7 @@ class LibraryUI:
         mosaic.rebuild()
         if reflow or old.tick or mosaic.mode!='all' and (mosaic.expanded_month or mosaic.expanded_year):mosaic.continue_from(old,'reflow' if reflow else None)
         mosaic.on_selection=self.selection_changed
+        mosaic.on_window=lambda:GLib.idle_add(self.load_visible_thumbnails)
         self.mosaic=mosaic
         self.pending_images.clear()
         self.scroller.set_child(mosaic)
@@ -576,25 +659,36 @@ class LibraryUI:
         adjustment=self.scroller.get_vadjustment()
         top=adjustment.get_value();height=adjustment.get_page_size()
         mosaic=self.mosaic
-        if self.client and mosaic.mode!='all':self.load_date_covers(mosaic,top,height)
-        for tile in mosaic.tiles:
+        if mosaic.indexed:self.request_timeline_metadata()
+        wanted={}
+        tiles=[]
+        for tile in mosaic.active_widgets & mosaic.tile_set:
             rect=mosaic.rendered.get(tile)
-            wanted=bool(rect and rect[1]+rect[3]>=max(0,top-height*2) and rect[1]<=top+height*3)
-            if mosaic.mode!='all' and tile in mosaic.cover_slots:wanted=True
-            if wanted and tile.media_texture is None and time.monotonic()>=getattr(tile,'retry_after',0) and (tile.media_item.kind=='IMAGE' or self.client):
+            if not rect or tile.media_item.metadata.get('placeholder'):continue
+            distance=abs(rect[1]+rect[3]/2-top-height/2)/max(1,height)
+            key=(id(mosaic),tile.media_item.id);wanted[key]=distance
+            tiles.append((distance,tile,key))
+        self.image_wanted=wanted
+        if self.client and mosaic.mode!='all':self.load_date_covers(mosaic,top,height,wanted)
+        for _,tile,key in sorted(tiles,key=lambda row:row[0]):
+            if tile.media_texture is None and self.texture_key(tile.media_item) in self.texture_cache:self.apply_texture(tile,self.texture_cache[self.texture_key(tile.media_item)])
+            if tile.media_texture is None and time.monotonic()>=getattr(tile,'retry_after',0) and (tile.media_item.kind=='IMAGE' or self.client):
                 key=(id(mosaic),tile.media_item.id)
                 if key not in self.pending_images:
                     self.pending_images.add(key);self.load_thumbnail(tile,mosaic,key)
-            if wanted and tile.media_item.kind=='VIDEO':self.preload_video(tile.media_item)
+            if tile.media_item.kind=='VIDEO':self.preload_video(tile.media_item,job_key=key)
 
-    def load_date_covers(self,mosaic,top,height):
+    def load_date_covers(self,mosaic,top,height,wanted):
         from datetime import datetime,timedelta
         client=self.client
         cards=mosaic.year_cards if mosaic.mode=='years' else mosaic.month_cards
         for key,card in cards.items():
             rect=mosaic.rendered.get(card)
             if not rect or rect[1]+rect[3]<max(0,top-height*2) or rect[1]>top+height*3:continue
+            job_key=(id(mosaic),'cover',mosaic.mode,key)
+            wanted[job_key]=abs(rect[1]+rect[3]/2-top-height/2)/max(1,height)
             if getattr(card,'covers_requested',False):continue
+            if time.monotonic()<getattr(card,'retry_after',0):continue
             card.covers_requested=True
             cache_key=(mosaic.mode,key)
             if cache_key in self.date_cover_cache:
@@ -606,12 +700,17 @@ class LibraryUI:
             start=datetime.strptime(key,'%Y' if mosaic.mode=='years' else '%Y-%m')
             end=datetime(start.year+1,1,1) if mosaic.mode=='years' or start.month==12 else datetime(start.year,start.month+1,1)
             filters={'takenAfter':start.isoformat(timespec='milliseconds')+'Z','takenBefore':(end-timedelta(milliseconds=1)).isoformat(timespec='milliseconds')+'Z'}
-            def load(filters=filters):
-                if self.mosaic!=mosaic:return []
+            def load(filters=filters,job_key=job_key):
+                if self.mosaic!=mosaic or job_key not in self.image_wanted:return None
                 items,_=client.search(filters,size=4)
-                return [(item.id,decode_image(client.image_bytes(item),240)) for item in items]
+                values=[]
+                for item in items:
+                    if job_key not in self.image_wanted:return None
+                    values.append((item.id,decode_image(client.image_bytes(item),240)))
+                return values
             def ready(values,card=card,cache_key=cache_key):
                 if self.mosaic!=mosaic:return
+                if values is None:card.covers_requested=False;return
                 values=[(asset,self.texture_from_pixels(value)) for asset,value in values]
                 self.date_cover_cache[cache_key]=values;self.date_cover_cache.move_to_end(cache_key)
                 while len(self.date_cover_cache)>96:self.date_cover_cache.popitem(last=False)
@@ -623,7 +722,8 @@ class LibraryUI:
                     if values:
                         picture.media_id,texture=values[min(i,len(values)-1)];picture.set_paintable(texture)
                 self.populate_date_covers(mosaic)
-            self.background(load,ready,lambda _:None,images=True)
+            def failed(_message,card=card):card.covers_requested=False;card.retry_after=time.monotonic()+60
+            self.background(load,ready,failed,images=True,priority=lambda job_key=job_key:self.image_wanted.get(job_key,1000))
 
     def populate_date_covers(self,mosaic):
         for mode,cards in [('months',mosaic.month_cards),('years',mosaic.year_cards)]:
@@ -651,8 +751,9 @@ class LibraryUI:
         item=tile.media_item
         client=self.client
         vault=self.vault
+        proxy=self.get_video_proxy() if client and item.kind=='VIDEO' else None
         def load():
-            if self.mosaic!=mosaic:return None
+            if self.mosaic!=mosaic or pending_key not in self.image_wanted:return None
             if item.path:
                 stat=Path(item.path).stat()
                 data=self.disk_cache.fetch(f'{item.path}:{stat.st_mtime_ns}:{stat.st_size}',lambda:thumbnail_bytes(item.path))
@@ -661,9 +762,9 @@ class LibraryUI:
                 except LibraryError as error:
                     if item.kind!='VIDEO' or error.status!=404:raise
                     from video_edit import Edits,frame
-                    uri=self.get_video_proxy().register(client,item,vault)
+                    uri=proxy.register(client,item,vault)
                     try:data=frame(uri,Edits(0,1))
-                    finally:self.get_video_proxy().unregister(uri)
+                    finally:proxy.unregister(uri)
             try:return decode_image(data)
             except (OSError,ValueError):
                 cache=vault if item.metadata.get('visibility')=='locked' else client.media_cache() if client else self.disk_cache
@@ -672,6 +773,9 @@ class LibraryUI:
         def ready(value):
             self.pending_images.discard(pending_key)
             if self.mosaic!=mosaic:return
+            if value is None:
+                if pending_key in self.image_wanted:GLib.idle_add(self.load_visible_thumbnails)
+                return
             texture=self.texture_from_pixels(value)
             key=self.texture_key(item)
             self.texture_cache[key]=texture
@@ -683,7 +787,7 @@ class LibraryUI:
             tile.retry_after=time.monotonic()+60
             tile.set_tooltip_text(item.filename+' · '+message)
             tile.media_icon.set_from_icon_name('dialog-error-symbolic')
-        self.background(load,ready,failed,images=True)
+        self.background(load,ready,failed,images=True,priority=lambda:self.image_wanted.get(pending_key,1000))
 
     def texture_from_pixels(self,value):
         width,height,data=value
