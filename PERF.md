@@ -243,3 +243,35 @@ handoff, not scan interval or source/deletion semantics.
 The0.10.2 native integration checks an active indicator's10px bottom inset,
 opens its popover, then completes the fixture scan and verifies both the popover
 and sidebar indicator disappear. Background sync is not paused by hiding it.
+
+## Galeria0.10.3 resize geometry
+
+Reproduced the reported lag with45,000 generated media items,100months, cached
+synthetic textures and the actual catalog runtime: Python3.13.15,
+PyGObject3.56.3, GTK4.22.4, Adwaita1.9.3. PrivateXvfb/OpenGL software rendering;
+same106-step window width/height sequence for every run, no network. Profiling
+found14.19s cumulative in photo_rows (7.41s in justified_rows) over the instrumented
+sequence; per-width full-library rectangle creation dominated height-for-width
+measurement. Profiling overhead is excluded from the table.
+
+| Unprofiled sequence | Measure p95/max ms | Allocate p95/max ms | Frame interval p95/max ms |
+| --- | --- | --- | --- |
+| Before |66.80/105.40|10.51/23.85|83.34/116.67|
+| Row index, run1 |19.96/24.85|7.33/20.86|33.33/50.00|
+| Row index, run2 |20.86/26.60|7.57/18.66|33.33/50.00|
+
+Kept: compact per-row boundaries/heights and normalized ratios; construct actual
+photo rectangles only for intersecting viewport rows. Full height remains exact.
+An empty filename query now bypasses a full-library casefold/filter pass. This
+avoids per-photo rectangle/ys duplication for offscreen content without changing
+image geometry, row thresholds, scroll span or the two-screen buffer.63unit tests
+include seeded equivalence against the existing layout function at15width/target
+combinations and every viewport band. Native10k-slot LOD/date/priority/groups and
+account/cache/export/sync/unfocused-update checks pass with fatal GTK warnings.
+
+Remaining: new widths still scan ratios to compute exact full-library height;
+this is not a guarantee of16.7ms frames, physical Wayland GPU presentation or
+performance under every concurrent game load. No input was automated on the
+user's displays. Evidence: /tmp/gallery-app-identification/bench-resize.py,
+resize-baseline.log, resize-profile.log, resize-row-index.log,
+resize-row-index-repeat.log, resize-unit-final.log, resize-timeline-native.log.

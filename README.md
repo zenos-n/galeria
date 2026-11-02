@@ -166,3 +166,10 @@ scan starts automatically. Existing running services use the normal wake signal.
 Galeria0.10.2 shows the sidebar sync indicator only for pending/active work or
 errors. Successful idle completion closes its popover and hides the indicator;
 background scans continue. The active indicator has10px bottom/side spacing.
+
+Galeria0.10.3 keeps a compact justified-row index during window resizing instead
+of constructing every offscreen photo rectangle for each width. Full scroll
+heights and photo geometry remain exact; rectangles are produced only around the
+viewport. A45,000-item private-display resize benchmark reduced frame p95 from
+83ms to33ms. These are frame-clock measurements, not a universal GPU framerate
+claim. Exact tests and limits are recorded in PERF.md.

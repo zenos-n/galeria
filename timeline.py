@@ -1,6 +1,6 @@
 """Data-free timeline with stable media tiles and expandable date folders."""
 from gi.repository import Gdk, GLib, Graphene, Gsk, Gtk
-from layout import justified_rows
+from layout import RowLayout
 from imaging import duration_label
 from collections import defaultdict,deque,OrderedDict
 from bisect import bisect_left,bisect_right
@@ -388,17 +388,16 @@ class Mosaic(Gtk.Widget):
         key=(ids if isinstance(ids,range) else tuple(ids),width,self.target,self.query)
         cached=self._row_cache.get(key)
         if cached is None:
-            filtered=[i for i in ids if self.query.casefold() in self.tiles[i].filename.casefold()]
-            rows=justified_rows([self.tiles[i].photo_ratio for i in filtered],width,self.target)
-            cached=([(self.tiles[filtered[n]],dx,dy,w,h) for n,dx,dy,w,h in rows],[dy for _,_,dy,_,_ in rows],max((dy+h for _,_,dy,_,h in rows),default=0))
+            query=self.query.casefold()
+            filtered=[i for i in ids if query in self.tiles[i].filename.casefold()] if query else ids
+            cached=(filtered,RowLayout([self.tiles[i].photo_ratio for i in filtered],width,self.target))
             self._row_cache[key]=cached
             while len(self._row_cache)>384:self._row_cache.popitem(last=False)
         self._row_cache.move_to_end(key)
-        rows,ys,height=cached
+        filtered,rows=cached
         low,high=self._layout_band
-        a=bisect_left(ys,low-y-self.target-1);b=bisect_right(ys,high-y)
-        for tile,dx,dy,w,h in rows[a:b]:result[tile]=(x+dx,y+dy,w,h,1)
-        return height
+        for index,dx,dy,w,h in rows.visible(low-y,high-y):result[self.tiles[filtered[index]]]=(x+dx,y+dy,w,h,1)
+        return rows.height
 
     def folder_rows(self,keys,kind,x,y,width,result):
         if not keys:
