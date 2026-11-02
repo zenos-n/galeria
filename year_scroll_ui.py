@@ -55,7 +55,7 @@ class YearScrollbar(Gtk.Overlay):
 
     def motion(self,_controller,_x,y):
         self.hovered=True;self.pointer_y=y
-        if not self.held:self.show_hint(y/max(1,self.bar.get_height()))
+        if not self.held:self.show_hint((y/max(1,self.bar.get_height())-.02)/.96)
 
     def leave(self,*_):
         self.hovered=False
@@ -73,7 +73,7 @@ class YearScrollbar(Gtk.Overlay):
         if not self.years:return
         fraction=max(0,min(1,fraction));index=min(len(self.years)-1,int(fraction*len(self.years)))
         self.hint.set_label(self.years[index])
-        rect=Gdk.Rectangle();rect.x=0;rect.y=round(fraction*max(1,self.get_height()-1));rect.width=1;rect.height=1
+        rect=Gdk.Rectangle();rect.x=0;rect.y=round((.02+.96*fraction)*max(1,self.get_height()-1));rect.width=1;rect.height=1
         self.popover.set_pointing_to(rect);self.popover.popup()
 
     def draw_ticks(self,widget,context,width,height):
@@ -81,6 +81,6 @@ class YearScrollbar(Gtk.Overlay):
         color=widget.get_color();context.set_source_rgba(color.red,color.green,color.blue,.18)
         context.set_line_width(1)
         for index in range(1,len(self.years)):
-            y=round(index*height/len(self.years))+.5
+            y=round((.02+.96*index/len(self.years))*height)+.5
             context.move_to(width*.25,y);context.line_to(width*.75,y)
         context.stroke()

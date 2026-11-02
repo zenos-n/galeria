@@ -725,7 +725,7 @@ class LibraryUI:
                         picture.media_id,texture=values[min(i,len(values)-1)];picture.set_paintable(texture)
                 self.populate_date_covers(mosaic)
             def failed(_message,card=card):card.covers_requested=False;card.retry_after=time.monotonic()+60
-            self.background(load,ready,failed,images=True,priority=lambda job_key=job_key:self.image_wanted.get(job_key,1000))
+            self.background(load,ready,failed,images=True,priority=lambda job_key=job_key:self.image_wanted.get(job_key))
 
     def populate_date_covers(self,mosaic):
         for mode,cards in [('months',mosaic.month_cards),('years',mosaic.year_cards)]:
@@ -793,7 +793,7 @@ class LibraryUI:
             tile.retry_after=time.monotonic()+60
             tile.set_tooltip_text(item.filename+' · '+message)
             tile.media_icon.set_from_icon_name('dialog-error-symbolic')
-        self.background(load,ready,failed,images=True,priority=lambda:self.image_wanted.get(pending_key,1000))
+        self.background(load,ready,failed,images=True,priority=lambda:self.image_wanted.get(pending_key))
 
     def texture_from_pixels(self,value):
         width,height,data=value

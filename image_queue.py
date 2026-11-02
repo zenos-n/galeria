@@ -21,8 +21,17 @@ class ImageQueue:
             with self.condition:
                 self.condition.wait_for(lambda:self.closed or self.jobs)
                 if not self.jobs:return
-                index=min(range(len(self.jobs)),key=lambda i:self.jobs[i][2]() if callable(self.jobs[i][2]) else self.jobs[i][2])
-                future,work,_=self.jobs.pop(index)
+                ranked=[(job[2]() if callable(job[2]) else job[2],job) for job in self.jobs]
+                stale=[job for priority,job in ranked if priority is None]
+                ranked=[entry for entry in ranked if entry[0] is not None]
+                self.jobs=[job for _,job in ranked]
+                next_job=self.jobs.pop(min(range(len(ranked)),key=lambda i:ranked[i][0])) if ranked else None
+            # Reap abandoned view jobs together, instead of rescanning the queue
+            # once per stale future while GTK competes with the workers for Python.
+            for future,_,_ in stale:
+                if future.set_running_or_notify_cancel():future.set_result(None)
+            if next_job is None:continue
+            future,work,_=next_job
             if not future.set_running_or_notify_cancel():continue
             try:future.set_result(work())
             except BaseException as error:future.set_exception(error)

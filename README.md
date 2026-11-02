@@ -117,3 +117,10 @@ native children only around the viewport. Scroll position determines image-job
 priority; hover and transition planning operate on visible items. Cache writes
 use an eviction index instead of rescanning the directory after every image.
 See [PERF.md](PERF.md) for real-library measurements and remaining outliers.
+
+
+Galeria 0.9 adds a native scrollbar with equal space per year in the indexed
+All Photos view. Its small track divisions mark years; the year hint appears
+only during hover or dragging. The newest year is at the top. Scrolling within
+each year remains proportional to that year's content. Abandoned thumbnail jobs
+are retired in batches so rapid scrolling does not repeatedly rescan stale work.

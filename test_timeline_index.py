@@ -50,5 +50,14 @@ class TimelineIndexTests(unittest.TestCase):
             self.assertIsNone(cache.get('asset:thumbnail'))
             cache.put('asset:preview',b'private');self.assertIsNone(cache.get('asset:preview'))
 
+    def test_abandoned_image_jobs_are_reaped_in_one_pass(self):
+        pool=ImageQueue(1);started=Event();gate=Event();evaluated=[];work=[]
+        first=pool.submit(lambda:(started.set(),gate.wait(3)));self.assertTrue(started.wait(1))
+        stale=[pool.submit(lambda:work.append('stale'),lambda:(evaluated.append(1),None)[1]) for _ in range(1000)]
+        visible=pool.submit(lambda:work.append('visible'),0)
+        gate.set();first.result(3);visible.result(3)
+        self.assertTrue(all(future.result(3) is None for future in stale))
+        pool.shutdown();self.assertEqual(len(evaluated),1000);self.assertEqual(work,['visible'])
+
 
 if __name__=='__main__':unittest.main()

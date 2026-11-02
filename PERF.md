@@ -127,3 +127,45 @@ Evidence: /tmp/gallery-app-identification/bench-cache.py, live-timed-indexfix.js
 live-timed-windowgeometry{,-repeat}.json and live-timed-gl-layoutfix.json.
 Run the offline native regression with the packaged GI environment on a private
 display: `G_DEBUG=fatal-criticals python3 checks/timeline_native.py`.
+
+
+## Galeria 0.9: sustained scrolling and abandoned image work
+
+The user reported a scrolling freeze after the 0.8.1 short-run measurements.
+Longer 3,600-step runs reproduced 1.2–4.5 second frame gaps. The installed
+catalog runtime is Python 3.13.15 (GTK 4.22.4, PyGObject 3.56.3, Adwaita 1.9.3),
+whereas the separate upstream development flake used Python 3.14.7. Tests and
+native checks were repeated in the actual catalog environment.
+
+The pending image queue repeatedly ranked every abandoned job while draining
+stale work one future at a time. With 5,000 abandoned jobs and one visible job,
+three controlled runs took 1.7589 / 1.7123 / 1.6888 seconds, evaluating priorities
+12,507,500 times each. A missing viewport priority now explicitly marks abandoned
+work; one ranking pass retires those futures together without running their
+loaders. The same fixture took 0.0167 / 0.0118 / 0.0111 seconds and 5,000 priority
+evaluations. Completion callbacks still clear pending-image/cover bookkeeping.
+Kept, with a deterministic regression test for linear priority evaluation.
+
+Two subsequent runs each used a new private empty thumbnail cache, the actual
+catalog Python/GI environment, the real 44,855-item read-only library on DP-2,
+and the same 3,600-step forward/reverse/old-date-jump sequence. Their frame-clock
+median was 16.67ms; p95 was16.75 /29.82ms; max148.74 /134.02ms. No multi-second
+scrolling gap appeared. Pending queues peaked at509 /574 jobs. This is evidence
+for the queue fix, not proof that every possible unresponsive-window failure is
+resolved. Initial model/widget construction still pauses for roughly0.7seconds
+before initial media display; it is outside the scrolling phase.
+
+Experiments not shipped: skipping unchanged native cell allocation caused GTK
+allocation warnings; retaining cached allocation arguments still did not remove
+the long stalls, so the entire allocation-reuse experiment was reverted.
+Suppressing repeated cover opacity calls alone did not fix them either and was
+reverted. GC instrumentation measured25–55ms collections, insufficient to explain
+the multi-second stalls. A native-call/system-call trace perturbed timing and did
+not reproduce the long pause; it is not used as an after-fix performance claim.
+No renderer, scheduler, kernel, game or monitor configuration changes ship.
+
+The native regression now also checks the year rail's standard Gtk.Scrollbar,
+top/bottom mapping, hidden hint at rest, and hint visibility during hover/hold.
+All53unit tests plus native layout, cache/refresh/Trash/stack and rail checks pass.
+Evidence: /tmp/gallery-app-identification/bench-stale.py,
+freeze-queuefix{,-repeat}-events.jsonl, tests-09-final.log and native-09-final.log.
