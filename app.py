@@ -580,8 +580,10 @@ class Gallery(Adw.Application):
     def __init__(self):
         super().__init__(application_id="com.neg-zero.Galeria", flags=Gio.ApplicationFlags.HANDLES_OPEN|Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
         self.window=None;self.background_enabled=False;self.quitting=False;self.control=None;self.pending_sync=False
+        self.open_monitor=None
         self.add_main_option('background',0,GLib.OptionFlags.NONE,GLib.OptionArg.NONE,'Start without opening a window',None)
         self.add_main_option('folder-sync',0,GLib.OptionFlags.NONE,GLib.OptionArg.NONE,'Open folder syncing',None)
+        self.add_main_option('monitor',0,GLib.OptionFlags.NONE,GLib.OptionArg.STRING,'Open on this monitor connector','CONNECTOR')
         self.add_main_option(GLib.OPTION_REMAINING,0,GLib.OptionFlags.NONE,GLib.OptionArg.FILENAME_ARRAY,'Media files or folders','FILES')
         quit_action=Gio.SimpleAction.new('quit',None);quit_action.connect('activate',lambda *_:self.force_quit());self.add_action(quit_action)
         self.set_accels_for_action('app.quit',['<Control>q'])
@@ -633,6 +635,24 @@ class Gallery(Adw.Application):
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.window = GalleryWindow(self)
         self.window.connect('notify::visible',lambda *_:self.emit_state())
+        if self.open_monitor:
+            monitors=Gdk.Display.get_default().get_monitors()
+            monitor=next((monitors.get_item(i) for i in range(monitors.get_n_items()) if monitors.get_item(i).get_connector()==self.open_monitor),None)
+            if monitor:
+                # Wayland permits choosing a monitor for fullscreen before first map.
+                self.window.fullscreen_on_monitor(monitor)
+                def mapped(*_):
+                    def restore():
+                        if self.window:self.window.unfullscreen();GLib.timeout_add(350,verify)
+                        return False
+                    GLib.timeout_add(250,restore)
+                def verify():
+                    if not self.window:return False
+                    actual=Gdk.Display.get_default().get_monitor_at_surface(self.window.get_surface())
+                    if actual!=monitor:self.window.fullscreen_on_monitor(monitor)
+                    print('Galeria monitor: '+monitor.get_connector(),flush=True)
+                    return False
+                self.window.connect('map',mapped)
         self.window.present()
         return True
 
@@ -651,6 +671,8 @@ class Gallery(Adw.Application):
 
     def do_command_line(self,command_line):
         options=command_line.get_options_dict()
+        monitor=options.lookup_value('monitor',None)
+        if monitor:self.open_monitor=monitor.unpack()
         values=options.lookup_value(GLib.OPTION_REMAINING,None)
         arguments=[os.fsdecode(value) for value in values.get_bytestring_array()] if values else []
         if options.contains('background'):self.set_background(True)
