@@ -20,6 +20,9 @@ def secret_put(identity,kind,value):
     return Secret.password_store_sync(SCHEMA,{'identity':identity,'kind':kind},Secret.COLLECTION_DEFAULT,'Gallery '+kind,value,None)
 
 
+def secret_clear(identity,kind):return Secret.password_clear_sync(SCHEMA,{'identity':identity,'kind':kind},None)
+
+
 def vault_key(identity):
     value=secret_get(identity,'vault')
     if value:return base64.b64decode(value)

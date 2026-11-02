@@ -11,7 +11,7 @@ from library import ImmichClient, LibraryError, scan_folders
 from timeline import Mosaic
 from cache import MediaCache
 from imaging import decode_image,image_ratio,thumbnail_bytes
-from session_store import preferences_read,preferences_write,secret_get,secret_put
+from session_store import preferences_read,preferences_write,secret_get,secret_put,secret_clear
 
 
 class LibraryUI:
@@ -34,9 +34,14 @@ class LibraryUI:
         self.vault=None
         self.sync_cancel=threading.Event()
         self.scope_filters={}
+        self.timeline_buckets=[]
+        self.dates_ready=True
+        self.bucket_scope={}
         self.io=ThreadPoolExecutor(max_workers=3,thread_name_prefix='gallery-io')
         self.images=ThreadPoolExecutor(max_workers=4,thread_name_prefix='gallery-images')
         self.previews=ThreadPoolExecutor(max_workers=2,thread_name_prefix='gallery-preview')
+        self.video_io=ThreadPoolExecutor(max_workers=2,thread_name_prefix='gallery-video')
+        self.video_proxy=None;self.video_prefetch=set()
         self.connect('close-request',self.stop_data)
 
     def stop_data(self,*_):
@@ -44,6 +49,9 @@ class LibraryUI:
         self.io.shutdown(wait=False,cancel_futures=True)
         self.images.shutdown(wait=False,cancel_futures=True)
         self.previews.shutdown(wait=False,cancel_futures=True)
+        self.video_io.shutdown(wait=False,cancel_futures=True)
+        if self.viewer and self.viewer.stage.video_player:self.viewer.stage.video_player.stop()
+        if self.video_proxy:threading.Thread(target=self.video_proxy.close,daemon=True).start()
         self.sync_cancel.set()
         if self.client:
             self.client.token=None
@@ -51,10 +59,53 @@ class LibraryUI:
 
     def save_preferences(self):preferences_write(self.preferences)
 
+    def get_video_proxy(self):
+        if self.video_proxy is None:
+            from video_proxy import VideoProxy
+            self.video_proxy=VideoProxy()
+        return self.video_proxy
+
+    def preload_video(self,item):
+        key=self.texture_key(item)
+        if key in self.video_prefetch:return
+        self.video_prefetch.add(key)
+        client=self.client;vault=self.vault
+        proxy=self.get_video_proxy() if client else None
+        def work():
+            if item.path:
+                with open(item.path,'rb') as stream:stream.read(2*1024*1024)
+            else:proxy.preload(client,item,vault)
+        self.background(work,lambda _:None,lambda _:None,images='video')
+
     def remember_account(self,client):
         def store():
             if not secret_put(client.identity,'session',client.token):raise LibraryError('The system keyring could not save this account.')
         self.background(store,lambda _:None,lambda message:self.notice(message))
+
+    def sign_out(self):
+        client=self.client
+        if not client:return
+        from sync_service import disable_account
+        token=client.token;client.token=None;client.locked_until=0
+        if self.viewer:
+            self.root_overlay.remove_overlay(self.viewer);self.viewer.stage.dispose()
+            self.viewer=None;self.split.set_can_target(True)
+        self.sync_cancel.set();self.vault=None
+        self.data_generation+=1
+        self.client=None;self.media_items=[];self.local_items=[];self.local_roots=[]
+        self.timeline_buckets=[];self.bucket_scope={};self.dates_ready=True
+        self.texture_cache.clear();self.pending_images.clear()
+        self.preferences.update(mode=None,remember=False);self.save_preferences()
+        self.album_tree.set_albums([]);self.source_label.set_label('No library connected')
+        self.update_account_ui();self.set_searching(False)
+        self.set_library_items([])
+        def clear_session():
+            try:disable_account(client.identity)
+            finally:secret_clear(client.identity,'session')
+            logout=ImmichClient(client.base);logout.token=token
+            logout.request('/auth/logout',{},method='POST')
+        self.background(clear_session,lambda _:None,lambda _:None)
+        self.welcome()
 
     def restore_last_library(self):
         mode=self.preferences.get('mode')
@@ -66,6 +117,7 @@ class LibraryUI:
                 client.token=secret_get(client.base+'|'+self.preferences['user_id'],'session')
                 if not client.token:return None
                 client.user=client.request('/users/me')
+                client.detect_version()
                 client.lock_session()
                 return client
             self.busy_library('Reconnecting to your library…')
@@ -187,7 +239,7 @@ class LibraryUI:
             if generation!=self.data_generation:
                 return None
             return work()
-        future=(self.previews if images=='preview' else self.images if images else self.io).submit(execute)
+        future=(self.video_io if images=='video' else self.previews if images=='preview' else self.images if images else self.io).submit(execute)
         def completed(result):
             if result.cancelled():
                 return
@@ -226,6 +278,9 @@ class LibraryUI:
         self.lock_button.set_visible(False)
         self.data_generation+=1
         self.client=None
+        self.video_prefetch.clear()
+        self.update_account_ui()
+        self.timeline_buckets=[];self.dates_ready=True;self.bucket_scope={}
         self.local_items=[]
         self.library_mode='local'
         self.local_roots=paths
@@ -255,6 +310,8 @@ class LibraryUI:
         self.data_generation+=1
         self.search_generation+=1
         self.client=client
+        self.video_prefetch.clear()
+        self.timeline_buckets=[];self.dates_ready=False;self.bucket_scope={}
         client.media_cache()
         self.library_mode='immich'
         self.local_items=[]
@@ -264,9 +321,26 @@ class LibraryUI:
         self.save_preferences()
         self.search.set_mode('immich')
         self.source_label.set_label(client.user.get('name') or client.user.get('email') or 'Immich')
+        self.update_account_ui()
         self.current_page='library'
         self.background(client.albums,self.album_tree.set_albums)
         self.navigate(self.rows['library'].get_parent(),self.rows['library'])
+        def dates_loaded(buckets):
+            self.timeline_buckets=buckets;self.dates_ready=True
+            if self.current_page=='library':self.search_library()
+        def dates_failed(message):
+            self.dates_ready=True;self.notice('Date index unavailable: '+message)
+            if self.current_page=='library':self.search_library()
+        self.background(client.time_buckets,dates_loaded,dates_failed)
+
+    def open_date_bucket(self,kind,key):
+        from datetime import datetime,timedelta
+        if not self.client:return
+        start=datetime.strptime(key,'%Y' if kind=='year' else '%Y-%m')
+        end=datetime(start.year+1,1,1) if kind=='year' or start.month==12 else datetime(start.year,start.month+1,1)
+        self.bucket_scope={'takenAfter':start.isoformat(timespec='milliseconds')+'Z',
+                           'takenBefore':(end-timedelta(milliseconds=1)).isoformat(timespec='milliseconds')+'Z'}
+        self.search_library(preserve_folder=True)
 
     def refresh_library(self):
         if self.client:
@@ -280,9 +354,11 @@ class LibraryUI:
         else:
             self.welcome()
 
-    def search_library(self,append=False):
+    def search_library(self,append=False,preserve_folder=False):
         if self.viewer:
             return
+        if self.client and self.current_page=='library' and not self.dates_ready:
+            self.busy_library('Loading library dates…');return
         if self.current_page not in ('library','photos','videos','screenshots','live','favorites','archive','trash','locked','collection') and not self.current_page.startswith('album-'):
             return
         if append and (self.loading_more or not self.next_page):return
@@ -311,33 +387,17 @@ class LibraryUI:
             return
         if not self.client:
             return
-        if self.current_page.startswith('album-'):
-            album_id=self.current_page.removeprefix('album-')
-            client=self.client
-            if append and self.album_result_id==album_id:
-                count=len(self.media_items)+100
-                self.next_page=count if len(self.album_items)>count else None
-                self.set_library_items(self.album_items[:count],append=True)
-                return
-            self.busy_library('Loading album…')
-            self.next_page=None
-            def loaded(items):
-                if request_id!=self.search_generation:return
-                self.album_items=items
-                self.album_result_id=album_id
-                self.next_page=100 if len(items)>100 else None
-                self.set_library_items(items[:100])
-            self.background(lambda:client.album(album_id),
-                            loaded,
-                            lambda error:self.library_failed(error) if request_id==self.search_generation else None)
-            return
         client=self.client
         try:
             filters,query=self.search.request_filters()
         except ValueError as error:
             self.notice(str(error));return
         page=self.current_page
+        if page.startswith('album-'):
+            filters['albumIds']=[page.removeprefix('album-')]
+            filters['visibility']=None
         filters.update(self.scope_filters if page=='collection' else {})
+        if page=='library':filters.update(self.bucket_scope)
         if page in ('photos','videos'):filters['type']='IMAGE' if page=='photos' else 'VIDEO'
         if page=='screenshots':filters['originalFileName']='Screenshot'
         if page=='live':filters['isMotion']=True
@@ -346,7 +406,7 @@ class LibraryUI:
         if page=='locked':filters['visibility']='locked'
         if page=='trash':filters.pop('visibility',None);filters['isTrashed']=True
         next_page=int(self.next_page) if append and self.next_page else 1
-        if not append:self.busy_library('Loading your photos…')
+        if not append and not preserve_folder:self.busy_library('Loading your photos…')
         self.load_more.set_sensitive(False)
         def loaded(value):
             if request_id!=self.search_generation:return
@@ -361,11 +421,12 @@ class LibraryUI:
         self.background(lambda:client.search(filters,query,next_page),loaded,failed)
 
     def set_library_items(self,items,append=False):
-        position=self.scroller.get_vadjustment().get_value() if append else 0
+        position=self.scroller.get_vadjustment().get_value() if append or self.bucket_scope else 0
         self.loading_more=True
         self.media_items=sorted({item.id:item for item in items}.values(),key=lambda item:item.created,reverse=True)
         old=self.mosaic
-        mosaic=Mosaic(self.open_viewer,self.media_items)
+        buckets=self.timeline_buckets if self.current_page=='library' and not self.search.entry.get_text() else None
+        mosaic=Mosaic(self.open_viewer,self.media_items,buckets,self.open_date_bucket if buckets else None)
         if append:
             selected={old.tiles[i].media_item.id for i in old.selected}
             mosaic.selection_mode=old.selection_mode
@@ -387,7 +448,7 @@ class LibraryUI:
         self.period.set_label('Library' if mosaic.mode=='years' else newest.strftime('%Y' if mosaic.mode=='months' else '%B %Y') if newest else 'Library')
         self.load_more.set_visible(False)
         self.load_more.set_sensitive(True)
-        self.stack.set_visible_child_name('library' if self.media_items else 'status')
+        self.stack.set_visible_child_name('library' if self.media_items or buckets and mosaic.mode!='all' else 'status')
         self.status_actions.set_visible(False)
         if not self.media_items:
             self.status.set_icon_name('folder-pictures-symbolic')
@@ -414,12 +475,13 @@ class LibraryUI:
         mosaic=self.mosaic
         for tile in mosaic.tiles:
             rect=mosaic.rendered.get(tile)
-            wanted=bool(rect and rect[1]+rect[3]>=top-height/2 and rect[1]<=top+height*1.5)
+            wanted=bool(rect and rect[1]+rect[3]>=max(0,top-height*2) and rect[1]<=top+height*3)
             if mosaic.mode!='all' and tile in mosaic.cover_slots:wanted=True
             if wanted and tile.media_texture is None and (tile.media_item.kind=='IMAGE' or self.client):
                 key=(id(mosaic),tile.media_item.id)
                 if key not in self.pending_images:
                     self.pending_images.add(key);self.load_thumbnail(tile,mosaic,key)
+            if wanted and tile.media_item.kind=='VIDEO':self.preload_video(tile.media_item)
 
     def scroll_changed(self,*_):
         self.load_visible_thumbnails()

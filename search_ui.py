@@ -4,9 +4,9 @@ from uuid import UUID
 from gi.repository import Adw, GLib, Gtk
 
 
-class SearchPanel(Gtk.SearchBar):
+class SearchPanel(Gtk.Box):
     def __init__(self,window):
-        super().__init__()
+        super().__init__(orientation=Gtk.Orientation.VERTICAL,spacing=4,hexpand=True)
         self.window=window
         self.mode='immich'
         self.inputs={}
@@ -17,7 +17,7 @@ class SearchPanel(Gtk.SearchBar):
         self.entry=Gtk.SearchEntry(placeholder_text='Search photos, people, places…',hexpand=True)
         self.entry.connect('search-changed',self.changed)
         self.entry.connect('activate',lambda _:self.run_search())
-        self.connect_entry(self.entry)
+        self.entry.connect('stop-search',lambda _:self.set_search_mode(False))
         row.append(self.entry)
         self.filter_button=Gtk.MenuButton(icon_name='gallery-filter-symbolic',tooltip_text='Search filters')
         self.filter_button.add_css_class('flat')
@@ -29,11 +29,17 @@ class SearchPanel(Gtk.SearchBar):
         self.tokens=Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,max_children_per_line=6,
                                 min_children_per_line=1,column_spacing=5,row_spacing=4,visible=False)
         body.append(self.tokens)
-        self.set_child(body)
+        self.append(body)
+
+    def set_key_capture_widget(self,_widget):pass
+
+    def set_search_mode(self,active):self.window.set_searching(active)
+
+    def get_search_mode(self):return getattr(self.window,'searching',False)
 
     def build_filters(self):
         root=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=12,margin_top=14,margin_bottom=14,
-                      margin_start=14,margin_end=14,width_request=520)
+                      margin_start=12,margin_end=12,width_request=320)
         root.append(Gtk.Label(label='Search filters',xalign=0,css_classes=['title-3']))
         groups=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=18)
         def group(title):
@@ -58,7 +64,7 @@ class SearchPanel(Gtk.SearchBar):
         who=group('People and collections')
         for key in ['People','Albums','Tags']:
             entry(who,key)
-            self.inputs[key].set_title(key+' · IDs separated by commas')
+            self.inputs[key].set_tooltip_text('IDs separated by commas')
         where=group('Location')
         for key in ['City','State','Country']:
             entry(where,key)
@@ -73,8 +79,10 @@ class SearchPanel(Gtk.SearchBar):
         combo(display,'Visibility',['Main library','Include archive','Archive only'])
         for key in ['Favorites only','Not in an album']:
             switch(display,key)
-        scroll=Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,min_content_height=360,
-                                  max_content_height=440,propagate_natural_height=True,child=groups)
+        scroll=Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,min_content_height=280,
+                                  max_content_height=420,propagate_natural_height=True,child=groups,
+                                  margin_start=0,margin_end=0)
+        scroll.set_overlay_scrolling(False)
         root.append(scroll)
         footer=Gtk.Box(spacing=8,halign=Gtk.Align.END)
         clear=Gtk.Button(label='Clear')
@@ -148,7 +156,10 @@ class SearchPanel(Gtk.SearchBar):
     def run_search(self):
         if self.pending:
             GLib.source_remove(self.pending);self.pending=0
-        self.window.search_library()
+        if self.window.current_page in ('albums','people','tags','sharing','duplicates'):
+            from collections_ui import collection_view
+            collection_view(self.window,self.window.current_page)
+        else:self.window.search_library()
         return False
 
     def request_filters(self):

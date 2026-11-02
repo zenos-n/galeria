@@ -44,6 +44,8 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.viewer_index = 0
         self.viewer = None
         self.library_mode='immich'
+        self.searching=False
+        self.grid_page=True
         self.init_data()
         self.toast = Adw.ToastOverlay()
         self.set_content(self.toast)
@@ -59,6 +61,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.split.connect("notify::collapsed", self.collapsed)
         self.dialog = None
         self.make_drop_target()
+        self.update_account_ui()
 
     def notice(self, text):
         self.toast.add_toast(Adw.Toast.new(text))
@@ -106,11 +109,14 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.split.set_sidebar(toolbar)
         header = Adw.HeaderBar(show_start_title_buttons=False, show_end_title_buttons=False)
         header.set_title_widget(label("Gallery", "heading"))
-        header.pack_start(button("system-search-symbolic", "Search", lambda _: self.search.set_search_mode(True)))
+        self.search_toggle=Gtk.ToggleButton(icon_name='system-search-symbolic',tooltip_text='Search',css_classes=['flat'])
+        self.search_toggle.connect('toggled',lambda widget:self.set_searching(widget.get_active()))
+        header.pack_start(self.search_toggle)
         menu = Gio.Menu()
+        self.hamburger_menu=menu
         menu.append("Choose library…", "win.source")
         menu.append("Refresh library", "win.refresh")
-        menu.append("Administration", "win.admin")
+        menu.append('Folder sync','win.sync')
         menu.append("Preferences", "win.preferences")
         menu.append("About Gallery", "win.about")
         menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
@@ -147,7 +153,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
                 row = Gtk.ListBoxRow()
                 row.key = key
                 self.page_titles[key] = title
-                line = Gtk.Box(spacing=10, margin_start=10, margin_end=8)
+                line = Gtk.Box(spacing=10, margin_start=0, margin_end=0)
                 line.append(Gtk.Image(icon_name=icon, pixel_size=16))
                 line.append(label(title, xalign=0, hexpand=True))
                 row.set_child(line)
@@ -170,6 +176,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         for name, callback in [("source", self.welcome), ("density", self.density),
                                ("appearance", self.appearance), ("about", self.about),
                                ("admin",lambda:administration(self)),("refresh",self.refresh_library),
+                               ('sync',self.show_folder_sync),
                                ("preferences", lambda: preferences(self))]:
             action = Gio.SimpleAction.new(name, None)
             action.connect("activate", lambda _a, _p, cb=callback: cb())
@@ -194,15 +201,17 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         header.set_title_widget(self.switcher)
         self.page_title = label("", "heading")
         avatar = Adw.Avatar(size=28, text="Gallery", show_initials=False)
-        account = Gtk.Button(child=avatar, tooltip_text="Account and library", width_request=34, height_request=34, valign=Gtk.Align.CENTER)
+        account = Gtk.MenuButton(child=avatar, tooltip_text="Account and library", width_request=34, height_request=34, valign=Gtk.Align.CENTER)
+        self.avatar=avatar
         account.add_css_class("flat")
         account.add_css_class("avatar-button")
         account.add_css_class("circular")
-        account.connect("clicked", lambda _: self.welcome())
+        account.set_create_popup_func(lambda _:self.account_menu())
         self.account_button = account
-        header.pack_end(Gtk.AspectFrame(child=account,ratio=1,obey_child=False,
-                                       halign=Gtk.Align.CENTER,valign=Gtk.Align.CENTER))
-        header.pack_end(button("cloud-deploy-symbolic", "Upload files", lambda _: self.choose_uploads()))
+        self.account_wrapper=Gtk.AspectFrame(child=account,ratio=1,obey_child=False,halign=Gtk.Align.CENTER,valign=Gtk.Align.CENTER)
+        header.pack_end(self.account_wrapper)
+        self.upload_button=button("cloud-deploy-symbolic", "Upload files", lambda _: self.choose_uploads())
+        header.pack_end(self.upload_button)
         self.select_button=Gtk.ToggleButton(icon_name='object-select-symbolic',tooltip_text='Select items')
         self.select_button.add_css_class('flat')
         self.select_button.connect('toggled',lambda w:self.mosaic.set_selection(w.get_active()))
@@ -213,7 +222,6 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.toolbar.add_top_bar(header)
         self.search = SearchPanel(self)
         self.search.set_key_capture_widget(self)
-        self.toolbar.add_top_bar(self.search)
         self.stack = Gtk.Stack()
         self.toolbar.set_content(self.stack)
         self.scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
@@ -270,6 +278,8 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
     def key_pressed(self, _controller, keyval, _keycode, state):
         if self.viewer:
             return self.viewer.on_key(_controller, keyval, _keycode, state)
+        if keyval==Gdk.KEY_Escape and self.searching:
+            self.set_searching(False);return True
         if keyval == Gdk.KEY_f and state & Gdk.ModifierType.CONTROL_MASK:
             self.search.set_search_mode(True)
             return True
@@ -286,11 +296,58 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.select_button.set_active(active)
         self.selection_bar.set_reveal_child(active)
         self.selection_title.set_label(f'{len(self.mosaic.selected)} selected' if self.mosaic.selected else 'Select items')
-        self.period.set_visible(not active and self.current_page=='library')
-        self.header.set_title_widget(self.selection_title if active else self.switcher if self.current_page=='library' else self.page_title)
+        self.update_header()
+
+    def update_header(self):
+        active=self.mosaic.selection_mode
+        is_library=self.current_page=='library'
+        self.period.set_visible(not self.searching and not active and is_library)
+        self.switcher.set_visible(not self.searching and not active and is_library)
+        self.account_wrapper.set_visible(not self.searching)
+        self.upload_button.set_visible(not self.searching)
+        self.select_button.set_visible(not self.searching and self.grid_page)
+        self.lock_button.set_visible(not self.searching and bool(self.client and self.client.locked_until>time.monotonic()))
+        self.sidebar_button.set_visible(not self.searching and self.split.get_collapsed())
+        self.header.set_title_widget(self.search if self.searching else self.selection_title if active else self.switcher if is_library else self.page_title)
+
+    def set_searching(self,active):
+        self.searching=active
+        self.search_toggle.set_active(active)
+        if not hasattr(self,'search'):return
+        self.update_header()
+        if active:GLib.idle_add(self.search.entry.grab_focus)
+        else:
+            self.search.popover.popdown()
+            self.search.entry.set_text('')
+            self.search.clear()
+
+    def update_account_ui(self):
+        admin=bool(self.client and self.client.user.get('isAdmin'))
+        self.lookup_action('admin').set_enabled(admin)
+        self.hamburger_menu.remove_all()
+        for title,action in [('Choose library…','source'),('Refresh library','refresh'),('Folder sync','sync')]+([('Administration','admin')] if admin else [])+[('Preferences','preferences'),('About Gallery','about')]:
+            self.hamburger_menu.append(title,'win.'+action)
+        self.avatar.set_text(self.client.user.get('name','') if self.client else 'Gallery')
+        self.avatar.set_show_initials(bool(self.client))
+
+    def account_menu(self):
+        popover=Gtk.Popover()
+        box=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=6,margin_top=12,margin_bottom=12,margin_start=12,margin_end=12,width_request=220)
+        if self.client:
+            box.append(label(self.client.user.get('name','Account'),'heading',xalign=0))
+            box.append(label(self.client.user.get('email',''),'dim-label',xalign=0,ellipsize=3))
+        for title,callback in ([('Folder sync',self.show_folder_sync),('Preferences',lambda:preferences(self)),('Switch library…',self.welcome),('Sign out',self.sign_out)] if self.client else [('Choose library…',self.welcome),('Preferences',lambda:preferences(self))]):
+            item=Gtk.Button(label=title,css_classes=['flat'],halign=Gtk.Align.FILL)
+            item.connect('clicked',lambda _,callback=callback:(self.account_button.popdown(),callback()))
+            box.append(item)
+        popover.set_child(box);self.account_button.set_popover(popover)
+
+    def show_folder_sync(self):
+        from sync_ui import folder_sync
+        folder_sync(self)
 
     def collapsed(self, *_):
-        self.sidebar_button.set_visible(self.split.get_collapsed())
+        self.update_header()
 
     def navigate(self, nav, row):
         if self.current_page=='locked' and row.key!='locked':self.lock_folder(refresh=False)
@@ -310,10 +367,12 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         is_library = row.key == "library"
         has_grid = is_library or row.key in ("photos", "videos", "screenshots", "live") or row.key.startswith("album-") or bool(self.client) and row.key in ('favorites','archive','trash') or row.key=='locked' and bool(self.client and self.client.locked_until>time.monotonic())
         self.select_button.set_visible(has_grid)
+        self.grid_page=has_grid
         self.switcher.set_visible(is_library)
         self.period.set_visible(is_library)
         self.page_title.set_label(self.page_titles[row.key])
         self.header.set_title_widget(self.switcher if is_library else self.page_title)
+        self.update_header()
         self.stack.set_visible_child_name("library" if has_grid else "status")
         self.status_actions.set_visible(row.key == "locked")
         if row.key in ('albums','people','tags','duplicates','sharing','map','pinned'):
@@ -344,6 +403,8 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         if not hasattr(self, "mosaic"):
             return
         self.mosaic.set_mode(self.switcher.get_active_name())
+        if self.client and self.bucket_scope:
+            self.bucket_scope={};self.search_library()
         self.scroller.get_vadjustment().set_value(0)
         newest=self.media_items[0].created if self.media_items else None
         self.period.set_label({'all':newest.strftime('%B %Y') if newest else 'Library',

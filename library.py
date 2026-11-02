@@ -4,9 +4,10 @@ from datetime import datetime
 import json
 import os
 import time
+import re
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
@@ -44,7 +45,18 @@ IMAGE_TYPES = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tif', '.tiff'
 VIDEO_TYPES = {'.mp4', '.mov', '.mkv', '.webm', '.avi', '.m4v'}
 
 
-def scan_folders(paths, probe=None):
+def media_paths(root,recursive=True,max_depth=0,onerror=None):
+    root=Path(root)
+    for directory,dirs,files in os.walk(root,followlinks=False,onerror=onerror):
+        depth=len(Path(directory).relative_to(root).parts)
+        dirs[:]=[name for name in dirs if not (Path(directory)/name).is_symlink()]
+        if not recursive or max_depth and depth>=max_depth:dirs.clear()
+        for name in files:
+            path=Path(directory)/name
+            if path.suffix.lower() in IMAGE_TYPES|VIDEO_TYPES and not path.is_symlink():yield path
+
+
+def scan_folders(paths, probe=None,recursive=True,max_depth=0):
     items, seen, errors = [], set(), []
     def failed(error):
         errors.append(str(error))
@@ -53,23 +65,15 @@ def scan_folders(paths, probe=None):
         if not root.is_dir():
             errors.append(f'Folder unavailable: {root.name}')
             continue
-        for directory, _, files in os.walk(root, followlinks=False, onerror=failed):
-            for name in files:
-                path = Path(directory) / name
-                suffix = path.suffix.lower()
-                if suffix not in IMAGE_TYPES | VIDEO_TYPES or path.is_symlink():
-                    continue
-                absolute = str(path.absolute())
-                if absolute in seen:
-                    continue
-                seen.add(absolute)
-                try:
-                    stat = path.stat()
-                    ratio = probe(absolute) if probe and suffix in IMAGE_TYPES else 16 / 9
-                    items.append(MediaItem(absolute, name, datetime.fromtimestamp(stat.st_mtime),
-                                           ratio or 1.5, 'VIDEO' if suffix in VIDEO_TYPES else 'IMAGE', absolute))
-                except (OSError, ValueError) as error:
-                    errors.append(f'{name}: {error}')
+        for path in media_paths(root,recursive,max_depth,failed):
+            absolute=str(path.absolute());suffix=path.suffix.lower()
+            if absolute in seen:continue
+            seen.add(absolute)
+            try:
+                stat=path.stat();ratio=probe(absolute) if probe and suffix in IMAGE_TYPES else 16/9
+                items.append(MediaItem(absolute,path.name,datetime.fromtimestamp(stat.st_mtime),ratio or 1.5,
+                                       'VIDEO' if suffix in VIDEO_TYPES else 'IMAGE',absolute))
+            except (OSError,ValueError) as error:errors.append(f'{path.name}: {error}')
     return sorted(items, key=lambda item: item.created, reverse=True), errors
 
 
@@ -94,6 +98,7 @@ class ImmichClient:
         self.cache=None
         self.locked_until=0
         self.server_lock_pending=False
+        self.modern_search=True
 
     @property
     def identity(self):return self.base+'|'+str((self.user or {}).get('id',''))
@@ -137,18 +142,42 @@ class ImmichClient:
             raise LibraryError('Immich did not return a session token.')
         self.token = response['accessToken']
         self.user = self.request('/users/me')
+        self.detect_version()
         return self.user
 
+    def detect_version(self):
+        try:
+            version=self.request('/server/about').get('version','')
+            match=re.search(r'(\d+)\.(\d+)',str(version))
+            if match:self.modern_search=tuple(map(int,match.groups()))>=(3,2)
+        except LibraryError:pass
+
+    def search_filter(self,values):
+        result={'trashedAt':{'eq':None}}
+        for key,value in values.items():
+            if key=='isTrashed':result['trashedAt']={'ne' if value else 'eq':None}
+            elif key in ('albumIds','personIds','tagIds'):result[key]={'any':value}
+            elif key in ('originalFileName','originalPath','description'):result[key]={'like':'%'+value+'%'}
+            elif key in ('takenAfter','takenBefore'):result.setdefault('takenAt',{})['gte' if key=='takenAfter' else 'lte']=value
+            elif key=='isNotInAlbum':result['hasAlbums']={'eq':not value}
+            elif key=='visibility' and value is None:result[key]={'in':['timeline','archive']}
+            elif key=='ocr':result[key]={'matches':value}
+            else:result[key]={'eq':value}
+        return result
+
     def search(self, filters=None, query='', page=1):
-        body = {'size': 100, 'page': page, 'order': 'desc', 'withExif': True, 'visibility': 'timeline'}
-        body.update(filters or {})
-        if body.get('visibility') is None or body.get('isTrashed'):
-            body.pop('visibility',None)
+        values={'visibility':'timeline',**(filters or {})}
+        if values.get('isTrashed'):values['visibility']=None
+        body={'size':100,'page':page,'order':'desc','withExif':True}
+        if self.modern_search:body['filter']=self.search_filter(values)
+        else:
+            body.update(values)
+            if body.get('visibility') is None:body.pop('visibility',None)
         path = '/search/metadata'
         if query:
             path = '/search/smart'
             body['query'] = query
-        locked=body.get('visibility')=='locked'
+        locked=values.get('visibility')=='locked'
         if not locked and self.server_lock_pending:self.lock_session()
         if locked and time.monotonic()>=self.locked_until:
             raise LibraryError('Unlock the locked folder first.',403)
@@ -166,11 +195,28 @@ class ImmichClient:
         items=[media_from_asset(asset) for asset in assets.get('items', []) if asset.get('visibility')!='hidden' and (locked or asset.get('visibility')!='locked')]
         return items, assets.get('nextPage')
 
+    def time_buckets(self,filters=None):
+        options={'visibility':'timeline','order':'desc'}
+        for key,value in (filters or {}).items():
+            if key in ('visibility','isFavorite','isTrashed'):options[key]=str(value).lower() if isinstance(value,bool) else value
+            elif key in ('albumIds','personIds','tagIds') and len(value)==1:options[key[:-1]]=value[0]
+        path='/timeline/buckets?'+urlencode({key:value for key,value in options.items() if value is not None})
+        return self.media_cache().json('buckets:'+path,lambda:self.request(path),30)
+
+    def share_album(self,album_id,options):
+        return self.request('/shared-links',dict(options,type='ALBUM',albumId=album_id))
+
     def albums(self):
         return self.media_cache().json('albums',lambda:self.request('/albums'),30)
 
     def album(self, album_id):
-        return [media_from_asset(asset) for asset in self.request('/albums/' + quote(album_id, safe='')).get('assets', []) if asset.get('visibility') not in ('locked','hidden')]
+        items=[];page=1
+        while True:
+            batch,next_page=self.search({'albumIds':[album_id],'visibility':None},page=page)
+            items.extend(batch)
+            if not next_page:break
+            page=int(next_page)
+        return items
 
     def thumbnail(self, asset_id, preview=False):
         return self.request('/assets/' + quote(asset_id, safe='') + '/thumbnail?size=' + ('preview' if preview else 'thumbnail'), binary=True)
@@ -233,7 +279,7 @@ class ImmichClient:
             return result.get('people',[]) if isinstance(result,dict) else result
         if kind=='tags':return self.request('/tags')
         if kind=='duplicates':return self.request('/duplicates')
-        if kind=='sharing':return [album for album in self.albums() if album.get('shared') or album.get('albumUsers')]
+        if kind=='sharing':return [album for album in self.albums() if album.get('shared') or album.get('hasSharedLink') or len(album.get('albumUsers',[]))>1]
         if kind=='map':return self.request('/map/markers')
         return self.albums()
 

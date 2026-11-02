@@ -110,6 +110,7 @@ class AlbumTree(Gtk.ListView):
         factory = Gtk.SignalListItemFactory()
         factory.connect("setup", self.setup)
         factory.connect("bind", self.bind)
+        factory.connect('unbind',self.unbind)
         super().__init__(model=selection, factory=factory, single_click_activate=True)
         self.add_css_class("navigation-sidebar")
         self.add_css_class("album-tree")
@@ -131,22 +132,30 @@ class AlbumTree(Gtk.ListView):
         self.window.refresh_pins()
 
     def setup(self, _factory, item):
-        expander = Gtk.TreeExpander()
-        expander.set_indent_for_icon(False)
-        line = Gtk.Box(spacing=8, margin_start=0, margin_end=6, height_request=34)
+        line = Gtk.Box(spacing=10,margin_end=0,height_request=34)
         item.icon = Gtk.Image(pixel_size=16)
         item.title = text("", xalign=0, hexpand=True, ellipsize=3)
         line.append(item.icon)
         line.append(item.title)
-        expander.set_child(line)
-        item.set_child(expander)
+        item.arrow=Gtk.Button(icon_name='pan-down-symbolic',tooltip_text='Expand or collapse albums',css_classes=['flat','album-disclosure'],valign=Gtk.Align.CENTER)
+        item.arrow.connect('clicked',lambda _:item.tree_row.set_expanded(not item.tree_row.get_expanded()))
+        line.append(item.arrow)
+        item.set_child(line)
 
     def bind(self, _factory, item):
         row = item.get_item()
         node = row.get_item()
-        item.get_child().set_list_row(row)
+        item.tree_row=row
+        item.get_child().set_margin_start(0 if node.key=='albums' else 18)
+        item.arrow.set_visible(node.key=='albums')
+        def update(*_):item.arrow.set_icon_name('pan-down-symbolic' if row.get_expanded() else 'pan-end-symbolic')
+        item.tree_handler=row.connect('notify::expanded',update);update()
         item.icon.set_from_icon_name("folder-pictures-symbolic" if node.key=='albums' else "gallery-image-symbolic")
         item.title.set_label(node.name)
+
+    def unbind(self,_factory,item):
+        if getattr(item,'tree_handler',None):
+            item.tree_row.disconnect(item.tree_handler);item.tree_handler=None
 
 
 def share_sheet(window,count=1):

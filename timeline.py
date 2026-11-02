@@ -10,9 +10,11 @@ MONTHS=[('2026-01','January 2026','2026',0,12),('2025-12','December 2025','2025'
 class Mosaic(Gtk.Widget):
     __gtype_name__='GalleryMosaic'
 
-    def __init__(self,open_photo,items=None):
+    def __init__(self,open_photo,items=None,buckets=None,on_bucket=None):
         super().__init__(hexpand=True,margin_start=10,margin_end=10)
         self.open_photo=open_photo
+        self.on_bucket=on_bucket
+        self.bucket_counts={}
         self.target=154
         self.mode='all'
         self.show_durations=True
@@ -57,8 +59,17 @@ class Mosaic(Gtk.Widget):
                     self.months[-1]=(k,title,year,a,i+1)
                 else:
                     self.months.append((key,item.created.strftime('%B %Y'),item.created.strftime('%Y'),i,i+1))
+        if buckets is not None:
+            from datetime import datetime
+            groups={month[0]:month for month in self.months}
+            for bucket in buckets:
+                key=bucket['timeBucket'][:7]
+                self.bucket_counts[key]=self.bucket_counts.get(key,0)+bucket['count']
+                groups.setdefault(key,(key,datetime.strptime(key,'%Y-%m').strftime('%B %Y'),key[:4],0,0))
+            self.months=[groups[key] for key in sorted(groups,reverse=True)]
         self.panel_month=self.parent(Gtk.Box(css_classes=['date-panel']))
         self.panel_year=self.parent(Gtk.Box(css_classes=['date-panel']))
+        self.loading=self.parent(Gtk.Spinner(spinning=True))
         self.pointer_month=self.pointer()
         self.pointer_year=self.pointer()
         ratios=[item.ratio for item in items] if items is not None else RATIOS[:12]+RATIOS[12:]+RATIOS[4:18]
@@ -237,9 +248,11 @@ class Mosaic(Gtk.Widget):
 
     def expand_month(self,key):
         self.change(lambda:setattr(self,'expanded_month',None if self.expanded_month==key else key),'folder')
+        if self.expanded_month and self.on_bucket:self.on_bucket('month',key)
 
     def expand_year(self,year):
         self.change(lambda:setattr(self,'expanded_year',None if self.expanded_year==year else year),'folder')
+        if self.expanded_year and self.on_bucket:self.on_bucket('year',year)
 
     def change(self,update,kind='tier'):
         if self.tick:
@@ -316,6 +329,9 @@ class Mosaic(Gtk.Widget):
                     _,_,_,a,b=next(m for m in self.months if m[0]==active)
                     ids=range(a,b)
                 content_h=self.photo_rows(ids,x+12,panel_y+12,width-24,result)
+                if not content_h and self.on_bucket:
+                    result[self.loading]=(x+width/2-16,panel_y+24,32,32,1)
+                    content_h=68
                 content_h+=24
                 result[panel]=(x,panel_y,width,content_h,1)
                 y=panel_y+content_h+18

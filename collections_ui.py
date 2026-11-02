@@ -39,6 +39,8 @@ def collection_view(window,kind):
         return
     def loaded(data):
         if window.current_page!=kind or generation!=window.search_generation:return
+        query=window.search.entry.get_text().strip().casefold()
+        if query:data=[value for value in data if query in str(value.get('albumName') or value.get('value') or value.get('name') or '').casefold()]
         if kind=='map':
             data=[dict(marker,name=f"{marker.get('lat',marker.get('latitude',0)):.4f}, {marker.get('lon',marker.get('longitude',0)):.4f}") for marker in data]
         flow=Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,min_children_per_line=1,max_children_per_line=20,

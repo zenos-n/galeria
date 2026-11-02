@@ -47,7 +47,8 @@ class ImmichFixture(BaseHTTPRequestHandler):
             return self.respond({'assets':{'items':ASSETS[:1] if page==1 else ASSETS[1:], 'nextPage':'2' if page==1 else None}})
         if '/thumbnail?' in self.path:return self.respond(self.thumbnail)
         if self.path=='/api/albums':return self.respond([{'id':'album','albumName':'Trips'}])
-        if self.path=='/api/albums/album':return self.respond({'assets':ASSETS})
+        if self.path=='/api/albums/album':return self.respond({'id':'album','albumName':'Trips','assetCount':2})
+        if self.path.startswith('/api/timeline/buckets'):return self.respond([{'timeBucket':'2026-03-01','count':1},{'timeBucket':'2018-01-01','count':500}])
         if self.path=='/api/server/about':return self.respond({'version':'3.2.0-fixture'})
         if self.path=='/api/server/statistics':return self.respond({'photos':2,'videos':0,'usage':1000000})
         if self.path=='/api/server/storage':return self.respond({'diskUse':'1 GB','diskAvailable':'9 GB','diskUsagePercentage':10})
@@ -117,6 +118,29 @@ class LibraryTests(unittest.TestCase):
         self.client.search({'isTrashed':True})
         self.assertNotIn('visibility',ImmichFixture.requests[-1][2])
 
+    def test_current_filters_trash_album_and_complete_dates(self):
+        self.login()
+        self.client.search({'isTrashed':True})
+        body=ImmichFixture.requests[-1][2]
+        self.assertEqual(body['filter']['trashedAt'],{'ne':None})
+        self.assertNotIn('isTrashed',body)
+        self.client.search({'albumIds':['album'],'visibility':None})
+        body=ImmichFixture.requests[-1][2]
+        self.assertEqual(body['filter']['albumIds'],{'any':['album']})
+        self.assertEqual(body['filter']['trashedAt'],{'eq':None})
+        self.assertEqual(body['filter']['visibility'],{'in':['timeline','archive']})
+        self.assertEqual(self.client.time_buckets()[-1]['timeBucket'],'2018-01-01')
+        self.assertEqual(len(self.client.album('album')),2)
+        self.assertFalse(any(r[1]=='/api/albums/album' for r in ImmichFixture.requests))
+
+    def test_local_subfolder_depth(self):
+        with TemporaryDirectory() as root:
+            path=Path(root);(path/'one'/'two').mkdir(parents=True)
+            for folder in [path,path/'one',path/'one'/'two']:(folder/'photo.jpg').write_bytes(b'image')
+            self.assertEqual(len(scan_folders([root],recursive=False)[0]),1)
+            self.assertEqual(len(scan_folders([root],max_depth=1)[0]),2)
+            self.assertEqual(len(scan_folders([root],max_depth=0)[0]),3)
+
     def test_admin_access_queues_and_legacy_fallback(self):
         self.login()
         self.assertEqual(self.client.admin_section('overview')['statistics']['photos'],2)
@@ -172,7 +196,7 @@ class LibraryTests(unittest.TestCase):
         private=[dict(ASSETS[0],visibility=visibility) for visibility in ('locked','hidden')]
         with patch.object(self.client,'request',return_value={'assets':{'items':private,'nextPage':None}}):
             self.assertEqual(self.client.search(),([],None))
-        with patch.object(self.client,'request',return_value={'assets':private}):
+        with patch.object(self.client,'request',return_value={'assets':{'items':private,'nextPage':None}}):
             self.assertEqual(self.client.album('album'),[])
         with patch.object(self.client,'request',return_value=private[0]):
             self.assertIsNone(self.client.collection_cover('private-cover'))
