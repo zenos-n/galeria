@@ -192,7 +192,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         header.pack_start(self.sidebar_button)
         self.period = label("January 2026", "timeline-date", margin_start=14)
         header.pack_start(self.period)
-        self.switcher = Adw.ToggleGroup()
+        self.switcher = Adw.ToggleGroup(valign=Gtk.Align.CENTER)
         self.switcher.add_css_class("round")
         for name, title in [("years", "Years"), ("months", "Months"), ("all", "All Photos")]:
             self.switcher.add(Adw.Toggle(name=name, label=title))

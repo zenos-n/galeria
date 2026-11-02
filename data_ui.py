@@ -411,7 +411,7 @@ class LibraryUI:
         if page=='archive':filters['visibility']='archive'
         if page=='locked':filters['visibility']='locked'
         if page=='trash':filters.pop('visibility',None);filters['isTrashed']=True
-        next_page=int(self.next_page) if append and self.next_page else 1
+        next_page=self.next_page if append and self.next_page else 1
         if not append and not preserve_folder:self.busy_library('Loading your photos…')
         self.load_more.set_sensitive(False)
         def loaded(value):

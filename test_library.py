@@ -43,8 +43,12 @@ class ImmichFixture(BaseHTTPRequestHandler):
         if self.path.split('?')[0] in self.denied:return self.respond({},403)
         if self.path=='/api/users/me':return self.respond({'id':'user','name':'Test Administrator','email':'test@example.invalid','isAdmin':self.admin})
         if self.path.startswith('/api/search/'):
-            page=payload.get('page',1)
-            return self.respond({'assets':{'items':ASSETS[:1] if page==1 else ASSETS[1:], 'nextPage':'2' if page==1 else None}})
+            structured='filter' in payload
+            if structured and any(key in payload for key in ('page','order','visibility','albumIds')):
+                return self.respond({'message':'Deprecated fields cannot be combined with filter'},400)
+            page=2 if payload.get('cursor')=='opaque-next-page' else payload.get('page',1)
+            return self.respond({'assets':{'items':ASSETS[:1] if page==1 else ASSETS[1:],
+                'nextPage':None if structured or page!=1 else '2','nextCursor':'opaque-next-page' if structured and page==1 else None}})
         if '/thumbnail?' in self.path:return self.respond(self.thumbnail)
         if self.path=='/api/albums':return self.respond([{'id':'album','albumName':'Trips'}])
         if self.path=='/api/albums/album':return self.respond({'id':'album','albumName':'Trips','assetCount':2})
@@ -99,8 +103,8 @@ class LibraryTests(unittest.TestCase):
     def test_login_search_pages_and_authenticated_thumbnail(self):
         self.login()
         items,next_page=self.client.search()
-        self.assertEqual((items[0].filename,items[0].ratio,next_page),('mountain.jpg',1.5,'2'))
-        items,next_page=self.client.search(page=2)
+        self.assertEqual((items[0].filename,items[0].ratio,next_page),('mountain.jpg',1.5,'opaque-next-page'))
+        items,next_page=self.client.search(page=next_page)
         self.assertEqual((items[0].id,next_page),('b',None))
         self.assertEqual(self.client.thumbnail('a'),b'thumbnail')
         self.assertEqual(self.client.albums()[0]['albumName'],'Trips')
@@ -132,6 +136,23 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(self.client.time_buckets()[-1]['timeBucket'],'2018-01-01')
         self.assertEqual(len(self.client.album('album')),2)
         self.assertFalse(any(r[1]=='/api/albums/album' for r in ImmichFixture.requests))
+
+    def test_structured_paging_and_smart_search_do_not_mix_shapes(self):
+        self.login()
+        _,cursor=self.client.search()
+        body=ImmichFixture.requests[-1][2]
+        self.assertNotIn('page',body);self.assertNotIn('order',body)
+        self.assertEqual(body['orderBy'],{'field':'fileCreatedAt','direction':'desc'})
+        self.client.search(page=cursor)
+        self.assertEqual(ImmichFixture.requests[-1][2]['cursor'],'opaque-next-page')
+        _,page=self.client.search(query='landscape')
+        self.client.search(query='landscape',page=page)
+        self.assertEqual(ImmichFixture.requests[-1][2]['page'],2)
+        self.assertNotIn('filter',ImmichFixture.requests[-1][2])
+        self.client.search({'isTrashed':True},'landscape')
+        body=ImmichFixture.requests[-1][2]
+        self.assertTrue(body['withDeleted']);self.assertIn('trashedAfter',body)
+        self.assertNotIn('isTrashed',body)
 
     def test_local_subfolder_depth(self):
         with TemporaryDirectory() as root:

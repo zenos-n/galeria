@@ -11,11 +11,13 @@ def edit_user(panel,user=None):
     name=Adw.EntryRow(title='Name',text=(user or {}).get('name',''))
     email=Adw.EntryRow(title='Email',text=(user or {}).get('email',''))
     password=Adw.PasswordEntryRow(title='New password' if user else 'Password')
-    quota=Adw.EntryRow(title='Storage quota · GB (blank for unlimited)')
+    limited=Adw.SwitchRow(title='Limit storage',active=bool(user and user.get('quotaSizeInBytes') is not None))
+    quota=Adw.EntryRow(title='Storage quota · GB',visible=limited.get_active())
+    limited.connect('notify::active',lambda row,_:quota.set_visible(row.get_active()))
     if user and user.get('quotaSizeInBytes') is not None:quota.set_text(str(user['quotaSizeInBytes']/1024**3))
     role=Adw.SwitchRow(title='Administrator',active=bool((user or {}).get('isAdmin')))
     change=Adw.SwitchRow(title='Require password change',active=(user or {}).get('shouldChangePassword',True))
-    for row in (name,email,password,quota,role,change):group.add(row)
+    for row in (name,email,password,limited,quota,role,change):group.add(row)
     page.add(group)
     feedback=Gtk.Label(wrap=True,css_classes=['error'],margin_top=12,margin_bottom=12)
     buttons=Adw.PreferencesGroup();buttons.add(feedback)
@@ -56,7 +58,7 @@ def edit_user(panel,user=None):
         if not user and not password.get_text():feedback.set_label('Enter an initial password.');return
         if password.get_text():fields['password']=password.get_text()
         try:
-            value=quota.get_text().strip();amount=float(value) if value else None
+            value=quota.get_text().strip();amount=float(value) if limited.get_active() else None
             if amount is not None and (amount<0 or amount!=amount):raise ValueError()
             fields['quotaSizeInBytes']=int(amount*1024**3) if amount is not None else None
         except (ValueError,OverflowError):feedback.set_label('Enter a non-negative storage quota.');return

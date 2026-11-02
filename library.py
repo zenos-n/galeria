@@ -171,10 +171,19 @@ class ImmichClient:
     def search(self, filters=None, query='', page=1):
         values={'visibility':'timeline',**(filters or {})}
         if values.get('isTrashed'):values['visibility']=None
-        body={'size':100,'page':page,'order':'desc','withExif':True}
-        if self.modern_search:body['filter']=self.search_filter(values)
+        structured=self.modern_search and not query
+        body={'size':100,'withExif':True}
+        if structured:
+            body['filter']=self.search_filter(values)
+            body['orderBy']={'field':'fileCreatedAt','direction':'desc'}
+            if page!=1:body['cursor']=str(page)
         else:
             body.update(values)
+            body['page']=int(page)
+            if not query:body['order']='desc'
+            if self.modern_search:
+                trashed=body.pop('isTrashed',False)
+                if trashed:body.update(withDeleted=True,trashedAfter='1970-01-01T00:00:00.000Z')
             if body.get('visibility') is None:body.pop('visibility',None)
         path = '/search/metadata'
         if query:
@@ -196,7 +205,7 @@ class ImmichClient:
                 cache.put(cache_key,json.dumps(response).encode())
         assets = response.get('assets', {})
         items=[media_from_asset(asset) for asset in assets.get('items', []) if asset.get('visibility')!='hidden' and (locked or asset.get('visibility')!='locked')]
-        return items, assets.get('nextPage')
+        return items, assets.get('nextCursor') if structured else assets.get('nextPage')
 
     def time_buckets(self,filters=None):
         options={'visibility':'timeline','order':'desc'}
@@ -241,7 +250,7 @@ class ImmichClient:
             batch,next_page=self.search({'albumIds':[album_id],'visibility':None},page=page)
             items.extend(batch)
             if not next_page:break
-            page=int(next_page)
+            page=next_page
         return items
 
     def thumbnail(self, asset_id, preview=False):
