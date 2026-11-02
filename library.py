@@ -304,7 +304,9 @@ class ImmichClient:
             result=self.request('/people?size=1000&withHidden=false')
             return result.get('people',[]) if isinstance(result,dict) else result
         if kind=='tags':return self.request('/tags')
-        if kind=='duplicates':return self.request('/duplicates')
+        if kind=='duplicates':
+            groups=[dict(group,assets=[asset for asset in group.get('assets',[]) if asset.get('visibility') not in ('locked','hidden')]) for group in self.request('/duplicates')]
+            return [group for group in groups if group['assets']]
         if kind=='sharing':return [album for album in self.albums() if album.get('shared') or album.get('hasSharedLink') or len(album.get('albumUsers',[]))>1]
         if kind=='map':return self.request('/map/markers')
         return self.albums()

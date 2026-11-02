@@ -200,6 +200,8 @@ class LibraryTests(unittest.TestCase):
             self.assertEqual(self.client.album('album'),[])
         with patch.object(self.client,'request',return_value=private[0]):
             self.assertIsNone(self.client.collection_cover('private-cover'))
+        with patch.object(self.client,'request',return_value=[{'duplicateId':'private','assets':private}]):
+            self.assertEqual(self.client.collection('duplicates'),[])
         self.assertIsNone(self.client.media_cache().get('cover-info:private-cover'))
 
     def test_recursive_local_discovery_deduplicates_and_skips_symlinks(self):

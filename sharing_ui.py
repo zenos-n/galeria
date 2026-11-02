@@ -9,6 +9,7 @@ class SharingDialog(Adw.PreferencesDialog):
         super().__init__(title='Share album' if album else 'Share media',content_width=480,content_height=680)
         self.window=window;self.client=window.client;self.album=album;self.asset_ids=asset_ids or []
         self.closed=False;self.owner=not album
+        self.link_generation=0;self.member_generation=0
         self.connect('closed',lambda *_:setattr(self,'closed',True))
         self.page=Adw.PreferencesPage(title='Sharing')
         self.page.set_description(album.get('albumName','Album') if album else f'{len(self.asset_ids)} selected '+('item' if len(self.asset_ids)==1 else 'items'))
@@ -44,8 +45,9 @@ class SharingDialog(Adw.PreferencesDialog):
 
     def load_links(self):
         if self.closed:return
+        self.link_generation+=1;generation=self.link_generation
         def loaded(values):
-            if self.closed:return
+            if self.closed or generation!=self.link_generation:return
             for row in self.link_rows:self.links.remove(row)
             self.link_rows=[]
             for value in values:
@@ -89,8 +91,9 @@ class SharingDialog(Adw.PreferencesDialog):
 
     def load_members(self):
         if self.closed:return
+        self.member_generation+=1;generation=self.member_generation
         def loaded(album):
-            if self.closed:return
+            if self.closed or generation!=self.member_generation:return
             self.owner=album.get('ownerId')==self.client.user['id']
             self.create.set_sensitive(self.owner);self.options.set_visible(self.owner);self.invites.set_visible(self.owner)
             for row in self.member_rows:self.members.remove(row)
