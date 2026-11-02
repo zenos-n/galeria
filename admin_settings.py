@@ -80,4 +80,5 @@ def edit_library(panel,library=None):
         if not library:fields['ownerId']=panel.client.user['id']
         panel.window.background(lambda:panel.client.request('/libraries/'+library['id'],fields,method='PUT') if library else panel.client.request('/libraries',fields),
             lambda _:(dialog.close(),panel.refresh()),lambda message:(save.set_sensitive(True),feedback.set_label(message)))
-    save.connect('clicked',submit);toolbar.set_content(page);dialog.set_child(toolbar);dialog.present(panel.window)
+    save.connect('clicked',submit);toolbar.set_content(page);dialog.set_child(toolbar)
+    panel.library_dialog=dialog;dialog.present(panel.window)

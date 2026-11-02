@@ -58,6 +58,7 @@ class ImmichFixture(BaseHTTPRequestHandler):
             return self.respond([{'id':'user','name':'Test Administrator','email':'test@example.invalid','isAdmin':True,'quotaUsageInBytes':1000000}])
         if self.path=='/api/system-config':return self.respond(payload if self.command=='PUT' else {'logging':{'enabled':True,'level':'log'},'trash':{'days':30}})
         if self.path=='/api/libraries':return self.respond([{'id':'external','name':'Camera','importPaths':['/photos']}])
+        if self.path.startswith('/api/libraries/'):return self.respond(payload or {})
         if self.path=='/api/auth/session/unlock':return self.respond(None,204)
         if self.path=='/api/sessions':return self.respond([{'id':'session','current':True}])
         if self.path=='/api/sessions/session/lock':return self.respond(None,204)
@@ -173,6 +174,9 @@ class LibraryTests(unittest.TestCase):
             self.assertEqual(self.client.search(),([],None))
         with patch.object(self.client,'request',return_value={'assets':private}):
             self.assertEqual(self.client.album('album'),[])
+        with patch.object(self.client,'request',return_value=private[0]):
+            self.assertIsNone(self.client.collection_cover('private-cover'))
+        self.assertIsNone(self.client.media_cache().get('cover-info:private-cover'))
 
     def test_recursive_local_discovery_deduplicates_and_skips_symlinks(self):
         with TemporaryDirectory() as root:

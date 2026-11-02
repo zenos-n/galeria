@@ -40,6 +40,8 @@ def unlock_folder(window):
             client.unlock(value,password)
             return MediaCache(client.identity+'|locked|'+hashlib.sha256(key).hexdigest(),key=key,budget=None) if key else None
         def done(vault):
+            window.data_generation+=1
+            window.pending_images.clear()
             window.vault=vault
             window.texture_cache.clear()
             window.preferences['vault_sync']=keep;window.save_preferences()

@@ -93,6 +93,7 @@ class ImmichClient:
         self.http = build_opener(NoRedirects())
         self.cache=None
         self.locked_until=0
+        self.server_lock_pending=False
 
     @property
     def identity(self):return self.base+'|'+str((self.user or {}).get('id',''))
@@ -148,6 +149,7 @@ class ImmichClient:
             path = '/search/smart'
             body['query'] = query
         locked=body.get('visibility')=='locked'
+        if not locked and self.server_lock_pending:self.lock_session()
         if locked and time.monotonic()>=self.locked_until:
             raise LibraryError('Unlock the locked folder first.',403)
         cache=self.media_cache()
@@ -177,6 +179,7 @@ class ImmichClient:
         key=self.image_key(item,preview)
         locked=item.metadata.get('visibility')=='locked'
         cache=vault if locked else self.media_cache()
+        if not locked and not item.metadata.get('visibility') and (self.locked_until or self.server_lock_pending):cache=None
         def load():
             try:return self.thumbnail(item.id,preview)
             except LibraryError as error:
@@ -187,6 +190,14 @@ class ImmichClient:
     def image_key(self,item,preview=False):
         version=item.metadata.get('updatedAt') or item.metadata.get('checksum') or ''
         return f'{item.id}:{version}:{"preview" if preview else "thumbnail"}'
+
+    def collection_cover(self,asset_id):
+        cache=self.media_cache();key='cover-info:'+asset_id
+        data=cache.get(key,30)
+        asset=json.loads(data) if data else self.request('/assets/'+quote(asset_id,safe=''))
+        if asset.get('visibility') in ('locked','hidden'):return None
+        if not data:cache.put(key,json.dumps(asset).encode())
+        return media_from_asset(asset)
 
     def users_create(self,fields):
         return self.request('/admin/users',fields)
@@ -210,10 +221,13 @@ class ImmichClient:
 
     def lock_session(self):
         self.locked_until=0
+        self.server_lock_pending=True
         session=next((s for s in self.request('/sessions') if s.get('current')),None)
         if session:self.request('/sessions/'+quote(session['id'],safe='')+'/lock',{},method='POST')
+        self.server_lock_pending=False
 
     def collection(self,kind):
+        if self.server_lock_pending:self.lock_session()
         if kind=='people':
             result=self.request('/people?size=1000&withHidden=false')
             return result.get('people',[]) if isinstance(result,dict) else result

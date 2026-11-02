@@ -66,6 +66,7 @@ class LibraryUI:
                 client.token=secret_get(client.base+'|'+self.preferences['user_id'],'session')
                 if not client.token:return None
                 client.user=client.request('/users/me')
+                client.lock_session()
                 return client
             self.busy_library('Reconnecting to your library…')
             self.background(restore,lambda client:self.connect_immich(client) if client else self.welcome(),lambda _:self.welcome())
@@ -135,6 +136,7 @@ class LibraryUI:
         self.lock_button.set_visible(False)
         if client:
             client.locked_until=0
+            client.server_lock_pending=True
             self.background(client.lock_session,lambda _:None)
         if refresh:
             if self.viewer:
@@ -258,7 +260,7 @@ class LibraryUI:
         self.local_items=[]
         self.texture_cache.clear()
         self.pending_images.clear()
-        self.preferences.update(mode='immich',server=client.base,user_id=client.user['id'])
+        self.preferences.update(mode='immich',server=client.base,user_id=client.user['id'],email=client.user.get('email',''))
         self.save_preferences()
         self.search.set_mode('immich')
         self.source_label.set_label(client.user.get('name') or client.user.get('email') or 'Immich')
@@ -364,6 +366,10 @@ class LibraryUI:
         self.media_items=sorted({item.id:item for item in items}.values(),key=lambda item:item.created,reverse=True)
         old=self.mosaic
         mosaic=Mosaic(self.open_viewer,self.media_items)
+        if append:
+            selected={old.tiles[i].media_item.id for i in old.selected}
+            mosaic.selection_mode=old.selection_mode
+            mosaic.selected={i for i,tile in enumerate(mosaic.tiles) if tile.media_item.id in selected}
         mosaic.mode=self.switcher.get_active_name() if self.current_page=='library' else 'all'
         mosaic.target=old.target
         mosaic.show_durations=old.show_durations
@@ -372,8 +378,10 @@ class LibraryUI:
         mosaic.rebuild()
         mosaic.on_selection=self.selection_changed
         self.mosaic=mosaic
+        self.pending_images.clear()
         self.scroller.set_child(mosaic)
         old.dispose()
+        mosaic.update_selection()
         self.selection_changed()
         newest=self.media_items[0].created if self.media_items else None
         self.period.set_label('Library' if mosaic.mode=='years' else newest.strftime('%Y' if mosaic.mode=='months' else '%B %Y') if newest else 'Library')
@@ -431,6 +439,7 @@ class LibraryUI:
         client=self.client
         vault=self.vault
         def load():
+            if self.mosaic!=mosaic:return None
             if item.path:
                 stat=Path(item.path).stat()
                 data=self.disk_cache.fetch(f'{item.path}:{stat.st_mtime_ns}:{stat.st_size}',lambda:thumbnail_bytes(item.path))
@@ -474,6 +483,7 @@ class LibraryUI:
         client=self.client
         vault=self.vault
         def load():
+            if not self.viewer or self.viewer.stage!=stage:return None
             return decode_image(item.path if item.path else client.image_bytes(item,True,vault),2400)
         def ready(value):
             if not self.viewer or self.viewer.stage!=stage:return

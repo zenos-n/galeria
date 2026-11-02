@@ -106,12 +106,16 @@ def collection_view(window,kind):
                 button.add_controller(context)
             if cover or kind=='people':
                 def image(value=value,cover=cover):
+                    if window.current_page!=kind or generation!=window.search_generation:return None
                     if kind=='people':
                         blob=client.media_cache().fetch('person:'+value['id']+str(value.get('updatedAt','')),
                             lambda:client.request('/people/'+value['id']+'/thumbnail',binary=True))
-                    else:blob=client.image_bytes(MediaItem(cover,'',datetime(1970,1,1)))
+                    else:
+                        item=client.collection_cover(cover)
+                        if item is None:return None
+                        blob=client.image_bytes(item)
                     return decode_image(blob)
-                window.background(image,lambda pixels,picture=picture:picture.set_paintable(window.texture_from_pixels(pixels)),lambda _:None,images=True)
+                window.background(image,lambda pixels,picture=picture:picture.set_paintable(window.texture_from_pixels(pixels)) if pixels else None,lambda _:None,images=True)
         previous=window.stack.get_child_by_name('collections')
         if previous:window.stack.remove(previous)
         wrapper=Gtk.Box(orientation=Gtk.Orientation.VERTICAL)

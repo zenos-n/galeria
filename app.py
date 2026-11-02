@@ -436,8 +436,10 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         body.append(label("Your Immich library", "title-2"))
         group = Adw.PreferencesGroup()
         self.server_entry = Adw.EntryRow(title="Server address")
+        self.server_entry.set_text(self.preferences.get('server',''))
         self.server_entry.set_input_purpose(Gtk.InputPurpose.URL)
         self.email_entry = Adw.EntryRow(title="Email")
+        self.email_entry.set_text(self.preferences.get('email',''))
         self.email_entry.set_input_purpose(Gtk.InputPurpose.EMAIL)
         self.password_entry = Adw.PasswordEntryRow(title="Password")
         for row in (self.server_entry, self.email_entry, self.password_entry):
