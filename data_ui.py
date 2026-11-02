@@ -657,6 +657,7 @@ class LibraryUI:
 
     def load_visible_thumbnails(self,*_):
         if not hasattr(self,'mosaic') or not hasattr(self,'load_more'):return
+        self.year_scrollbar.queue_refresh()
         adjustment=self.scroller.get_vadjustment()
         top=adjustment.get_value();height=adjustment.get_page_size()
         mosaic=self.mosaic

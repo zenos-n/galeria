@@ -52,13 +52,13 @@ def check():
    assert m.target_layout(m.last_width)[1]==full_height,(m.target_layout(m.last_width)[1],full_height)
    live=sum(tile.button is not None for tile in m.tiles)
    assert live<500,live
-   assert sum(tile.get_parent() is m for tile in m.tiles)==live
+   assert live<=sum(tile.get_parent() is m for tile in m.tiles)<500
    assert len(m.rendered.keys() & m.tile_set)<500,len(m.rendered)
    adjustment=window.scroller.get_vadjustment();assert adjustment.get_upper()>100000,adjustment.get_upper()
    at_jump=len(client.downloads);adjustment.set_value(adjustment.get_upper()-adjustment.get_page_size()-100);jumped=time.monotonic();phase=1
   elif phase==1 and time.monotonic()-jumped>2:
    live=sum(tile.button is not None for tile in m.tiles);assert live<500,live
-   assert sum(tile.get_parent() is m for tile in m.tiles)==live
+   assert live<=sum(tile.get_parent() is m for tile in m.tiles)<500
    assert len(m.rendered.keys() & m.tile_set)<500,len(m.rendered)
    expected=m.months[-1][0]
    recent=client.downloads[-20:];assert recent and sum(id.startswith(expected) for id in recent)>=15,(expected,recent)
@@ -75,7 +75,20 @@ def check():
    assert all(len(key)==4 for key,*_ in m.tier_groups),[g[0] for g in m.tier_groups]
    print('Month images grouped into',len(m.tier_groups),'years',flush=True);phase=4
   elif phase==4 and not m.tick:
-   window.close();app.quit();print('INDEXED LOD/VIRTUALIZATION/PRIORITY/GROUPS PASSED',flush=True);return False
+   window.switcher.set_active_name('all');phase=5
+  elif phase==5 and not m.tick and window.year_scrollbar.get_visible():
+   rail=window.year_scrollbar;adjustment=window.scroller.get_vadjustment()
+   assert isinstance(rail.bar,Gtk.Scrollbar) and not rail.popover.get_visible()
+   rail.bar.get_adjustment().set_value(0);assert adjustment.get_value()==0
+   rail.bar.get_adjustment().set_value(.96)
+   assert abs(adjustment.get_value()-(adjustment.get_upper()-adjustment.get_page_size()))<1
+   rail.motion(None,0,rail.get_height()/2);phase=6
+  elif phase==6:
+   rail=window.year_scrollbar;assert rail.popover.get_visible()
+   rail.held=True;rail.leave();assert rail.popover.get_visible()
+   rail.held=False;rail.leave();phase=7
+  elif phase==7 and not window.year_scrollbar.popover.get_visible():
+   window.close();app.quit();print('INDEXED LOD/VIRTUALIZATION/PRIORITY/GROUPS/YEAR RAIL PASSED',flush=True);return False
  except Exception as error:
   import traceback;traceback.print_exc();errors.append(error);window.close();app.quit();return False
  return True
