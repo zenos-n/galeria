@@ -42,7 +42,11 @@ def collection_view(window,kind):
         query=window.search.entry.get_text().strip().casefold()
         if query:data=[value for value in data if query in str(value.get('albumName') or value.get('value') or value.get('name') or '').casefold()]
         if kind=='map':
-            data=[dict(marker,name=f"{marker.get('lat',marker.get('latitude',0)):.4f}, {marker.get('lon',marker.get('longitude',0)):.4f}") for marker in data]
+            from map_ui import PhotoMap
+            previous=window.stack.get_child_by_name('collections')
+            if previous:window.stack.remove(previous)
+            page=PhotoMap(window,client,data);window.stack.add_named(page,'collections')
+            window.stack.set_visible_child_name('collections');return
         from collection_widgets import collection_grid,tag_list,location_list
         refresh=lambda:collection_view(window,kind)
         view=tag_list(window,data,refresh) if kind=='tags' else location_list(window,data) if kind=='map' else collection_grid(window,client,kind,data,generation,refresh)

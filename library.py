@@ -7,8 +7,8 @@ import time
 import re
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode, urlsplit, urlunsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.parse import quote, urlencode, urlsplit, urlunsplit, urljoin
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 
 class LibraryError(Exception):
@@ -165,11 +165,17 @@ class ImmichClient:
             elif key=='isNotInAlbum':result['hasAlbums']={'eq':not value}
             elif key=='visibility' and value is None:result[key]={'in':['timeline','archive']}
             elif key=='ocr':result[key]={'matches':value}
+            elif key=='id' and isinstance(value,list):result['or']=[{'id':{'eq':item}} for item in value]
             else:result[key]={'eq':value}
         return result
 
     def search(self, filters=None, query='', page=1):
         values={'visibility':'timeline',**(filters or {})}
+        if values.get('id')==[]:return [],None
+        if isinstance(values.get('id'),list) and not self.modern_search:
+            offset=(int(page)-1)*100;ids=values['id']
+            items=[self.collection_cover(id) for id in ids[offset:offset+100]]
+            return [item for item in items if item is not None],str(int(page)+1) if offset+100<len(ids) else None
         if values.get('isTrashed'):values['visibility']=None
         structured=self.modern_search and not query
         body={'size':100,'withExif':True}
@@ -214,6 +220,34 @@ class ImmichClient:
             elif key in ('albumIds','personIds','tagIds') and len(value)==1:options[key[:-1]]=value[0]
         path='/timeline/buckets?'+urlencode({key:value for key,value in options.items() if value is not None})
         return self.media_cache().json('buckets:'+path,lambda:self.request(path),30)
+
+    def map_style(self,dark):
+        config=self.media_cache().json('public-config',lambda:self.request('/server/config'),300)
+        url=config.get('mapDarkStyleUrl' if dark else 'mapLightStyleUrl','')
+        parsed=urlsplit(url)
+        if parsed.scheme not in ('http','https') or parsed.username or parsed.password:
+            raise LibraryError('The server has no supported map style URL.')
+        def load():
+            # Map providers never receive the Immich session token.
+            try:
+                def document(address):
+                    parsed=urlsplit(address)
+                    if parsed.scheme not in ('http','https') or parsed.username or parsed.password:raise ValueError()
+                    with urlopen(Request(address,headers={'User-Agent':'Galeria/0.6.0'}),timeout=20) as response:blob=response.read(2*1024*1024+1)
+                    if len(blob)>2*1024*1024:raise ValueError()
+                    return json.loads(blob)
+                style=document(url)
+                if style.get('version')!=8:raise ValueError()
+                # Shumate requires inline TileJSON rather than source URL references.
+                for source in style.get('sources',{}).values():
+                    if 'url' in source:
+                        address=urljoin(url,source.pop('url'))
+                        tiles=document(address)
+                        source.update({key:tiles[key] for key in ('tiles','minzoom','maxzoom','bounds','scheme','attribution') if key in tiles})
+                        source['tiles']=[urljoin(address,tile) for tile in source.get('tiles',[])]
+                return style
+            except (OSError,ValueError):raise LibraryError('The map style could not be loaded.') from None
+        return self.media_cache().json('map-style-inline-v1:'+url,load,3600)
 
     def share_album(self,album_id,options):
         return self.request('/shared-links',dict(options,type='ALBUM',albumId=album_id))

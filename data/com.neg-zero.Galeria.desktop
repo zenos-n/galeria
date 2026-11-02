@@ -8,4 +8,9 @@ Icon=com.neg-zero.Galeria
 Terminal=false
 Categories=Graphics;Photography;Viewer;
 StartupNotify=true
+Actions=SyncFolders;
 MimeType=image/jpeg;image/png;image/webp;image/avif;image/gif;image/bmp;image/tiff;video/mp4;video/webm;video/quicktime;video/x-matroska;
+
+[Desktop Action SyncFolders]
+Name=Folder sync
+Exec=galeria --folder-sync

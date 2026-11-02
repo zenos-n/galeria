@@ -17,6 +17,7 @@ from session_store import preferences_read,preferences_write,secret_get,secret_p
 class LibraryUI:
     def init_data(self):
         self.client=None
+        self.data_stopped=False
         self.preferences=preferences_read()
         self.collection_items=None
         self.media_items=[]
@@ -42,9 +43,20 @@ class LibraryUI:
         self.previews=ThreadPoolExecutor(max_workers=2,thread_name_prefix='gallery-preview')
         self.video_io=ThreadPoolExecutor(max_workers=2,thread_name_prefix='gallery-video')
         self.video_proxy=None;self.video_prefetch=set()
-        self.connect('close-request',self.stop_data)
+        self.connect('close-request',self.request_close)
+
+    def request_close(self,*_):
+        app=self.get_application()
+        if getattr(app,'background_enabled',False) and not getattr(app,'quitting',False):
+            if self.viewer and self.viewer.stage.video_player:self.viewer.stage.video_player.pause()
+            if self.client and self.client.locked_until:self.lock_folder(refresh=self.current_page=='locked')
+            self.set_visible(False);app.emit_state();return True
+        if getattr(app,'window',None)==self:app.window=None
+        return self.stop_data()
 
     def stop_data(self,*_):
+        if self.data_stopped:return False
+        self.data_stopped=True
         self.data_generation+=1
         self.io.shutdown(wait=False,cancel_futures=True)
         self.images.shutdown(wait=False,cancel_futures=True)
@@ -107,10 +119,12 @@ class LibraryUI:
         self.background(clear_session,lambda _:None,lambda _:None)
         self.welcome()
 
-    def restore_last_library(self):
+    def restore_last_library(self,done=None):
         mode=self.preferences.get('mode')
         if mode=='local' and self.preferences.get('folders'):
-            self.connect_local(self.preferences['folders']);return False
+            self.connect_local(self.preferences['folders'])
+            if done:done()
+            return False
         if mode=='immich' and self.preferences.get('remember'):
             def restore():
                 client=ImmichClient(self.preferences['server'])
@@ -121,8 +135,13 @@ class LibraryUI:
                 client.lock_session()
                 return client
             self.busy_library('Reconnecting to your library…')
-            self.background(restore,lambda client:self.connect_immich(client) if client else self.welcome(),lambda _:self.welcome())
-        else:self.welcome()
+            def finished(client):
+                self.connect_immich(client) if client else self.welcome()
+                if done:done()
+            self.background(restore,finished,lambda _:finished(None))
+        else:
+            self.welcome()
+            if done:done()
         return False
 
     def activate_album(self,album_id):
@@ -167,6 +186,7 @@ class LibraryUI:
     def open_collection(self,title,filters=None,items=None):
         self.search_generation+=1
         self.current_page='collection'
+        self.grid_page=True
         self.collection_items=items
         self.scope_filters=filters or {}
         self.page_title.set_label(title)

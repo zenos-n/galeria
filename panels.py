@@ -209,6 +209,25 @@ def preferences(window):
     durations.connect("notify::active", lambda w, _: window.set_durations(w.get_active()))
     appearance.add(durations)
     general.add(appearance)
+    app=window.get_application()
+    if hasattr(app,'login_startup'):
+        startup=Adw.PreferencesGroup(title='Startup')
+        login=Adw.SwitchRow(title='Start at login',subtitle='Start in the background when you sign in',active=app.login_startup.enabled(),sensitive=not app.login_startup.managed())
+        if app.login_startup.managed():login.set_subtitle('Controlled by your ZenOS configuration')
+        changing={'value':False}
+        def startup_changed(row,_param):
+            if changing['value']:return
+            enabled=row.get_active();row.set_sensitive(False)
+            def done(_):row.set_sensitive(True)
+            def failed(message):
+                changing['value']=True;row.set_active(not enabled);changing['value']=False
+                row.set_sensitive(True);window.notice(message)
+            window.background(lambda:app.login_startup.set_enabled(enabled),done,failed)
+        login.connect('notify::active',startup_changed);startup.add(login)
+        background=Adw.SwitchRow(title='Keep running in the background',subtitle='Keep Galeria available from Quick Settings after closing its window',active=app.background_enabled)
+        app.bind_property('background-enabled',background,'active',GObject.BindingFlags.SYNC_CREATE)
+        background.connect('notify::active',lambda row,_:app.set_background(row.get_active(),persist=True))
+        startup.add(background);general.add(startup)
     source = Adw.PreferencesGroup(title="Library")
     library = Adw.ActionRow(title="Library source", subtitle=window.source_label.get_label())
     choose = Gtk.Button(label="Choose…", valign=Gtk.Align.CENTER)

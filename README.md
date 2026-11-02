@@ -4,6 +4,11 @@ Native GTK4/libadwaita gallery for local folders and Immich, based on the suppli
 
 Run `./run` on this ZenOS/Nix machine. The launcher builds an isolated package; it does not change the system configuration.
 
+The flake supports `x86_64-linux` and `aarch64-linux`: `nix run` opens Galeria,
+`nix build` builds it, and `nix develop` opens its Python/GTK development shell.
+`nix run .#sync -- --help` runs the folder-sync service CLI. Nixpkgs is locked;
+the app's NAPL license is allowed only for Galeria inside these outputs.
+
 The welcome dialog routes **Yes, use Immich** to server/email/password sign-in and **No, choose folders** to the native multiple-folder picker. Sign-in loads albums, media and authenticated thumbnails/previews. Passwords are cleared on submission. Remember this account stores the session in the system Secret Service keyring; server/account identity and selected local folders are saved in private app preferences. OAuth is not implemented.
 
 Local mode recursively discovers images and videos without modifying files or following symlinks. Images render thumbnails/previews, including WebP and AVIF, decoded off the GTK thread. Dates currently use filesystem modification times; filename search is local and case-insensitive. Scrolling near the end automatically loads the next batch, preserving scroll position. Images within two viewports above/below are requested; viewer previews have a separate worker queue. Clapper/GStreamer plays local and authenticated remote videos with buffering feedback and native controls. Nearby videos preload a bounded 2 MiB prefix. The loopback range bridge keeps credentials out of player URLs and uses encrypted caching for locked videos.
@@ -46,8 +51,19 @@ Search toggles from the sidebar and replaces the main header controls; Escape or
 
 **Hamburger → Folder sync** configures upload-only rules per account: library or album destination, include/exclude subfolders, and maximum subfolder depth (0 is unlimited). Enabling uploads explicitly stores the session in the system keyring and installs/enables the app-owned `gallery-folder-sync.service` user service. It continues while the app is closed. A private SQLite journal skips unchanged files, checksum checks avoid duplicate uploads, changed files upload as new assets, and a stable-file check defers files still being written. The service never edits originals or mirrors deletions. Pausing/removing a rule stops it at file boundaries; an in-flight upload can finish. Disabling all accounts stops the service. No service was enabled against a production account during development.
 
-Folder sync, sharing and remote playback were verified against loopback fixtures, not the user's production server. Google Photos processing/AI parity, graphical maps, offline locked-vault browsing and viewer downloads remain unfinished.
+Folder sync, sharing and remote playback were verified against loopback fixtures, not the user's production server. Google Photos processing/AI parity, offline locked-vault browsing and viewer downloads remain unfinished.
 
 The app is now **Galeria**, application ID `com.neg-zero.Galeria`, executable `galeria`. Desktop Open With accepts supported image/video files and directories; a single file opens in the viewer. Existing `gallery` configuration/cache/state directories and the folder-sync service name are retained for compatibility. Keyring reads fall back to the old schema and migrate entries to the Galeria schema; sign-out clears both. No stored library, sync rule, or encrypted vault key is discarded.
 
 The ZenPkgs package is `pkgs.com.neg-zero.Galeria` (category alias `pkgs.byCategories.apps.graphics.galeria`). Enable it with `users.<name>.programs.galeria.enable = true;` or the corresponding system program defaults. `defaultViewer = true` optionally assigns supported image/video MIME types; its default is false. Accounts, credentials, preferences, caches and folder-sync rules stay writable and managed by the app.
+
+Map uses libshumate with the server's configured map style, clustering geotagged
+photos as you pan and zoom. Click a cluster to zoom in or a photo to browse that
+location. OpenStreetMap is the fallback when the server style is unavailable.
+External map providers receive no Immich session token.
+
+Preferences offers **Start at login** (starts without a window) and **Keep running
+in the background**. Closing the window hides it when background mode is enabled;
+Ctrl+Q or Quit Galeria exits. Folder uploads use their independent sync service.
+The optional [GNOME helper](https://github.com/zenos-n/galeria-gnome-extension)
+adds Open, Folder sync, Sync now and background controls to Quick Settings.

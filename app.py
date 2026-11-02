@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Native GTK gallery for local folders and Immich."""
 from pathlib import Path
+import os
 import sys
+import threading
 import time
 
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gsk, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Graphene, Gsk, Gtk
 
 from layout import justified_rows
 from panels import AlbumTree, Uploads, import_sheet, preferences, share_sheet
@@ -119,6 +121,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         menu.append('Folder sync','win.sync')
         menu.append("Preferences", "win.preferences")
         menu.append("About Galeria", "win.about")
+        menu.append('Quit Galeria','app.quit')
         menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
         menu_button.add_css_class("flat")
         header.pack_end(menu_button)
@@ -330,6 +333,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.hamburger_menu.remove_all()
         for title,action in [('Choose library…','source'),('Refresh library','refresh'),('Folder sync','sync')]+([('Administration','admin')] if admin else [])+[('Preferences','preferences'),('About Galeria','about')]:
             self.hamburger_menu.append(title,'win.'+action)
+        self.hamburger_menu.append('Quit Galeria','app.quit')
         self.avatar.set_text(self.client.user.get('name','') if self.client else 'Galeria')
         self.avatar.set_show_initials(bool(self.client))
 
@@ -436,7 +440,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.5.0", developer_name="Negative Zero",
+                                 version="0.6.0", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 
@@ -561,22 +565,88 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
 
 class Gallery(Adw.Application):
+    background_enabled=GObject.Property(type=bool,default=False)
     def __init__(self):
-        super().__init__(application_id="com.neg-zero.Galeria", flags=Gio.ApplicationFlags.HANDLES_OPEN)
+        super().__init__(application_id="com.neg-zero.Galeria", flags=Gio.ApplicationFlags.HANDLES_OPEN|Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.window=None;self.background_enabled=False;self.quitting=False;self.control=None;self.pending_sync=False
+        self.add_main_option('background',0,GLib.OptionFlags.NONE,GLib.OptionArg.NONE,'Start without opening a window',None)
+        self.add_main_option('folder-sync',0,GLib.OptionFlags.NONE,GLib.OptionArg.NONE,'Open folder syncing',None)
+        self.add_main_option(GLib.OPTION_REMAINING,0,GLib.OptionFlags.NONE,GLib.OptionArg.FILENAME_ARRAY,'Media files or folders','FILES')
+        quit_action=Gio.SimpleAction.new('quit',None);quit_action.connect('activate',lambda *_:self.force_quit());self.add_action(quit_action)
+        self.set_accels_for_action('app.quit',['<Control>q'])
+
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        from startup import LoginStartup
+        from desktop_control import DesktopControl
+        from session_store import preferences_read
+        Gtk.Window.set_default_icon_name('com.neg-zero.Galeria')
+        self.login_startup=LoginStartup()
+        self.set_background(preferences_read().get('background',False))
+        self.control=DesktopControl(self,self.get_dbus_connection())
+        def refresh_login():
+            try:self.login_startup.refresh()
+            except (OSError,LibraryError):pass
+        threading.Thread(target=refresh_login,daemon=True).start()
+
+    def set_background(self,enabled,persist=False):
+        if persist:
+            from session_store import preferences_read,preferences_write
+            prefs=self.window.preferences if self.window else preferences_read()
+            prefs['background']=bool(enabled);preferences_write(prefs)
+        if self.background_enabled!=enabled:
+            self.background_enabled=bool(enabled)
+            self.hold() if enabled else self.release()
+        if not enabled and self.window and not self.window.get_visible():self.window.present()
+        self.emit_state()
+
+    def emit_state(self):
+        if self.control:self.control.emit()
+
+    def force_quit(self):
+        self.quitting=True
+        if self.window:self.window.close()
+        self.quit();return False
+
+    def do_shutdown(self):
+        if self.window:self.window.stop_data()
+        if self.control:self.control.close()
+        Adw.Application.do_shutdown(self)
 
     def ensure_window(self):
-        if self.get_active_window():
-            self.get_active_window().present()
+        if self.window is not None and not self.window.data_stopped:
+            self.window.present()
             return False
         provider = Gtk.CssProvider()
         provider.load_from_path(str(Path(__file__).with_name("style.css")))
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.window = GalleryWindow(self)
+        self.window.connect('notify::visible',lambda *_:self.emit_state())
         self.window.present()
         return True
 
     def do_activate(self):
-        if self.ensure_window():GLib.idle_add(self.window.restore_last_library)
+        if self.ensure_window():GLib.idle_add(self.window.restore_last_library,self.finish_pending_sync)
+        else:self.finish_pending_sync()
+
+    def open_folder_sync(self):
+        self.pending_sync=True;self.activate()
+
+    def finish_pending_sync(self):
+        if self.pending_sync and self.window:
+            self.pending_sync=False
+            if self.window.dialog and self.window.dialog.get_mapped() and self.window.dialog.get_title()=='Welcome to Galeria':self.window.dialog.close()
+            self.window.show_folder_sync()
+
+    def do_command_line(self,command_line):
+        options=command_line.get_options_dict()
+        values=options.lookup_value(GLib.OPTION_REMAINING,None)
+        arguments=[os.fsdecode(value) for value in values.get_bytestring_array()] if values else []
+        if options.contains('background'):self.set_background(True)
+        if arguments:self.do_open([command_line.create_file_for_arg(value) for value in arguments],len(arguments),'')
+        elif options.contains('folder-sync'):self.open_folder_sync()
+        elif not options.contains('background'):self.activate()
+        return 0
 
     def do_open(self,files,_count,_hint):
         self.ensure_window()

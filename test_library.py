@@ -39,7 +39,10 @@ class ImmichFixture(BaseHTTPRequestHandler):
             self.send_response(302);self.send_header('Location','/api/users/me');self.end_headers();return
         if self.path=='/api/invalid':
             self.send_response(200);self.end_headers();self.wfile.write(b'not JSON');return
+        if self.path=='/map-style':return self.respond({'version':8,'sources':{'world':{'type':'vector','url':'/tile-source'}},'layers':[]})
+        if self.path=='/tile-source':return self.respond({'tiles':['/tiles/{z}/{x}/{y}.pbf'],'maxzoom':14,'attribution':'Map contributors'})
         if self.headers.get('Authorization')!='Bearer test-session':return self.respond({},401)
+        if self.path=='/api/server/config':return self.respond({'mapDarkStyleUrl':f'http://127.0.0.1:{self.server.server_port}/map-style'})
         if self.path.split('?')[0] in self.denied:return self.respond({},403)
         if self.path=='/api/users/me':return self.respond({'id':'user','name':'Test Administrator','email':'test@example.invalid','isAdmin':self.admin})
         if self.path.startswith('/api/search/'):
@@ -82,6 +85,20 @@ class ImmichFixture(BaseHTTPRequestHandler):
 
 
 class LibraryTests(unittest.TestCase):
+    def test_map_tilejson_is_inlined_cached_and_receives_no_account_token(self):
+        with TemporaryDirectory() as root,patch.dict(os.environ,{'XDG_CACHE_HOME':root}):
+            client=ImmichClient(self.address);client.token='test-session';client.user={'id':'map-test'}
+            ImmichFixture.requests=[]
+            style=client.map_style(True)
+            source=style['sources']['world']
+            self.assertNotIn('url',source)
+            self.assertEqual(source['tiles'],[self.address+'/tiles/{z}/{x}/{y}.pbf'])
+            self.assertEqual(source['maxzoom'],14)
+            count=len(ImmichFixture.requests);self.assertEqual(client.map_style(True),style)
+            self.assertEqual(len(ImmichFixture.requests),count)
+            external=[entry for entry in ImmichFixture.requests if entry[1] in ('/map-style','/tile-source')]
+            self.assertEqual(len(external),2);self.assertTrue(all(entry[3] is None for entry in external))
+
     @classmethod
     def setUpClass(cls):
         cls.server=ThreadingHTTPServer(('127.0.0.1',0),ImmichFixture)
