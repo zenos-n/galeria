@@ -5,3 +5,6 @@ License: CC0-1.0; see COPYING-CC0.md.
 SVGs are unchanged; prefixed filenames prevent collisions with installed themes.
 cloud-deploy-symbolic retains the requested upstream name. Markup uses pencil,
 large-brush, eye-crossed and text from the same kit.
+# Galeria application icon
+
+`hicolor/scalable/apps/com.neg-zero.Galeria.svg` composes the bundled image paths by Jakub Steiner from GNOME's Icon Development Kit (CC0-1.0) with a purple app tile. The derivative is also CC0-1.0.

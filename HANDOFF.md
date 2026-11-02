@@ -24,3 +24,7 @@ Remaining requested work:
 - Google Photos editor parity, actual image processing/save, graphical map and offline locked-vault browsing remain unfinished from earlier iterations.
 
 Use `./run` after reboot to build/start the current source. The app-owned sync service starts only when Background uploads is enabled in Folder sync. Resume from the existing commits and preserve other sessions' work.
+
+## Resumed after reboot
+
+The user resumed work and requested a Galeria rename (`com.neg-zero.Galeria`) plus a ZenPkgs package/program module. Collection-specific layouts and real album/media sharing are now implemented. Native fixture checks cover 500 albums with bounded cover loading, circular people, compact tags, duplicate comparisons at narrow widths, link creation/password clearing, invitations and role changes. Desktop file-open and legacy keyring migration checks also pass. Remaining work listed above is historical where superseded by these changes; real-server acceptance and editor/AI parity remain pending. No further shutdown is authorized.

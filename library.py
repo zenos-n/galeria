@@ -62,10 +62,13 @@ def scan_folders(paths, probe=None,recursive=True,max_depth=0):
         errors.append(str(error))
     for root in paths:
         root = Path(root).expanduser()
-        if not root.is_dir():
+        if root.is_file() and not root.is_symlink():
+            candidates=[root] if root.suffix.lower() in IMAGE_TYPES|VIDEO_TYPES else []
+        elif root.is_dir():candidates=media_paths(root,recursive,max_depth,failed)
+        else:
             errors.append(f'Folder unavailable: {root.name}')
             continue
-        for path in media_paths(root,recursive,max_depth,failed):
+        for path in candidates:
             absolute=str(path.absolute());suffix=path.suffix.lower()
             if absolute in seen:continue
             seen.add(absolute)

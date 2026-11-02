@@ -2,4 +2,4 @@
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 result=$(nix build --impure --file default.nix --no-link --print-out-paths)
-exec "$result/bin/gallery" "$@"
+exec "$result/bin/galeria" "$@"

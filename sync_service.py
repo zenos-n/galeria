@@ -1,4 +1,4 @@
-"""Per-user background upload service; configured only by Gallery's sync UI."""
+"""Per-user background upload service; configured only by Galeria's sync UI."""
 import argparse
 import fcntl
 import json
@@ -43,7 +43,7 @@ def command(args,check=True):
 def runtime_command():
     source=Path(__file__).resolve()
     if str(source).startswith('/nix/store/'):
-        return [str(source.parents[2]/'bin/gallery-sync')]
+        return [str(source.parents[2]/'bin/galeria-sync')]
     return [sys.executable,str(source)]
 
 
@@ -51,7 +51,7 @@ def install_service():
     executable=runtime_command()
     unit_dir=Path(os.environ.get('XDG_CONFIG_HOME',Path.home()/'.config'))/'systemd'/'user'
     quote=lambda value:'"'+value.replace('\\','\\\\').replace('"','\\"').replace('%','%%')+'"'
-    text='[Unit]\nDescription=Gallery folder uploads\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart='+ ' '.join(quote(part) for part in executable)+'\nRestart=on-failure\nRestartSec=15\nTimeoutStopSec=25\n\n[Install]\nWantedBy=default.target\n'
+    text='[Unit]\nDescription=Galeria folder uploads\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart='+ ' '.join(quote(part) for part in executable)+'\nRestart=on-failure\nRestartSec=15\nTimeoutStopSec=25\n\n[Install]\nWantedBy=default.target\n'
     atomic_write(unit_dir/UNIT,text.encode())
     if executable[0].startswith('/nix/store/'):
         root=state_dir()/'sync-runtime'

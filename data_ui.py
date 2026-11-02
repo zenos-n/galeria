@@ -273,7 +273,7 @@ class LibraryUI:
         self.stack.set_visible_child_name('status')
         self.notice(message)
 
-    def connect_local(self,paths):
+    def connect_local(self,paths,focus_first=False):
         self.sync_cancel.set();self.vault=None;self.pending_media=None
         self.lock_button.set_visible(False)
         self.data_generation+=1
@@ -300,6 +300,12 @@ class LibraryUI:
             self.local_items,errors=value
             self.source_label.set_label(Path(paths[0]).name if len(paths)==1 else f'{len(paths)} folders')
             self.search_library()
+            if focus_first and self.media_items:
+                generation=self.data_generation
+                def focus():
+                    if generation==self.data_generation and not self.viewer and self.mosaic.tiles:self.open_viewer(0,self.mosaic.tiles[0])
+                    return False
+                GLib.timeout_add(80,focus)
             if errors:
                 self.notice(f'{len(errors)} files or folders could not be read.')
         self.background(lambda:scan_folders(paths,probe),loaded,self.library_failed)

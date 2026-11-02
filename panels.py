@@ -234,7 +234,7 @@ def preferences(window):
     encryption = Adw.ActionRow(title="On-device encryption", subtitle="Required for locked-folder files and thumbnails")
     encryption.add_suffix(text("Required", "dim-label"))
     locked.add(encryption)
-    locked.add(Adw.SwitchRow(title="Lock when Gallery closes", active=True))
+    locked.add(Adw.SwitchRow(title="Lock when Galeria closes", active=True))
     timeout = Adw.ComboRow(title="Lock when inactive", model=Gtk.StringList.new(["Immediately", "After 5 minutes", "After 15 minutes"]))
     timeout.set_selected(1)
     locked.add(timeout)

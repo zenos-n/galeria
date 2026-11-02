@@ -30,7 +30,7 @@ def folder_sync(window,identity=None):
     choose.set_selected(keys.index(identity))
     choose.connect('notify::selected',lambda row,_:(dialog.close(),folder_sync(window,keys[row.get_selected()])))
     connection.add(choose)
-    enabled=Adw.SwitchRow(title='Background uploads',subtitle='Continue while Gallery is closed',active=account.get('enabled',False))
+    enabled=Adw.SwitchRow(title='Background uploads',subtitle='Continue while Galeria is closed',active=account.get('enabled',False))
     connection.add(enabled);page.add(connection)
     state=Adw.PreferencesGroup(title='Status')
     state_row=Adw.ActionRow(title='Ready' if account.get('enabled') else 'Paused',subtitle=account['server'],use_markup=False)

@@ -38,7 +38,7 @@ def label(text, css=None, **kwargs):
 
 class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
     def __init__(self, app):
-        super().__init__(application=app, title="Gallery", default_width=1280, default_height=820)
+        super().__init__(application=app, title="Galeria", default_width=1280, default_height=820)
         Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(str(Path(__file__).parent / "icons"))
         self.current_page = "library"
         self.viewer_index = 0
@@ -108,7 +108,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         toolbar.add_css_class("gallery-sidebar")
         self.split.set_sidebar(toolbar)
         header = Adw.HeaderBar(show_start_title_buttons=False, show_end_title_buttons=False)
-        header.set_title_widget(label("Gallery", "heading"))
+        header.set_title_widget(label("Galeria", "heading"))
         self.search_toggle=Gtk.ToggleButton(icon_name='system-search-symbolic',tooltip_text='Search',css_classes=['flat'])
         self.search_toggle.connect('toggled',lambda widget:self.set_searching(widget.get_active()))
         header.pack_start(self.search_toggle)
@@ -118,7 +118,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         menu.append("Refresh library", "win.refresh")
         menu.append('Folder sync','win.sync')
         menu.append("Preferences", "win.preferences")
-        menu.append("About Gallery", "win.about")
+        menu.append("About Galeria", "win.about")
         menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
         menu_button.add_css_class("flat")
         header.pack_end(menu_button)
@@ -200,7 +200,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.switcher.connect("notify::active-name", self.change_mode)
         header.set_title_widget(self.switcher)
         self.page_title = label("", "heading")
-        avatar = Adw.Avatar(size=28, text="Gallery", show_initials=False)
+        avatar = Adw.Avatar(size=28, text="Galeria", show_initials=False)
         account = Gtk.MenuButton(child=avatar, tooltip_text="Account and library", width_request=34, height_request=34, valign=Gtk.Align.CENTER)
         self.avatar=avatar
         account.add_css_class("flat")
@@ -328,9 +328,9 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         admin=bool(self.client and self.client.user.get('isAdmin'))
         self.lookup_action('admin').set_enabled(admin)
         self.hamburger_menu.remove_all()
-        for title,action in [('Choose library…','source'),('Refresh library','refresh'),('Folder sync','sync')]+([('Administration','admin')] if admin else [])+[('Preferences','preferences'),('About Gallery','about')]:
+        for title,action in [('Choose library…','source'),('Refresh library','refresh'),('Folder sync','sync')]+([('Administration','admin')] if admin else [])+[('Preferences','preferences'),('About Galeria','about')]:
             self.hamburger_menu.append(title,'win.'+action)
-        self.avatar.set_text(self.client.user.get('name','') if self.client else 'Gallery')
+        self.avatar.set_text(self.client.user.get('name','') if self.client else 'Galeria')
         self.avatar.set_show_initials(bool(self.client))
 
     def account_menu(self):
@@ -435,13 +435,13 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         manager.set_color_scheme(Adw.ColorScheme.FORCE_LIGHT if manager.get_dark() else Adw.ColorScheme.FORCE_DARK)
 
     def about(self):
-        dialog = Adw.AboutDialog(application_name="Gallery", application_icon="folder-pictures-symbolic",
-                                 version="0.2", developer_name="Gallery",
+        dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
+                                 version="0.5.0", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 
     def welcome(self):
-        dialog=Adw.Dialog(title='Welcome to Gallery',content_width=360)
+        dialog=Adw.Dialog(title='Welcome to Galeria',content_width=360)
         body=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=20,
                      margin_top=24,margin_bottom=24,margin_start=24,margin_end=24)
         self.welcome_illustration=Gtk.Picture(can_shrink=True,content_fit=Gtk.ContentFit.CONTAIN,
@@ -562,18 +562,27 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
 class Gallery(Adw.Application):
     def __init__(self):
-        super().__init__(application_id="io.github.gallery.DesignPreview", flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+        super().__init__(application_id="com.neg-zero.Galeria", flags=Gio.ApplicationFlags.HANDLES_OPEN)
 
-    def do_activate(self):
+    def ensure_window(self):
         if self.get_active_window():
             self.get_active_window().present()
-            return
+            return False
         provider = Gtk.CssProvider()
         provider.load_from_path(str(Path(__file__).with_name("style.css")))
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.window = GalleryWindow(self)
         self.window.present()
-        GLib.idle_add(self.window.restore_last_library)
+        return True
+
+    def do_activate(self):
+        if self.ensure_window():GLib.idle_add(self.window.restore_last_library)
+
+    def do_open(self,files,_count,_hint):
+        self.ensure_window()
+        paths=[file.get_path() for file in files if file.get_path()]
+        if paths:self.window.connect_local(paths,focus_first=len(paths)==1)
+        else:self.window.notice('Open device files or connect an Immich library.')
 
 
 if __name__ == "__main__":

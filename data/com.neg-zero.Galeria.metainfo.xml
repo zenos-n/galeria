@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.neg-zero.Galeria</id>
+  <name>Galeria</name>
+  <summary>A native photo library for local folders and Immich</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-NAPL</project_license>
+  <developer id="com.neg-zero"><name>Negative Zero</name></developer>
+  <description><p>Browse device photos and videos, connect to an Immich library, manage collections and sharing, and upload selected device folders without modifying originals.</p></description>
+  <launchable type="desktop-id">com.neg-zero.Galeria.desktop</launchable>
+  <url type="homepage">https://github.com/zenos-n/galeria</url>
+  <content_rating type="oars-1.1"/>
+</component>
