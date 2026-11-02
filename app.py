@@ -270,6 +270,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
             ('gallery-share-symbolic','Share selected',lambda _:share_sheet(self,len(self.mosaic.selected))),
             ('list-add-symbolic','Add to album',lambda _:self.add_selected_to_album()),
             ('starred-symbolic','Favorite selected',lambda _:self.selected_action('favorite')),
+            ('changes-prevent-symbolic','Move to locked folder',lambda _:self.move_selected_to_locked()),
             ('user-trash-symbolic','Trash or restore selected',lambda _:self.selected_action('trash')),
         ]:
             actionbar.pack_end(button(icon,title,callback))

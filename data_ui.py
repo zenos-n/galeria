@@ -269,6 +269,26 @@ class LibraryUI:
             group.add(row)
         page.add(group);dialog.add(page);dialog.present(self)
 
+    def move_selected_to_locked(self):
+        if not self.client:self.notice('Connect Immich to use the locked folder.');return
+        client=self.client;mosaic=self.mosaic
+        ids=[mosaic.tiles[i].media_item.id for i in mosaic.selected if not mosaic.tiles[i].media_item.metadata.get('placeholder')]
+        if not ids:return
+        def move():
+            if self.client!=client:return
+            def done(_):
+                self.data_generation+=1
+                self.page_cache.clear();self.collection_cache.clear();self.date_cover_cache.clear();self.collection_textures.clear();self.texture_cache.clear();self.pending_images.clear()
+                self.background(client.media_cache().clear,lambda _:None)
+                if self.mosaic==mosaic:
+                    self.mosaic.set_selection(False);self.set_library_items([item for item in self.media_items if item.id not in ids],append=True,reflow=True)
+                self.notice('Items moved to the locked folder.')
+            self.background(lambda:client.update_assets(ids,{'visibility':'locked'}),done)
+        if client.locked_until<=time.monotonic():
+            from vault_ui import unlock_folder
+            unlock_folder(self,after=move)
+        else:move()
+
     def background(self,work,done,failed=None,images=False):
         generation=self.data_generation
         def execute():
@@ -561,7 +581,7 @@ class LibraryUI:
             rect=mosaic.rendered.get(tile)
             wanted=bool(rect and rect[1]+rect[3]>=max(0,top-height*2) and rect[1]<=top+height*3)
             if mosaic.mode!='all' and tile in mosaic.cover_slots:wanted=True
-            if wanted and tile.media_texture is None and (tile.media_item.kind=='IMAGE' or self.client):
+            if wanted and tile.media_texture is None and time.monotonic()>=getattr(tile,'retry_after',0) and (tile.media_item.kind=='IMAGE' or self.client):
                 key=(id(mosaic),tile.media_item.id)
                 if key not in self.pending_images:
                     self.pending_images.add(key);self.load_thumbnail(tile,mosaic,key)
@@ -636,7 +656,14 @@ class LibraryUI:
             if item.path:
                 stat=Path(item.path).stat()
                 data=self.disk_cache.fetch(f'{item.path}:{stat.st_mtime_ns}:{stat.st_size}',lambda:thumbnail_bytes(item.path))
-            else:data=client.image_bytes(item,vault=vault)
+            else:
+                try:data=client.image_bytes(item,vault=vault)
+                except LibraryError as error:
+                    if item.kind!='VIDEO' or error.status!=404:raise
+                    from video_edit import Edits,frame
+                    uri=self.get_video_proxy().register(client,item,vault)
+                    try:data=frame(uri,Edits(0,1))
+                    finally:self.get_video_proxy().unregister(uri)
             try:return decode_image(data)
             except (OSError,ValueError):
                 cache=vault if item.metadata.get('visibility')=='locked' else client.media_cache() if client else self.disk_cache
@@ -652,11 +679,10 @@ class LibraryUI:
             while len(self.texture_cache)>768:self.texture_cache.popitem(last=False)
             self.apply_texture(tile,texture)
         def failed(message):
+            self.pending_images.discard(pending_key)
+            tile.retry_after=time.monotonic()+60
             tile.set_tooltip_text(item.filename+' · '+message)
             tile.media_icon.set_from_icon_name('dialog-error-symbolic')
-            if not getattr(mosaic,'reported_error',False):
-                mosaic.reported_error=True
-                self.notice('Media could not load: '+message)
         self.background(load,ready,failed,images=True)
 
     def texture_from_pixels(self,value):

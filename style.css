@@ -37,7 +37,8 @@
 .album-tree row { padding: 0 2px; }
 .album-disclosure { padding: 4px; min-width: 20px; min-height: 20px; }
 .album-tree treeexpander { padding: 0; }
-.avatar-button { padding: 3px; border-radius: 50%; min-width: 28px; min-height: 28px; }
+.avatar-button { padding: 0; border-radius: 50%; min-width: 28px; min-height: 28px; }
+.avatar-button > button { padding: 3px; min-width: 28px; min-height: 28px; border-radius: 50%; }
 .upload-indicator { margin: 8px 10px 0; }
 .upload-indicator > button { padding: 7px 10px; border-radius: 7px; background: transparent; box-shadow: none; }
 .upload-indicator > button:hover, .upload-indicator > button:checked { background: alpha(@window_fg_color,.07); }

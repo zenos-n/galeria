@@ -98,11 +98,15 @@ class SyncEngine:
             counts['errors']=['Folder is unavailable.'];return counts
         recursive=rule.get('recursive',True);depth=int(rule.get('max_depth',0))
         if depth<0:raise LibraryError('Subfolder depth must be non-negative.')
-        destination=self.destination(rule)
+        destination=self.destination(rule) if not rule.get('folder_albums') else ''
         def failed(_error):counts['errors'].append('A folder could not be read.')
         for path in media_paths(root,recursive,depth,failed):
             if self.cancel.is_set() or not self.valid_rule(rule):break
             try:
+                if rule.get('folder_albums'):
+                    relative=path.parent.relative_to(root).as_posix()
+                    name=root.name if relative=='.' else root.name+' / '+relative
+                    destination=self.destination(dict(rule,id=rule['id']+':'+relative,album_id='',album_name=name))
                 stat=path.stat()
                 if self.journal.known(self.client.identity,rule['id'],path,stat,destination):counts['unchanged']+=1;continue
                 if time.time()-stat.st_mtime<2:counts['pending']+=1;continue

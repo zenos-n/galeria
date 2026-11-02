@@ -11,7 +11,7 @@ from session_store import vault_key
 from library import LibraryError
 
 
-def unlock_folder(window):
+def unlock_folder(window,after=None):
     if not window.client:
         window.login();return
     client=window.client
@@ -46,10 +46,11 @@ def unlock_folder(window):
             window.texture_cache.clear()
             window.preferences['vault_sync']=keep;window.save_preferences()
             window.sync_cancel=threading.Event()
-            dialog.close();window.search_library()
+            dialog.close()
+            after() if after else window.search_library()
             window.lock_button.set_visible(True)
             GLib.timeout_add_seconds(5,window.check_locked_expiry)
-            if vault:sync_locked(window,client,vault)
+            if vault and not after:sync_locked(window,client,vault)
         def failed(message):
             unlock.set_sensitive(True);feedback.set_label(message)
         window.background(work,done,failed)

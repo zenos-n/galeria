@@ -115,6 +115,11 @@ class AlbumTree(Gtk.ListView):
         self.add_css_class("navigation-sidebar")
         self.add_css_class("album-tree")
         self.connect("activate", lambda view, position: window.navigate(view, tree.get_item(position).get_item()))
+        motion=Gtk.EventControllerMotion()
+        def restore_selection(*_):
+            active=next((i for i in range(tree.get_n_items()) if tree.get_item(i).get_item().key==window.current_page),Gtk.INVALID_LIST_POSITION)
+            selection.set_selected(active)
+        motion.connect('leave',restore_selection);self.add_controller(motion)
 
     def set_albums(self,albums):
         if getattr(self,'albums',None)==albums:return

@@ -288,7 +288,9 @@ class ImmichClient:
         return items
 
     def thumbnail(self, asset_id, preview=False):
-        return self.request('/assets/' + quote(asset_id, safe='') + '/thumbnail?size=' + ('preview' if preview else 'thumbnail'), binary=True)
+        blob=self.request('/assets/' + quote(asset_id, safe='') + '/thumbnail?size=' + ('preview' if preview else 'thumbnail'), binary=True)
+        if not blob:raise LibraryError('The thumbnail is not ready yet.',404)
+        return blob
 
     def image_bytes(self,item,preview=False,vault=None):
         key=self.image_key(item,preview)
@@ -299,8 +301,16 @@ class ImmichClient:
             try:return self.thumbnail(item.id,preview)
             except LibraryError as error:
                 if error.status!=404:raise
+                if item.kind=='VIDEO':
+                    if not preview:return self.thumbnail(item.id,True)
+                    raise
                 return self.request('/assets/'+quote(item.id,safe='')+'/original',binary=True)
-        return cache.fetch(key,load) if cache else load()
+        data=cache.fetch(key,load) if cache else load()
+        if not data:
+            if cache:cache.remove(key)
+            data=load()
+            if cache:cache.put(key,data)
+        return data
 
     def image_key(self,item,preview=False):
         version=item.metadata.get('updatedAt') or item.metadata.get('checksum') or ''

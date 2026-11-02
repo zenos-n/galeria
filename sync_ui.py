@@ -60,26 +60,33 @@ def folder_sync(window,identity=None):
         toolbar=Adw.ToolbarView();toolbar.add_top_bar(Adw.HeaderBar())
         body=Adw.PreferencesPage();group=Adw.PreferencesGroup(description=rule['path'])
         recursive=Adw.SwitchRow(title='Include subfolders',active=rule.get('recursive',True))
-        depth=Adw.SpinRow.new_with_range(0,100,1);depth.set_title('Maximum depth · 0 means unlimited')
-        depth.set_value(rule.get('max_depth',0));depth.set_sensitive(recursive.get_active())
-        recursive.connect('notify::active',lambda row,_:depth.set_sensitive(row.get_active()))
-        group.add(recursive);group.add(depth)
-        choices=[('', 'Library only'),('__new__','Create or use a named album')]
+        unlimited=Adw.SwitchRow(title='Unlimited subfolder depth',active=not rule.get('max_depth',0))
+        depth=Adw.SpinRow.new_with_range(1,100,1);depth.set_title('Maximum depth')
+        depth.set_value(max(1,rule.get('max_depth',0)))
+        def depth_visibility(*_):
+            unlimited.set_visible(recursive.get_active());depth.set_visible(recursive.get_active() and not unlimited.get_active())
+        recursive.connect('notify::active',depth_visibility);unlimited.connect('notify::active',depth_visibility)
+        group.add(recursive);group.add(unlimited);group.add(depth);depth_visibility()
+        albums=Adw.SwitchRow(title='Folders to albums',subtitle='Organize uploaded files into albums',
+                            active=bool(rule.get('folder_albums') or rule.get('album_id') or rule.get('album_name')))
+        group.add(albums)
+        choices=[('__folders__', 'An album for each folder'),('__new__','One named album')]
         choices.extend((album['id'],album.get('albumName','Untitled album')) for album in getattr(window.album_tree,'albums',[]) if window.client and window.client.identity==identity)
         if rule.get('album_id') and rule['album_id'] not in [key for key,_ in choices]:choices.append((rule['album_id'],'Current album'))
         destination=Adw.ComboRow(title='Destination',model=Gtk.StringList.new([name for _,name in choices]))
-        selected='__new__' if rule.get('album_name') else rule.get('album_id','')
+        selected='__folders__' if rule.get('folder_albums') else '__new__' if rule.get('album_name') else rule.get('album_id','__folders__')
         destination.set_selected(next((i for i,(key,_) in enumerate(choices) if key==selected),0))
         name=Adw.EntryRow(title='Album name',text=rule.get('album_name') or Path(rule['path']).name)
-        name.set_sensitive(selected=='__new__')
-        destination.connect('notify::selected',lambda row,_:name.set_sensitive(choices[row.get_selected()][0]=='__new__'))
+        def album_visibility(*_):
+            destination.set_visible(albums.get_active());name.set_visible(albums.get_active() and choices[destination.get_selected()][0]=='__new__')
+        destination.connect('notify::selected',album_visibility);albums.connect('notify::active',album_visibility);album_visibility()
         group.add(destination);group.add(name);body.add(group)
         actions=Adw.PreferencesGroup();save=Gtk.Button(label='Save folder rule',css_classes=['suggested-action'],margin_top=12,margin_bottom=12)
         def submit(_):
-            target=choices[destination.get_selected()][0]
+            target=choices[destination.get_selected()][0] if albums.get_active() else ''
             if target=='__new__' and not name.get_text().strip():window.notice('Enter an album name.');return
-            rule.update(recursive=recursive.get_active(),max_depth=int(depth.get_value()),
-                        album_id=target if target!='__new__' else '',album_name=name.get_text().strip() if target=='__new__' else '')
+            rule.update(recursive=recursive.get_active(),max_depth=0 if unlimited.get_active() else int(depth.get_value()),folder_albums=target=='__folders__',
+                        album_id=target if target not in ('__new__','__folders__') else '',album_name=name.get_text().strip() if target=='__new__' else '')
             if rule not in account['folders']:account['folders'].append(rule)
             persist();rows();editor.close()
         save.connect('clicked',submit);actions.add(save);body.add(actions);toolbar.set_content(body);editor.set_child(toolbar)
