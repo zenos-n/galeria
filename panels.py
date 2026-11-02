@@ -92,6 +92,8 @@ class Uploads(Gtk.MenuButton):
         uploaded=sum(row.get('uploaded',0) for row in folders)
         errors=[str(error) for row in folders for error in row.get('errors',[])];error=request_error or value.get('error') or (errors[0] if errors else '')
         busy=pending or status.get('active',False) and value.get('busy',False)
+        if not busy and not error and not self.manual:
+            self.popdown();self.set_visible(False);return True
         title='Sync needs attention' if error else 'Syncing folders…' if busy else 'Folders up to date'
         self.summary.set_label(title);self.title.set_label(title)
         self.count.set_label(f'{uploaded} uploaded · '+str(sum(row.get('existing',0)+row.get('unchanged',0) for row in folders))+' already saved')

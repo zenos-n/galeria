@@ -84,8 +84,14 @@ def check():
    atomic_write(state_dir()/'sync-status.json',json.dumps({'active':True,'updated':time.time(),'accounts':{identity:{'busy':True,'progress':{'uploaded':2}}}}).encode())
    window.uploads.requested();window.uploads.sync_requested_at=0;window.uploads.poll_sync()
    assert window.uploads.get_visible() and window.uploads.summary.get_label()=='Syncing folders…'
+   phase=40
+  elif phase==40:
+   ok,bounds=window.uploads.compute_bounds(window);assert ok
+   bottom=window.get_height()-bounds.get_y()-bounds.get_height()
+   assert abs(bottom-10)<1,bottom
+   window.uploads.popup();assert window.uploads.get_popover().get_visible()
    atomic_write(state_dir()/'sync-status.json',json.dumps({'active':False,'updated':time.time(),'accounts':{identity:{'busy':False,'folders':[{'uploaded':2}]}}}).encode())
-   window.uploads.poll_sync();assert window.uploads.summary.get_label()=='Folders up to date'
+   window.uploads.poll_sync();assert not window.uploads.get_visible() and not window.uploads.get_popover().get_visible()
    assert pickers==['save','folder','profile'],pickers
    window.mosaic.set_selection(False)
    items.insert(0,MediaItem('background-photo','new.png',datetime(2027,1,1),2,metadata={'visibility':'timeline'}))

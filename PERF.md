@@ -239,3 +239,7 @@ longer sends that signal, since main begins scanning immediately. Existing runni
 services are still explicitly woken. Tests mock service commands; no synthetic
 media is uploaded to a production account. This changes visibility and service
 handoff, not scan interval or source/deletion semantics.
+
+The0.10.2 native integration checks an active indicator's10px bottom inset,
+opens its popover, then completes the fixture scan and verifies both the popover
+and sidebar indicator disappear. Background sync is not paused by hiding it.

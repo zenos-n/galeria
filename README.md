@@ -162,3 +162,7 @@ until stable. After validating a saved account, Galeria resumes its already
 opted-in sync rules and updates an older service runtime. Installing the service
 no longer immediately sends SIGUSR1 before its signal handler is ready; its first
 scan starts automatically. Existing running services use the normal wake signal.
+
+Galeria0.10.2 shows the sidebar sync indicator only for pending/active work or
+errors. Successful idle completion closes its popover and hides the indicator;
+background scans continue. The active indicator has10px bottom/side spacing.
