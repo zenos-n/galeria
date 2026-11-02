@@ -6,6 +6,25 @@ from imaging import decode_image
 from urllib.parse import quote
 
 
+def delete_album(window,value,refresh):
+    client=window.client
+    confirm=Adw.AlertDialog(heading='Delete album?',body='Delete “'+(value.get('albumName') or 'Untitled album')+'”? Its photos and videos will remain in your library.')
+    confirm.add_response('cancel','Cancel');confirm.add_response('delete','Delete album')
+    confirm.set_response_appearance('delete',Adw.ResponseAppearance.DESTRUCTIVE)
+    def response(_,choice):
+        if choice!='delete':return
+        def done(_):
+            for kind in ('albums','sharing'):
+                if kind in window.collection_cache:window.collection_cache[kind]=[album for album in window.collection_cache[kind] if album['id']!=value['id']]
+            window.album_tree.set_albums([album for album in getattr(window.album_tree,'albums',[]) if album['id']!=value['id']])
+            pins=window.preferences.get('pins',{}).get(client.identity,[])
+            if value['id'] in pins:pins.remove(value['id']);window.save_preferences()
+            window.background(client.albums,window.album_tree.set_albums)
+            refresh();window.notice('Album deleted. Photos and videos are unchanged.')
+        confirm.connect('closed',lambda *_:window.background(lambda:client.delete_album(value['id']),done))
+    confirm.connect('response',response);confirm.present(window)
+
+
 def edit_name(window,kind,value=None):
     dialog=Adw.AlertDialog(heading=('Rename ' if value else 'Create ')+('tag' if kind=='tags' else 'person' if kind=='people' else 'album'))
     entry=Adw.EntryRow(title='Name',text=(value or {}).get('name') or (value or {}).get('albumName',''))
@@ -31,7 +50,7 @@ def edit_name(window,kind,value=None):
 def collection_view(window,kind,refresh=False):
     if window.current_page!=kind:return
     cached=window.collection_cache.get(kind)
-    if not cached and not window.media_items:window.busy_library('Loading '+window.page_titles.get(kind,kind).lower()+'…')
+    if cached is None and not window.media_items:window.busy_library('Loading '+window.page_titles.get(kind,kind).lower()+'…')
     generation=window.search_generation
     client=window.client
     if not client:

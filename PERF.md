@@ -299,3 +299,31 @@ white thumbs and the accent span. Existing10kLOD and cache/account/export/sync/
 unfocused-update tests also pass with fatal GTK warnings. No synthetic production
 media changes or automated physical-display input.0.10.3 resize measurements and
 remaining ratio-scan limit are unchanged; live GPU performance is not remeasured.
+
+## Galeria0.11.1 complete folder geometry and group captions
+
+The previous transition captured only viewport-adjacent date-card source rects.
+Closing a large folder could bring previously offscreen cards into view without
+a source rect; these appeared near their destination instead of sliding with the
+rest. Retain all structural card/panel/pointer rects (about120 in the fixture),
+while retaining viewport-only photo geometry/native cells. Collapse the panel's
+8px reveal gap with its height, preserving a nonnegative gap to the next card row.
+
+Tier mode previously hid the entire date card to suppress duplicate cover pixels,
+also hiding its caption. Hide only cover pictures and draw native captions after
+photo sprites. Captions retain natural dimensions during fades; structural labels
+leaving an interrupted tier/folder transition fade out normally.
+
+65unit tests pass. The18,000-photo/120-month native fixture checks every card's
+intermediate y against its own start/end interpolation, panel/next-row separation,
+bounded native photo cells, readable caption opacity with cover pictures hidden,
+and interrupted tier/folder captions. Captured frames wait for allocation and
+after-paint, avoiding stale WindowPaintable snapshots; opening/closing/tier shots
+were visually inspected. A private-XTest album test verifies exactly one hover
+background by comparing the open-button padding with the outer card background;
+it checks owner-only Delete, Cancel producing no request, a single confirmed
+album DELETE, and cache/sidebar/pin refresh with zero media-delete calls. Deletion
+also has an authenticated loopback API/cache test. Existing10kLOD/priority/groups
+and fold/cache/media-action/clipboard regressions pass under fatal GTK warnings.
+No production album was deleted. No new frame-time/GPU guarantee is claimed;
+0.10.3 resize measurements remain the recorded benchmark.

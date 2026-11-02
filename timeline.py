@@ -114,6 +114,7 @@ class Mosaic(Gtk.Widget):
                     tile=members[min(i,len(members)-1)]
                     if tile.media_item:picture.media_id=tile.media_item.id
                     self.cover_slots.setdefault(tile,[]).append(picture)
+        self.caption_widgets=set(self.card_pictures)|set(self.headings)
         motion=Gtk.EventControllerMotion()
         motion.connect('motion',self.pointer_motion)
         motion.connect('leave',lambda *_:self.set_hover(None))
@@ -316,8 +317,7 @@ class Mosaic(Gtk.Widget):
             self.remove_tick_callback(self.tick)
         self.from_map=visible_layout(self.rendered)
         if kind=='folder':
-            for panel in (self.panel_month,self.panel_year):
-                if panel in self.rendered:self.from_map[panel]=self.rendered[panel]
+            self.from_map.update((widget,rect) for widget,rect in self.rendered.items() if widget not in self.tile_set)
         self.from_height=self.last_height
         before=(self.expanded_month,self.expanded_year);old_mode=self.mode
         self.set_hover(None)
@@ -477,7 +477,7 @@ class Mosaic(Gtk.Widget):
         return value
 
     def anchor(self,widget,other,fallback):
-        if widget in self.card_pictures:return (*fallback[:4],0)
+        if widget in self.caption_widgets:return (*fallback[:4],0)
         owners=self.owners.get(widget,())
         owners=sorted(owners,key=lambda node:0 if (self.mode=='years' and node in self.year_cards.values()) else 1)
         for owner in owners:
@@ -510,9 +510,10 @@ class Mosaic(Gtk.Widget):
     def folder_endpoint(self,widget,rect,opening):
         x,y,w,h,_=rect
         if widget in (self.panel_month,self.panel_year):
-            return x,y,w,0,1
+            return x,y-8,w,0,1
         if widget in (self.pointer_month,self.pointer_year):
             return x,y,w,h,0
+        if widget in self.caption_widgets:return x,y,w,h,0
         return x,y-22,w,h,0 if self.folder_swap else 1
 
     def do_get_request_mode(self):
@@ -572,7 +573,7 @@ class Mosaic(Gtk.Widget):
                 widget.add_css_class('selected') if widget.index in self.selected else widget.remove_css_class('selected')
             x,y,w,h,opacity=rects[widget]
             if widget in self.tile_set:widget.ensure()
-            widget.set_opacity(0 if widget==self.hidden_tile or tier and widget in self.card_pictures else max(0,min(1,opacity)))
+            widget.set_opacity(0 if widget==self.hidden_tile else max(0,min(1,opacity)))
             reference=stable.get(widget,self.from_map.get(widget,(x,y,w,h,opacity)))
             min_w=widget.measure(Gtk.Orientation.HORIZONTAL,-1)[0]
             allocated_w=max(1,round(reference[2]),min_w)
@@ -610,7 +611,7 @@ class Mosaic(Gtk.Widget):
         for widget in getattr(self,'snapshot_widgets',[]):
             _,y,_,h,_=self.rendered[widget]
             if not widget.get_child_visible() or y+h<top or y>top+page:continue
-            if tier and widget in self.tile_set:continue
+            if tier and (widget in self.tile_set or widget in self.caption_widgets):continue
             self.snapshot_clipped(widget,snapshot)
         if tier:
             for _,images,old_clip,new_clip in self.tier_groups:
@@ -626,6 +627,10 @@ class Mosaic(Gtk.Widget):
                     paintable.snapshot(snapshot,iw*scale,ih*scale)
                     snapshot.pop();snapshot.pop();snapshot.restore()
                 snapshot.pop()
+            for widget in self.snapshot_widgets:
+                _,y,_,h,_=self.rendered[widget]
+                if widget in self.caption_widgets and widget.get_child_visible() and y+h>=top and y<=top+page:
+                    self.snapshot_clipped(widget,snapshot)
         for tile in self.active_widgets & self.tile_set:
             i=tile.index;check=self.checks[i]
             if check.get_visible() and check.get_child_visible():

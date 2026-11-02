@@ -86,6 +86,9 @@ def menu_button(window,kind,value,refresh):
         from sharing_ui import share_album
         action('Share album…',lambda:share_album(window,value))
     action('Rename',lambda:edit_name(window,'albums' if kind=='sharing' else kind,value))
+    if kind in ('albums','sharing') and value.get('ownerId',window.client.user['id'])==window.client.user['id']:
+        from collections_ui import delete_album
+        action('Delete album…',lambda:delete_album(window,value,refresh))
     if kind in ('tags','people'):
         title='Hide person' if kind=='people' else 'Delete tag'
         def remove():

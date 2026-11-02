@@ -22,6 +22,9 @@ class SharingFixture(ImmichFixture):
         body=json.loads(self.rfile.read(int(self.headers.get('Content-Length',0))) or b'null')
         self.requests.append((self.command,self.path,body,self.headers.get('Authorization')))
         if self.headers.get('Authorization')!='Bearer test-session':return self.respond({},401)
+        if self.command=='DELETE' and self.path.startswith('/api/albums/') and '/user/' not in self.path:
+            type(self).album_count=0
+            return self.respond(None,204)
         if self.path.startswith('/api/assets/'):
             return self.respond(self.thumbnail if '/thumbnail' in self.path else dict(ASSETS[0],id=self.path.split('/')[3]))
         if self.path=='/api/users':return self.respond([{'id':'user','name':'Owner','email':'owner@example.invalid'},{'id':'alice','name':'Alice','email':'alice@example.invalid'},{'id':'bob','name':'Bob','email':'bob@example.invalid'}])
@@ -50,6 +53,7 @@ class SharingTests(unittest.TestCase):
         self.cache=TemporaryDirectory();self.addCleanup(self.cache.cleanup)
         env=patch.dict(os.environ,{'XDG_CACHE_HOME':self.cache.name});env.start();self.addCleanup(env.stop)
         SharingFixture.requests=[];SharingFixture.links=[];SharingFixture.members=[{'user':{'id':'user','name':'Owner'},'role':'editor'}]
+        SharingFixture.album_count=1
         self.server=ThreadingHTTPServer(('127.0.0.1',0),SharingFixture)
         self.thread=Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
         self.addCleanup(self.stop)
@@ -66,6 +70,13 @@ class SharingTests(unittest.TestCase):
         other=ImmichClient('https://example.invalid/photos/api')
         self.assertEqual(other.share_url({'slug':'my album'}),'https://example.invalid/photos/share/my%20album')
         self.client.revoke_link(link['id']);self.assertEqual(self.client.shared_links(),[])
+
+    def test_delete_album_only_invalidates_album_cache_and_never_deletes_assets(self):
+        self.assertEqual(len(self.client.albums()),1)
+        self.client.delete_album('album')
+        self.assertEqual(self.client.albums(),[])
+        deleted=[request for request in SharingFixture.requests if request[0]=='DELETE']
+        self.assertEqual([(request[1],request[3]) for request in deleted],[('/api/albums/album','Bearer test-session')])
 
     def test_individual_links_and_album_collaborators(self):
         link=self.client.share_assets(['a','b'],{'allowDownload':True})

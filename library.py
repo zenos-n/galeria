@@ -304,6 +304,11 @@ class ImmichClient:
 
     def album_info(self,album_id):return self.request('/albums/'+quote(album_id,safe=''))
 
+    def delete_album(self,album_id):
+        result=self.request('/albums/'+quote(album_id,safe=''),method='DELETE')
+        self.media_cache().remove('albums')
+        return result
+
     def album_member(self,album_id,user_id,role=None,remove=False):
         path='/albums/'+quote(album_id,safe='')+'/user/'+quote(user_id,safe='')
         return self.request(path,None if remove else {'role':role},method='DELETE' if remove else 'PUT')

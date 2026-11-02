@@ -196,3 +196,15 @@ Play/Pause and seeking. Space toggles playback. Playback uses the original insid
 the selected trim interval; Preview5seconds renders crop/rotation/filters, and
 Save a copy exports all edits. Numeric fields and keyboard handle adjustment
 remain available. Tests use generated media, local clipboard and fixture accounts.
+
+Galeria0.11.1 retains the complete date-card starting layout during folder
+opening/closing, including cards outside the viewport; native photo children
+remain bounded. The panel collapses into the row gap so lower cards move with
+its edge. Tier labels keep their normal size and draw above photo sprites;
+interrupted tier-to-folder captions fade out instead of lingering.
+
+Album cards use one native hover background. Owned album menus include
+**Delete album…**, with confirmation. It deletes the collection, refreshes album
+caches/sidebar/pins, and leaves media in the library, following
+[Immich3.3.3's album deletion endpoint](https://github.com/immich-app/immich/blob/v3.3.3/server/src/services/album.service.ts#L153).
+Empty cached album views remain visible after deleting the last album.
