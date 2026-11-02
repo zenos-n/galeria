@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 from threading import Thread
 import unittest
 from unittest.mock import patch
+import os
 from library import ImmichClient, LibraryError, scan_folders
 
 
@@ -39,7 +40,7 @@ class ImmichFixture(BaseHTTPRequestHandler):
         if self.path=='/api/invalid':
             self.send_response(200);self.end_headers();self.wfile.write(b'not JSON');return
         if self.headers.get('Authorization')!='Bearer test-session':return self.respond({},401)
-        if self.path in self.denied:return self.respond({},403)
+        if self.path.split('?')[0] in self.denied:return self.respond({},403)
         if self.path=='/api/users/me':return self.respond({'id':'user','name':'Test Administrator','email':'test@example.invalid','isAdmin':self.admin})
         if self.path.startswith('/api/search/'):
             page=payload.get('page',1)
@@ -50,7 +51,19 @@ class ImmichFixture(BaseHTTPRequestHandler):
         if self.path=='/api/server/about':return self.respond({'version':'3.2.0-fixture'})
         if self.path=='/api/server/statistics':return self.respond({'photos':2,'videos':0,'usage':1000000})
         if self.path=='/api/server/storage':return self.respond({'diskUse':'1 GB','diskAvailable':'9 GB','diskUsagePercentage':10})
-        if self.path=='/api/admin/users':return self.respond([{'id':'user','name':'Test Administrator','email':'test@example.invalid','isAdmin':True,'quotaUsageInBytes':1000000}])
+        if self.path.startswith('/api/admin/users'):
+            if self.path.endswith('/statistics'):return self.respond({'photos':2,'videos':1})
+            if self.path.endswith('/sessions'):return self.respond([{'deviceType':'Browser','deviceOS':'Linux'}])
+            if self.command in ('POST','PUT'):return self.respond(dict(payload or {},id='new-user'))
+            return self.respond([{'id':'user','name':'Test Administrator','email':'test@example.invalid','isAdmin':True,'quotaUsageInBytes':1000000}])
+        if self.path=='/api/system-config':return self.respond(payload if self.command=='PUT' else {'logging':{'enabled':True,'level':'log'},'trash':{'days':30}})
+        if self.path=='/api/libraries':return self.respond([{'id':'external','name':'Camera','importPaths':['/photos']}])
+        if self.path=='/api/auth/session/unlock':return self.respond(None,204)
+        if self.path=='/api/sessions':return self.respond([{'id':'session','current':True}])
+        if self.path=='/api/sessions/session/lock':return self.respond(None,204)
+        if self.path.startswith('/api/people'):return self.respond({'people':[{'id':'person','name':'Alice'}]})
+        if self.path=='/api/tags':return self.respond([{'id':'tag','name':'Travel','value':'Travel'}])
+        if self.path=='/api/duplicates':return self.respond([{'duplicateId':'duplicate','assets':ASSETS}])
         if self.path=='/api/queues':
             return self.respond({} if self.legacy else [{'name':'thumbnailGeneration','isPaused':False,'statistics':{'active':1,'waiting':4,'failed':0}}],404 if self.legacy else 200)
         if self.path=='/api/jobs':return self.respond({'thumbnailGeneration':{'queueStatus':{'isPaused':True},'jobCounts':{'waiting':2}}})
@@ -74,6 +87,8 @@ class LibraryTests(unittest.TestCase):
         cls.server.shutdown();cls.server.server_close();cls.thread.join()
 
     def setUp(self):
+        self.cache_root=TemporaryDirectory();self.addCleanup(self.cache_root.cleanup)
+        env=patch.dict(os.environ,{'XDG_CACHE_HOME':self.cache_root.name});env.start();self.addCleanup(env.stop)
         ImmichFixture.requests=[];ImmichFixture.admin=True;ImmichFixture.legacy=False;ImmichFixture.denied=set()
         self.client=ImmichClient(self.address+'/api/')
 
@@ -113,6 +128,28 @@ class LibraryTests(unittest.TestCase):
         before=len(ImmichFixture.requests)
         with self.assertRaises(LibraryError):self.client.admin_section('users')
         self.assertEqual(before,len(ImmichFixture.requests))
+
+    def test_admin_user_create_update_and_locked_session(self):
+        self.login()
+        self.client.users_create({'name':'New user','email':'new@example.invalid','password':'dummy','notify':False})
+        self.assertEqual(ImmichFixture.requests[-1][0:2],('POST','/api/admin/users'))
+        self.client.users_update('new-user',{'name':'Changed','quotaSizeInBytes':1024})
+        self.assertEqual(ImmichFixture.requests[-1][0:2],('PUT','/api/admin/users/new-user'))
+        with self.assertRaises(LibraryError):self.client.search({'visibility':'locked'})
+        self.client.unlock('123456')
+        self.client.search({'visibility':'locked'})
+        self.client.lock_session()
+        self.assertEqual(self.client.locked_until,0)
+        self.assertEqual(ImmichFixture.requests[-1][1],'/api/sessions/session/lock')
+
+    def test_images_survive_client_restart_without_refetch(self):
+        from library import media_from_asset
+        self.login();item=media_from_asset(ASSETS[0])
+        first=self.client.image_bytes(item)
+        before=len(ImmichFixture.requests)
+        client=ImmichClient(self.address);client.token=self.client.token;client.user=self.client.user
+        self.assertEqual(client.image_bytes(item),first)
+        self.assertEqual(len(ImmichFixture.requests),before)
 
     def test_auth_failure_permissions_redirect_and_invalid_response(self):
         with self.assertRaises(LibraryError):self.client.login('test@example.invalid','wrong')

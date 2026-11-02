@@ -1,5 +1,7 @@
 """Native Immich administration, backed by the signed-in server."""
 from gi.repository import Adw, Gio, GLib, Gtk
+from admin_users import edit_user
+from admin_settings import configuration,edit_library,title as human_title
 
 
 def size(value):
@@ -44,7 +46,9 @@ class AdminPanel(Adw.PreferencesDialog):
             return
         for key,title,icon,page in [('overview','Server','drive-harddisk-symbolic',overview),
                                     ('users','Users','system-users-symbolic',None),
-                                    ('queues','Job queues','system-run-symbolic',None)]:
+                                    ('queues','Job queues','system-run-symbolic',None),
+                                    ('libraries','Libraries','folder-symbolic',None),
+                                    ('settings','Settings','preferences-system-symbolic',None)]:
             if page is None:
                 page=Adw.PreferencesPage(title=title,icon_name=icon)
                 self.add(page)
@@ -52,6 +56,13 @@ class AdminPanel(Adw.PreferencesDialog):
             page.add(group)
             self.sections[key]=group
             self.rows_by_section[key]=[]
+            if key=='users':
+                create=Gtk.Button(label='Create user',css_classes=['suggested-action'])
+                create.connect('clicked',lambda _:edit_user(self))
+                group.set_header_suffix(create)
+            if key=='libraries':
+                create=Gtk.Button(label='Create library',css_classes=['suggested-action'])
+                create.connect('clicked',lambda _:edit_library(self));group.set_header_suffix(create)
         self.refresh()
 
     def replace(self,key,rows):
@@ -101,13 +112,24 @@ class AdminPanel(Adw.PreferencesDialog):
                 used=size(user.get('quotaUsageInBytes'))
                 quota=user.get('quotaSizeInBytes')
                 row.add_suffix(Gtk.Label(label=used+(f' / {size(quota)}' if quota else ''),css_classes=['dim-label']))
+                row.add_suffix(Gtk.Image(icon_name='go-next-symbolic'))
+                row.set_activatable(True)
+                row.connect('activated',lambda _,user=user:edit_user(self,user))
                 rows.append(row)
+        elif key=='settings':rows=configuration(self,data)
+        elif key=='libraries':
+            for library in data:
+                row=Adw.ActionRow(title=library.get('name','External library'),subtitle=' · '.join(library.get('importPaths',[])),use_markup=False,activatable=True)
+                row.connect('activated',lambda _,library=library:edit_library(self,library))
+                scan=Gtk.Button(label='Scan',valign=Gtk.Align.CENTER)
+                scan.connect('clicked',lambda button,library=library:self.scan_library(button,library))
+                row.add_suffix(scan);rows.append(row)
         else:
             for queue in data:
                 counts=queue.get('statistics',{})
                 summary=' · '.join(f'{counts.get(name,0)} {name}' for name in ('active','waiting','failed'))
                 paused=queue.get('isPaused',False)
-                row=Adw.ActionRow(title=queue['name'].replace('-',' ').title(),use_markup=False,
+                row=Adw.ActionRow(title=human_title(queue['name']),use_markup=False,
                                   subtitle=('Paused · ' if paused else '')+summary)
                 control=Gtk.Button(label='Resume' if paused else 'Pause',valign=Gtk.Align.CENTER,
                                    sensitive=not queue.get('legacy',False))
@@ -125,6 +147,12 @@ class AdminPanel(Adw.PreferencesDialog):
             button.set_sensitive(True)
             self.window.notice(message)
         self.window.background(lambda:self.client.pause_queue(name,paused),done,failed)
+
+    def scan_library(self,button,library):
+        button.set_sensitive(False)
+        self.window.background(lambda:self.client.request('/libraries/'+library['id']+'/scan',{}),
+            lambda _:(button.set_sensitive(True),self.window.notice('Library scan started.')),
+            lambda error:(button.set_sensitive(True),self.window.notice(error)))
 
 
 def administration(window):

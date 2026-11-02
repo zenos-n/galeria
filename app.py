@@ -2,6 +2,7 @@
 """Native GTK gallery for local folders and Immich."""
 from pathlib import Path
 import sys
+import time
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -10,13 +11,15 @@ gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gsk, Gtk
 
 from layout import justified_rows
-from panels import AlbumTree, Uploads, import_sheet, preferences, share_sheet, unlock_folder
+from panels import AlbumTree, Uploads, import_sheet, preferences, share_sheet
 from viewer import Viewer
 from timeline import Mosaic
 from search_ui import SearchPanel
 from data_ui import LibraryUI
 from admin import administration
 from library import ImmichClient, LibraryError
+from collections_ui import collection_view
+from vault_ui import unlock_folder
 
 
 def button(icon, tooltip, callback):
@@ -153,6 +156,9 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
             nav.connect("row-activated", self.navigate)
             body.append(nav)
             self.lists.append(nav)
+            if heading=='Pinned':
+                self.pin_nav=nav
+                self.pin_rows=[]
             if heading == "Collections":
                 self.album_tree = AlbumTree(self)
                 body.append(self.album_tree)
@@ -201,6 +207,9 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.select_button.add_css_class('flat')
         self.select_button.connect('toggled',lambda w:self.mosaic.set_selection(w.get_active()))
         header.pack_end(self.select_button)
+        self.lock_button=button('changes-prevent-symbolic','Lock folder',lambda _:self.lock_folder())
+        self.lock_button.set_visible(False)
+        header.pack_end(self.lock_button)
         self.toolbar.add_top_bar(header)
         self.search = SearchPanel(self)
         self.search.set_key_capture_widget(self)
@@ -208,6 +217,9 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.stack = Gtk.Stack()
         self.toolbar.set_content(self.stack)
         self.scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
+        adjustment=self.scroller.get_vadjustment()
+        adjustment.connect('value-changed',self.scroll_changed)
+        adjustment.connect('changed',self.load_visible_thumbnails)
         self.scroller.add_css_class("timeline")
         self.mosaic = Mosaic(self.open_viewer,[])
         self.scroller.set_child(self.mosaic)
@@ -243,9 +255,9 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         actionbar.pack_start(cancel)
         for icon,title,callback in [
             ('gallery-share-symbolic','Share selected',lambda _:share_sheet(self,len(self.mosaic.selected))),
-            ('list-add-symbolic','Add to album',lambda _:self.notice('Album actions are not connected in this preview.')),
-            ('starred-symbolic','Favorite selected',lambda _:self.notice('Favorites are not connected in this preview.')),
-            ('user-trash-symbolic','Move selected to trash',lambda _:self.notice('Trash is not connected in this preview.')),
+            ('list-add-symbolic','Add to album',lambda _:self.add_selected_to_album()),
+            ('starred-symbolic','Favorite selected',lambda _:self.selected_action('favorite')),
+            ('user-trash-symbolic','Trash or restore selected',lambda _:self.selected_action('trash')),
         ]:
             actionbar.pack_end(button(icon,title,callback))
         self.selection_bar.set_child(actionbar)
@@ -281,10 +293,13 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.sidebar_button.set_visible(self.split.get_collapsed())
 
     def navigate(self, nav, row):
+        if self.current_page=='locked' and row.key!='locked':self.lock_folder(refresh=False)
         self.search_generation+=1
         self.load_more.set_visible(False)
         self.mosaic.set_selection(False)
         self.current_page = row.key
+        self.scope_filters={}
+        self.collection_items=None
         if nav != self.album_tree:
             self.album_tree.get_model().unselect_all()
         for other in self.lists:
@@ -293,7 +308,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         if self.split.get_collapsed():
             self.split.set_show_sidebar(False)
         is_library = row.key == "library"
-        has_grid = is_library or row.key in ("photos", "videos", "screenshots", "live") or row.key.startswith("album-") or bool(self.client) and row.key in ('favorites','archive','trash')
+        has_grid = is_library or row.key in ("photos", "videos", "screenshots", "live") or row.key.startswith("album-") or bool(self.client) and row.key in ('favorites','archive','trash') or row.key=='locked' and bool(self.client and self.client.locked_until>time.monotonic())
         self.select_button.set_visible(has_grid)
         self.switcher.set_visible(is_library)
         self.period.set_visible(is_library)
@@ -301,6 +316,9 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.header.set_title_widget(self.switcher if is_library else self.page_title)
         self.stack.set_visible_child_name("library" if has_grid else "status")
         self.status_actions.set_visible(row.key == "locked")
+        if row.key in ('albums','people','tags','duplicates','sharing','map','pinned'):
+            if row.key=='pinned':self.manage_pins();return
+            collection_view(self,row.key);return
         if not has_grid:
             titles = {
                 "favorites": ("starred-symbolic", "Your favorites", "The photos you love will live here."),
@@ -425,6 +443,8 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         for row in (self.server_entry, self.email_entry, self.password_entry):
             group.add(row)
         body.append(group)
+        remember=Adw.SwitchRow(title='Remember this account',active=True,subtitle='Store the session in the system keyring')
+        remember_group=Adw.PreferencesGroup();remember_group.add(remember);body.append(remember_group)
         sign_in = Gtk.Button(label="Sign in", height_request=44)
         sign_in.add_css_class("suggested-action")
         sign_in.add_css_class("pill")
@@ -444,7 +464,9 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
             def connected(_user):
                 if not active['value'] or self.dialog!=dialog:return
                 dialog.close()
+                self.preferences['remember']=remember.get_active()
                 self.connect_immich(client)
+                if remember.get_active():self.remember_account(client)
             def failed(error):
                 if not active['value'] or self.dialog!=dialog:return
                 sign_in.set_sensitive(True)
@@ -479,7 +501,7 @@ class Gallery(Adw.Application):
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.window = GalleryWindow(self)
         self.window.present()
-        GLib.idle_add(self.window.welcome)
+        GLib.idle_add(self.window.restore_last_library)
 
 
 if __name__ == "__main__":

@@ -82,6 +82,7 @@ class MediaCache:
     def sync_encrypted(self,key,response,cancel):
         """Stream an original to authenticated ciphertext; never create plaintext files."""
         if not self.key:raise ValueError('Encryption key required')
+        if cancel.is_set():raise InterruptedError('Sync cancelled')
         nonce=os.urandom(12)
         encryptor=Cipher(algorithms.AES(self.key),modes.GCM(nonce)).encryptor()
         encryptor.authenticate_additional_data(key.encode())
@@ -92,6 +93,7 @@ class MediaCache:
                 while chunk:=response.read(1024*1024):
                     if cancel.is_set():raise InterruptedError('Sync cancelled')
                     output.write(encryptor.update(chunk))
+                if cancel.is_set():raise InterruptedError('Sync cancelled')
                 output.write(encryptor.finalize());output.write(encryptor.tag)
             os.replace(name,self.path(key))
         finally:

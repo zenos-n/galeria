@@ -116,6 +116,8 @@ class AlbumTree(Gtk.ListView):
         self.connect("activate", lambda view, position: window.navigate(view, tree.get_item(position).get_item()))
 
     def set_albums(self,albums):
+        if getattr(self,'albums',None)==albums:return
+        self.albums=albums
         for key in list(self.window.rows):
             if key.startswith('album-'):
                 self.window.rows.pop(key,None)
@@ -126,6 +128,7 @@ class AlbumTree(Gtk.ListView):
             self.children.append(node)
             self.window.rows[node.key]=node
             self.window.page_titles[node.key]=node.name
+        self.window.refresh_pins()
 
     def setup(self, _factory, item):
         expander = Gtk.TreeExpander()
@@ -234,10 +237,20 @@ def preferences(window):
     library.add_suffix(choose)
     source.add(library)
     general.add(source)
+    cache_group=Adw.PreferencesGroup(title='Storage')
+    cache_row=Adw.ActionRow(title='Media cache',subtitle='Up to 512 MB · encrypted locked-folder copies are kept separately')
+    clear=Gtk.Button(label='Clear cache',valign=Gtk.Align.CENTER)
+    def clear_cache(_):
+        from cache import MediaCache
+        cache=window.client.media_cache() if window.client else MediaCache('local')
+        window.background(cache.clear,lambda _:(window.texture_cache.clear(),window.notice('Media cache cleared.')))
+    clear.connect('clicked',clear_cache);cache_row.add_suffix(clear);cache_group.add(cache_row)
+    general.add(cache_group)
     dialog.add(general)
     privacy = Adw.PreferencesPage(title="Privacy", icon_name="changes-prevent-symbolic")
     locked = Adw.PreferencesGroup(title="Locked folder", description="Locked-folder copies synced to this device must be encrypted locally.")
-    sync = Adw.SwitchRow(title="Keep an encrypted copy on this device", subtitle="Local sync is not connected in this preview", active=True)
+    sync = Adw.SwitchRow(title="Keep an encrypted copy on this device", subtitle="Requires the system keyring; sync starts when the folder is unlocked", active=window.preferences.get('vault_sync',True))
+    sync.connect('notify::active',lambda row,_:(window.preferences.update(vault_sync=row.get_active()),window.save_preferences()))
     locked.add(sync)
     encryption = Adw.ActionRow(title="On-device encryption", subtitle="Required for locked-folder files and thumbnails")
     encryption.add_suffix(text("Required", "dim-label"))
@@ -248,30 +261,5 @@ def preferences(window):
     locked.add(timeout)
     privacy.add(locked)
     dialog.add(privacy)
-    window.dialog = dialog
-    dialog.present(window)
-
-
-def unlock_folder(window):
-    dialog = Adw.Dialog(title="Unlock locked folder", content_width=420, content_height=400)
-    toolbar = Adw.ToolbarView()
-    toolbar.add_top_bar(Adw.HeaderBar())
-    body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20, margin_top=22,
-                   margin_bottom=28, margin_start=28, margin_end=28)
-    body.append(Gtk.Image(icon_name="changes-prevent-symbolic", pixel_size=48))
-    body.append(text("Unlock your photos", "title-2"))
-    group = Adw.PreferencesGroup()
-    password = Adw.PasswordEntryRow(title="Passphrase")
-    group.add(password)
-    body.append(group)
-    unlock = Gtk.Button(label="Unlock", height_request=42)
-    unlock.add_css_class("suggested-action")
-    unlock.add_css_class("pill")
-    message = text("", "dim-label", wrap=True, justify=Gtk.Justification.CENTER)
-    unlock.connect("clicked", lambda _: message.set_label("Unlocking is not connected in this design preview."))
-    body.append(unlock)
-    body.append(message)
-    toolbar.set_content(body)
-    dialog.set_child(toolbar)
     window.dialog = dialog
     dialog.present(window)

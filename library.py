@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import os
+import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -90,6 +91,17 @@ class ImmichClient:
         self.token = None
         self.user = None
         self.http = build_opener(NoRedirects())
+        self.cache=None
+        self.locked_until=0
+
+    @property
+    def identity(self):return self.base+'|'+str((self.user or {}).get('id',''))
+
+    def media_cache(self):
+        if self.cache is None:
+            from cache import MediaCache
+            self.cache=MediaCache(self.identity)
+        return self.cache
 
     def request(self, path, data=None, method=None, binary=False):
         headers = {'Accept': 'application/octet-stream' if binary else 'application/json'}
@@ -111,7 +123,8 @@ class ImmichClient:
                         403: 'This account does not have permission for this operation.',
                         404: 'This endpoint is unavailable on your Immich server.',
                         400: 'Immich rejected the request. Check your search fields or server version.'}
-            raise LibraryError(messages.get(error.code, f'Immich returned HTTP {error.code}.'), error.code) from None
+            status=error.code;error.close()
+            raise LibraryError(messages.get(status, f'Immich returned HTTP {status}.'), status) from None
         except (URLError, TimeoutError, OSError):
             raise LibraryError('Could not reach Immich. Check the server address and connection.') from None
         except (ValueError, UnicodeError):
@@ -134,13 +147,25 @@ class ImmichClient:
         if query:
             path = '/search/smart'
             body['query'] = query
-        response = self.request(path, body)
+        locked=body.get('visibility')=='locked'
+        if locked and time.monotonic()>=self.locked_until:
+            raise LibraryError('Unlock the locked folder first.',403)
+        cache=self.media_cache()
+        cache_key='search:'+str(getattr(self,'refresh_serial',0))+path+json.dumps(body,sort_keys=True)
+        cached=None if locked else cache.get(cache_key,30)
+        if cached:
+            response=json.loads(cached)
+        else:
+            response = self.request(path, body)
+            if not locked:
+                response['assets']['items']=[asset for asset in response.get('assets',{}).get('items',[]) if asset.get('visibility') not in ('locked','hidden')]
+                cache.put(cache_key,json.dumps(response).encode())
         assets = response.get('assets', {})
-        items=[media_from_asset(asset) for asset in assets.get('items', []) if asset.get('visibility') not in ('locked','hidden')]
+        items=[media_from_asset(asset) for asset in assets.get('items', []) if asset.get('visibility')!='hidden' and (locked or asset.get('visibility')!='locked')]
         return items, assets.get('nextPage')
 
     def albums(self):
-        return self.request('/albums')
+        return self.media_cache().json('albums',lambda:self.request('/albums'),30)
 
     def album(self, album_id):
         return [media_from_asset(asset) for asset in self.request('/albums/' + quote(album_id, safe='')).get('assets', []) if asset.get('visibility') not in ('locked','hidden')]
@@ -148,13 +173,73 @@ class ImmichClient:
     def thumbnail(self, asset_id, preview=False):
         return self.request('/assets/' + quote(asset_id, safe='') + '/thumbnail?size=' + ('preview' if preview else 'thumbnail'), binary=True)
 
+    def image_bytes(self,item,preview=False,vault=None):
+        key=self.image_key(item,preview)
+        locked=item.metadata.get('visibility')=='locked'
+        cache=vault if locked else self.media_cache()
+        def load():
+            try:return self.thumbnail(item.id,preview)
+            except LibraryError as error:
+                if error.status!=404:raise
+                return self.request('/assets/'+quote(item.id,safe='')+'/original',binary=True)
+        return cache.fetch(key,load) if cache else load()
+
+    def image_key(self,item,preview=False):
+        version=item.metadata.get('updatedAt') or item.metadata.get('checksum') or ''
+        return f'{item.id}:{version}:{"preview" if preview else "thumbnail"}'
+
+    def users_create(self,fields):
+        return self.request('/admin/users',fields)
+
+    def users_update(self,user_id,fields):
+        return self.request('/admin/users/'+quote(user_id,safe=''),fields,method='PUT')
+
+    def users_delete(self,user_id):
+        return self.request('/admin/users/'+quote(user_id,safe=''),{},method='DELETE')
+
+    def user_restore(self,user_id):
+        return self.request('/admin/users/'+quote(user_id,safe='')+'/restore',{},method='POST')
+
+    def unlock(self,secret,is_password=False):
+        try:self.request('/auth/session/unlock',{'password' if is_password else 'pinCode':secret})
+        except LibraryError as error:
+            if error.status in (400,401,403):raise LibraryError('Could not unlock. Check your PIN or password and try again.',error.status) from None
+            raise
+        self.media_cache().clear()
+        self.locked_until=time.monotonic()+14*60
+
+    def lock_session(self):
+        self.locked_until=0
+        session=next((s for s in self.request('/sessions') if s.get('current')),None)
+        if session:self.request('/sessions/'+quote(session['id'],safe='')+'/lock',{},method='POST')
+
+    def collection(self,kind):
+        if kind=='people':
+            result=self.request('/people?size=1000&withHidden=false')
+            return result.get('people',[]) if isinstance(result,dict) else result
+        if kind=='tags':return self.request('/tags')
+        if kind=='duplicates':return self.request('/duplicates')
+        if kind=='sharing':return [album for album in self.albums() if album.get('shared') or album.get('albumUsers')]
+        if kind=='map':return self.request('/map/markers')
+        return self.albums()
+
+    def update_assets(self,ids,fields):
+        return self.request('/assets',dict(fields,ids=ids),method='PUT')
+
+    def trash_assets(self,ids):
+        return self.request('/assets',{'ids':ids,'force':False},method='DELETE')
+
+    def restore_assets(self,ids):return self.request('/trash/restore/assets',{'ids':ids})
+
     def admin_section(self, section):
         if not self.user or not self.user.get('isAdmin'):
             raise LibraryError('Sign in with an Immich administrator account.', 403)
         if section == 'overview':
             return {key: self.request(path) for key, path in [('about', '/server/about'), ('storage', '/server/storage'), ('statistics', '/server/statistics')]}
         if section == 'users':
-            return self.request('/admin/users')
+            return self.request('/admin/users?withDeleted=true')
+        if section in ('settings','libraries'):
+            return self.request('/system-config' if section=='settings' else '/libraries')
         try:
             return self.request('/queues')
         except LibraryError as error:

@@ -1,4 +1,4 @@
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 from media import PhotoStage
 from panels import text, icon_button, share_sheet
 from editor import build_editor
@@ -21,6 +21,7 @@ class Viewer(Gtk.Overlay):
         self.add_overlay(self.blackout)
         self.viewer_split = Adw.OverlaySplitView(sidebar_position=Gtk.PackType.END, show_sidebar=False,
                                                 min_sidebar_width=280,max_sidebar_width=300)
+        self.viewer_split.set_sidebar_width_unit(Adw.LengthUnit.PX)
         self.breakpoint_bin = Adw.BreakpointBin(child=self.viewer_split,width_request=300,height_request=240)
         self.add_overlay(self.breakpoint_bin)
         self.photo_overlay = Gtk.Overlay(hexpand=True,vexpand=True)
@@ -45,7 +46,7 @@ class Viewer(Gtk.Overlay):
         self.header.pack_end(self.edit_button)
         self.info = Gtk.ToggleButton(icon_name='info-outline-symbolic',tooltip_text='Photo details')
         self.info.add_css_class('flat')
-        self.info.connect('toggled',lambda w:self.viewer_split.set_show_sidebar(w.get_active()))
+        self.info.connect('toggled',self.toggle_details)
         self.header.pack_end(self.info)
         self.download = icon_button('folder-download-symbolic','Download',lambda _:window.notice('Downloads are not connected in this preview.'))
         self.share = icon_button('gallery-share-symbolic','Share',lambda _:share_sheet(window))
@@ -79,7 +80,7 @@ class Viewer(Gtk.Overlay):
         for heading,value in [('Date','January 2026'),('File','Photo preview'),('Location','No location'),('Camera','No camera information')]:
             group=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=6)
             group.append(text(heading,'dim-label',xalign=0))
-            group.append(text(value,xalign=0,wrap=True))
+            group.append(text(value,xalign=0,wrap=True,wrap_mode=Pango.WrapMode.WORD_CHAR,max_width_chars=30,selectable=True))
             details_body.append(group)
         scroll=Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,child=details_body)
         self.details.set_content(scroll)
@@ -133,8 +134,14 @@ class Viewer(Gtk.Overlay):
         for arrow in self.arrows:
             arrow.set_opacity(0)
         self.close_button.grab_focus()
-        self.stage.animate(self.source,False,self.fade,lambda:None)
+        self.info.set_sensitive(False)
+        self.stage.animate(self.source,False,self.fade,lambda:self.info.set_sensitive(True))
         self.window.load_preview(self.stage,self.source)
+
+    def toggle_details(self,widget):
+        if widget.get_active() and self.stage.progress<1:
+            widget.set_active(False);return
+        self.viewer_split.set_show_sidebar(widget.get_active())
 
     def fade(self,progress):
         self.backdrop.set_opacity(progress)
@@ -162,6 +169,7 @@ class Viewer(Gtk.Overlay):
                 self.stage.dispose()
                 self.window.split.set_can_target(True)
                 self.window.viewer=None
+                self.window.flush_pending_media()
                 if self.chrome_timer:
                     GLib.source_remove(self.chrome_timer)
                     self.chrome_timer=0

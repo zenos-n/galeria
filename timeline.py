@@ -1,6 +1,7 @@
 """Data-free timeline with stable media tiles and expandable date folders."""
 from gi.repository import Gdk, GLib, Graphene, Gsk, Gtk
 from layout import justified_rows
+from imaging import duration_label
 
 RATIOS=[1.2,1.78,1,.72,.56,1.6,.48,.55,1.35,.8,1.7,.6,1,1.8,.65,.5,1.3,1.5,.8,1.65,.6,1,.7,1.6,.6,1.8]
 MONTHS=[('2026-01','January 2026','2026',0,12),('2025-12','December 2025','2025',12,26),('2025-11','November 2025','2025',26,40)]
@@ -69,7 +70,7 @@ class Mosaic(Gtk.Widget):
                            halign=Gtk.Align.CENTER,valign=Gtk.Align.CENTER,css_classes=['placeholder-icon'])
             overlay.add_overlay(icon)
             if items is not None and items[index].kind=='VIDEO' or items is None and index in (1,4,9,17,23):
-                duration=Gtk.Label(label='▷ '+str(items[index].metadata.get('duration','Video') if items is not None else '0:31'),halign=Gtk.Align.END,valign=Gtk.Align.START,css_classes=['video-duration'])
+                duration=Gtk.Label(label='▷ '+duration_label(items[index].metadata.get('duration') if items is not None else '0:31'),halign=Gtk.Align.END,valign=Gtk.Align.START,css_classes=['video-duration'])
                 overlay.add_overlay(duration)
                 self.badges.append(duration)
             tile=Gtk.Button(child=overlay,tooltip_text='Open photo preview',css_classes=['photo-tile'])
