@@ -60,7 +60,6 @@ def install_service():
         command(['nix-store','--add-root',str(root),'--indirect','--realise',str(Path(executable[0]).parents[1])])
     command(['systemctl','--user','daemon-reload'])
     command(['systemctl','--user','enable','--now',UNIT])
-    wake_service()
 
 
 def wake_service():return command(['systemctl','--user','kill','-s','USR1',UNIT],check=False)

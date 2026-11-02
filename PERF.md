@@ -220,3 +220,22 @@ As and bulk chosen-folder exports, month selection scopes and sidebar sync
 status. Tests use generated files and loopback/fake accounts; no production
 profile, original, sync service or media mutation is performed. Existing indexed
 10,000-slot and cache/refresh/Trash/stack regressions remain part of validation.
+
+## Galeria0.10.1 background update visibility
+
+Read-only live diagnosis found the supposedly missing clip had uploaded22seconds
+after creation and was returned by its remote album search. The service's status
+continued changing every30seconds after startup. The UI's is_active gate stopped
+remote refresh whenever another window had focus; remove that gate for visible
+windows, retaining hidden/viewer/restoring/loading guards. A native fixture now
+adds a remote item with is_active=False and verifies it appears without switching
+pages.62unit tests pass, including a file added under Clips after the first scan
+using the same SyncEngine/journal, and active-old/current service runtime paths.
+
+The installed older service also lacked current progress fields. Validated app
+startup now upgrades/resumes only already-enabled account rules. The live journal
+showed an initial SIGUSR1 terminating a just-started service; installation no
+longer sends that signal, since main begins scanning immediately. Existing running
+services are still explicitly woken. Tests mock service commands; no synthetic
+media is uploaded to a production account. This changes visibility and service
+handoff, not scan interval or source/deletion semantics.

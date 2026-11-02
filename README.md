@@ -77,7 +77,7 @@ The existing image editor remains a preview; this video export path is connected
 
 Visited grid results, date covers and collection thumbnails stay in bounded RAM
 caches. Returning to a cached grid does not replace it with the loading page.
-Active, visible views check for remote changes every15seconds and preserve the
+Visible views check for remote changes every15seconds and preserve the
 loaded page count and scroll position. These checks pause while viewing/editing
 media. Month/year covers load separately from their complete date catalog.
 Changing date tiers closes the expanded folder; transitions match asset IDs
@@ -153,3 +153,12 @@ Select month for the current/selected month, or Select all from selected months.
 The year hint is an input-transparent overlay in the same window, so dragging
 through it does not cross a separate popup input surface. Playback submenu
 chevrons keep their transparent background.
+
+Galeria0.10.1 refreshes visible libraries/albums even while another application
+has focus, so uploads appear when Galeria is on a secondary display. Refresh
+still pauses for hidden windows and focused-media viewing/editing. Folder sync
+rescans enabled rules every30seconds by default; recent or changing files wait
+until stable. After validating a saved account, Galeria resumes its already
+opted-in sync rules and updates an older service runtime. Installing the service
+no longer immediately sends SIGUSR1 before its signal handler is ready; its first
+scan starts automatically. Existing running services use the normal wake signal.

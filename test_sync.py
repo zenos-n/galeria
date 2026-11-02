@@ -52,6 +52,18 @@ class SyncTests(unittest.TestCase):
         SyncEngine(self.client,self.journal,valid_rule=lambda _:False).run_folder(self.rule)
         self.assertEqual(self.client.requests,[])
 
+    def test_new_files_after_first_scan_are_uploaded_without_restarting(self):
+        engine=SyncEngine(self.client,self.journal)
+        with patch('sync_engine.upload_file',return_value='asset') as upload:
+            self.assertEqual(engine.run_folder(self.rule)['uploaded'],1)
+            clips=self.root/'Clips';clips.mkdir();clip=clips/'new.mp4';clip.write_bytes(b'new clip')
+            os.utime(clip,(time.time()-10,time.time()-10))
+            counts=engine.run_folder(self.rule)
+            self.assertEqual(counts['uploaded'],1);self.assertEqual(counts['unchanged'],1)
+            self.assertEqual(upload.call_args.args[1],clip)
+            self.assertEqual(engine.run_folder(self.rule)['unchanged'],2)
+            self.assertEqual(upload.call_count,2);self.assertEqual(clip.read_bytes(),b'new clip')
+
     def test_folders_map_to_separate_albums_and_respect_depth(self):
         child=self.root/'Trips';child.mkdir();photo=child/'photo.jpg';photo.write_bytes(b'child');os.utime(photo,(time.time()-10,time.time()-10))
         deep=child/'deep';deep.mkdir();nested=deep/'photo.jpg';nested.write_bytes(b'deep');os.utime(nested,(time.time()-10,time.time()-10))
@@ -94,6 +106,19 @@ class SyncTests(unittest.TestCase):
             self.assertIn('ExecStart="/tmp/gallery-sync"',unit)
             self.assertIn('WantedBy=default.target',unit)
             self.assertIn((['systemctl','--user','enable','--now',sync_service.UNIT],),[call.args for call in command.call_args_list])
+            self.assertFalse(any('kill' in call.args[0] for call in command.call_args_list))
+
+    def test_request_upgrades_an_active_old_runtime_but_only_wakes_the_current_one(self):
+        import sync_service
+        from types import SimpleNamespace
+        config=Path(self.temp.name)/'config';unit=config/'systemd/user'/sync_service.UNIT
+        unit.parent.mkdir(parents=True);unit.write_text('ExecStart="/tmp/old-runtime"')
+        with patch.dict(os.environ,{'XDG_CONFIG_HOME':str(config)}),patch.object(sync_service,'runtime_command',return_value=['/tmp/new-runtime']),patch.object(sync_service,'command',return_value=SimpleNamespace(returncode=0)) as command,patch.object(sync_service,'install_service') as install:
+            sync_service.request_sync();install.assert_called_once()
+            self.assertIn((['systemctl','--user','restart',sync_service.UNIT],),[call.args for call in command.call_args_list])
+            install.reset_mock();command.reset_mock();unit.write_text('ExecStart="/tmp/new-runtime"')
+            sync_service.request_sync();install.assert_not_called()
+            self.assertIn((['systemctl','--user','kill','-s','USR1',sync_service.UNIT],),[call.args for call in command.call_args_list])
 
 
 if __name__=='__main__':unittest.main()

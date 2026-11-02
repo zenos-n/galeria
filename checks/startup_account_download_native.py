@@ -56,7 +56,7 @@ def close_dialog():
  dialog=window.get_visible_dialog()
  if dialog:dialog.close()
 def check():
- global phase,mosaic_before
+ global phase,mosaic_before,buckets
  try:
   assert time.monotonic()-start<25,(phase,busy,requests)
   if phase==0 and window.client and len(window.media_items)==8 and window.mosaic.rendered:
@@ -87,7 +87,12 @@ def check():
    atomic_write(state_dir()/'sync-status.json',json.dumps({'active':False,'updated':time.time(),'accounts':{identity:{'busy':False,'folders':[{'uploaded':2}]}}}).encode())
    window.uploads.poll_sync();assert window.uploads.summary.get_label()=='Folders up to date'
    assert pickers==['save','folder','profile'],pickers
-   print('CACHE-FIRST PIXELS BEFORE AUTH/NO LOADING PAGE; NO GRID RESET; MONTH SCOPES; SINGLE/BULK CHOSEN DESTINATIONS; PROFILE LOAD/CHANGE; SIDEBAR SYNC/NO USER FOOTER PASSED',flush=True)
+   window.mosaic.set_selection(False)
+   items.insert(0,MediaItem('background-photo','new.png',datetime(2027,1,1),2,metadata={'visibility':'timeline'}))
+   buckets=[{'timeBucket':'2027-01-01','count':1}]+buckets
+   window.is_active=lambda:False;window.refresh_remote();phase=5
+  elif phase==5 and len(window.media_items)==9 and window.media_items[0].id=='background-photo':
+   print('CACHE-FIRST PIXELS BEFORE AUTH/NO LOADING PAGE; NO GRID RESET; MONTH SCOPES; SINGLE/BULK CHOSEN DESTINATIONS; PROFILE LOAD/CHANGE; SIDEBAR SYNC/NO USER FOOTER; UNFOCUSED REMOTE REFRESH PASSED',flush=True)
    window.close();app.quit();return False
  except Exception as error:
   import traceback;traceback.print_exc();errors.append(error);gate.set();window.close();app.quit();return False

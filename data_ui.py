@@ -441,6 +441,9 @@ class LibraryUI:
 
     def refresh_connected_library(self):
         client=self.client
+        from sync_service import read_config
+        sync_account=read_config().get('accounts',{}).get(client.identity,{})
+        if sync_account.get('enabled') and sync_account.get('folders'):self.request_folder_sync()
         self.background(client.albums,self.album_tree.set_albums)
         def dates_loaded(buckets):
             previous=self.timeline_index
@@ -577,7 +580,7 @@ class LibraryUI:
 
     def refresh_remote(self,*_):
         if self.data_stopped:return False
-        if not self.client or self.viewer or self.loading_more or not self.get_visible() or not self.is_active():return True
+        if not self.client or getattr(self.client,'restoring',False) or self.viewer or self.loading_more or not self.get_visible():return True
         if self.current_page in ('albums','people','tags','duplicates','sharing','map'):
             if self.current_page!='map':
                 from collections_ui import collection_view
