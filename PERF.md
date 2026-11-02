@@ -169,3 +169,27 @@ top/bottom mapping, hidden hint at rest, and hint visibility during hover/hold.
 All53unit tests plus native layout, cache/refresh/Trash/stack and rail checks pass.
 Evidence: /tmp/gallery-app-identification/bench-stale.py,
 freeze-queuefix{,-repeat}-events.jsonl, tests-09-final.log and native-09-final.log.
+
+
+## Galeria 0.9.1 scrollbar interaction correction
+
+The first 0.9 rail was a standalone scrollbar beside the grid, so it reserved
+content width and never acquired the native overlay indicator states. Its
+legacy event callback also received a null GdkEvent on the live Wayland backend,
+preventing drag tracking. The rail now sits in a non-measuring Gtk.Overlay and
+uses native overlay-indicator/hovering/dragging CSS states. Tick marks are visible
+only while engaged. Captured click/unpaired-release gestures track held state
+without relying on that event object; parent motion observes the actual cursor
+coordinates even while dragging outside the narrow rail. The hint is anchored to
+those coordinates and presented again when it moves.
+
+A private Xvfb real-XTest pointer check (not direct method calls) verifies full
+content width, collapsed/expanded track states, hidden ticks at rest, visible
+ticks on hover/hold, popup position following cursor movement, native thumb drag,
+tracking outside the rail and release outside returning to the collapsed state.
+The native bar allocation changes21→25px with these theme metrics; screenshots
+confirm the visual indicator goes from narrow to expanded. Full grid width stays
+unchanged. The 10,000-slot date/priority/group test and existing cache/refresh/
+Trash/stack native checks also pass with fatal GTK warnings. All53unit tests pass.
+Run `checks/scrollbar_native.py` only on private DISPLAY=:91, with xdotool available
+or GALERIA_XDOTOOL set. Optional GALERIA_CHECK_SHOTS writes synthetic screenshots.

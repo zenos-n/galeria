@@ -238,8 +238,10 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.scroller.set_child(self.mosaic)
         from year_scroll_ui import YearScrollbar
         self.year_scrollbar=YearScrollbar(self)
-        library_view=Gtk.Box();library_view.append(self.scroller);library_view.append(self.year_scrollbar)
-        self.stack.add_named(library_view, "library")
+        self.library_view=Gtk.Overlay(child=self.scroller)
+        self.library_view.add_overlay(self.year_scrollbar)
+        self.year_scrollbar.attach(self.library_view)
+        self.stack.add_named(self.library_view, "library")
         self.status = Adw.StatusPage()
         self.status_actions = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, halign=Gtk.Align.CENTER)
         self.unlock_button = Gtk.Button(label="Unlock folder")
@@ -444,7 +446,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.9.0", developer_name="Negative Zero",
+                                 version="0.9.1", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 

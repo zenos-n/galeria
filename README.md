@@ -124,3 +124,10 @@ All Photos view. Its small track divisions mark years; the year hint appears
 only during hover or dragging. The newest year is at the top. Scrolling within
 each year remains proportional to that year's content. Abandoned thumbnail jobs
 are retired in batches so rapid scrolling does not repeatedly rescan stale work.
+
+
+The year scrollbar overlays the grid without reserving a side column. It uses
+native overlay-indicator styling: a narrow indicator at rest, an expanded track
+and year divisions on hover/drag, and a year hint anchored to the actual cursor.
+The hint follows the pointer even when dragging outside the track; release
+outside collapses the scrollbar and hides its year divisions.
