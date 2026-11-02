@@ -110,3 +110,10 @@ whole original as an image or repeatedly displaying error toasts.
 fullscreen placement selects the display before mapping, then restores a normal
 window; if the compositor moves it elsewhere, it retains fullscreen on the chosen
 monitor. It does not change monitor configuration or control other windows.
+
+
+Galeria 0.8.1 keeps full-library row heights while constructing rectangles and
+native children only around the viewport. Scroll position determines image-job
+priority; hover and transition planning operate on visible items. Cache writes
+use an eviction index instead of rescanning the directory after every image.
+See [PERF.md](PERF.md) for real-library measurements and remaining outliers.

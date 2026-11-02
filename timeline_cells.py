@@ -25,12 +25,14 @@ class Check:
     def __init__(self,owner,index):self.owner=owner;self.index=index;self.widget=None;self.visible=False;self.active=False;self.child_visible=False
     def ensure(self):
         if self.widget is None:
-            self.widget=Gtk.CheckButton(tooltip_text='Select photo',css_classes=['media-check'],active=self.active)
+            self.widget=Gtk.CheckButton(tooltip_text='Select photo',css_classes=['media-check'],active=self.index in self.owner.selected)
             self.widget.connect('toggled',lambda widget:self.owner.check_toggled(self.index,widget.get_active()))
             self.widget.set_parent(self.owner)
         return self.widget
     def set_visible(self,value):self.visible=value
-    def get_visible(self):return self.visible
+    def get_visible(self):
+        item=self.owner.tiles[self.index].media_item
+        return (self.owner.selection_mode or self.index==self.owner.hovered_index) and not (item and item.metadata.get('placeholder'))
     def set_active(self,value):
         self.active=value
         if self.widget:self.widget.set_active(value)

@@ -78,3 +78,52 @@ indexed-native.log, bench-tier-08.log. Header/sync/locked/hover and video editor
 native checks pass with fatal GTK criticals;49Python tests cover compact parsing,
 full placeholder range, grouped month→year destinations, dynamic job priority,
 folder-album mapping/depth, and cache invalidation during in-flight writes.
+
+
+## Galeria 0.8.1: profiling the real 44,854-item library
+
+The 0.8 synthetic pass missed the user's live regression. Read-only desktop
+traces used Python 3.14.7, PyGObject 3.56.3, GTK 4.22.4, Adwaita 1.9.3 and
+GskVulkanRenderer on DP-2. No production media was changed.
+
+* Disk pruning rescanned and sorted the entire cache after every write. A
+  controlled fixture with 3,000 existing entries and 100 writes took
+  2.9365 / 2.9411 / 2.9612 seconds and 610,100 Path.stat calls per run.
+  An in-memory eviction heap took 0.0156 / 0.0162 / 0.0145 seconds and 100
+  Path.stat calls, plus one initial scandir inventory. Kept. Other writers are
+  reconciled every 30 seconds; a single writer enforces its budget immediately.
+* Hover and selection updates now touch active cells; checks derive visibility
+  from selection/hover state. Unallocated cells have no GTK parent, so hidden
+  entries do not remain in the native child traversal. Cached per-month rows
+  survive other months' metadata updates.
+* Animation planning gathers visible photos instead of building 44,854 sprite
+  records and discarding most afterward. In the same unprofiled live sequence,
+  gathering photos fell from p95 83.10 ms to 1.08 / 1.13 ms. Group clips retain
+  actual source IDs and final folder-cover bounds.
+* A remaining visibility-index rebuild walked every stored rectangle whenever
+  metadata arrived. The final layout retains complete row heights and month
+  extents, but materializes rectangles only around the current scroll band.
+  Select All still includes loaded matching media outside that band. Offline
+  native checks compare the full scroll height with uncropped justified rows,
+  bound native parentage/rendered rectangles, jump to old dates and verify
+  viewport-prioritized downloads and grouped year transitions.
+
+The same live sequence (12 tier switches, then 120 scroll increments) measured:
+
+| Unprofiled Vulkan run | Allocation p95 | Tier frame interval p95 | Scroll frame interval p95 |
+| --- | ---: | ---: | ---: |
+| Before viewport-bounded rectangle construction | 37.18 ms | 33.34 ms | 116.38 ms |
+| Final, first run | 8.20 ms | 17.04 ms | 33.32 ms |
+| Final, repeated | 7.23 ms | 17.13 ms | 16.79 ms |
+
+These are frame-clock intervals, not GPU presentation timestamps. The first
+layout still has a roughly 74–82 ms outlier; no guaranteed frame rate under
+other GPU/game loads is claimed. Network/cache state varies between live runs.
+The deterministic cache benchmark and bounded native geometry checks supplement
+the desktop comparison. An OpenGL renderer experiment was slower (scroll p95
+283.66 ms); no renderer override ships.
+
+Evidence: /tmp/gallery-app-identification/bench-cache.py, live-timed-indexfix.json,
+live-timed-windowgeometry{,-repeat}.json and live-timed-gl-layoutfix.json.
+Run the offline native regression with the packaged GI environment on a private
+display: `G_DEBUG=fatal-criticals python3 checks/timeline_native.py`.

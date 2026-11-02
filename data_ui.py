@@ -554,7 +554,7 @@ class LibraryUI:
                         self.set_library_items(replacement.items,append=True)
                     else:
                         top,height=self.mosaic.visible_range()
-                        key=next((key for key,_,_,a,b in self.mosaic.months if a<b and self.mosaic.tiles[a] in self.mosaic.rendered and self.mosaic.rendered[self.mosaic.tiles[b-1]][1]>=top),next(iter(index.ranges),None))
+                        key=next((key for key,(a,b) in self.mosaic.month_extents.items() if b>=top),next(iter(index.ranges),None))
                         if key:
                             index.loaded.discard(key);self.timeline_refresh_key=key
                     self.request_timeline_metadata()
@@ -575,7 +575,7 @@ class LibraryUI:
         if self.mosaic.indexed:
             top,height=self.mosaic.visible_range()
             if self.mosaic.mode=='all':
-                preferred=[key for key,_,_,a,b in self.mosaic.months if a<b and self.mosaic.tiles[a] in self.mosaic.rendered and self.mosaic.rendered[self.mosaic.tiles[b-1]][1]+self.mosaic.rendered[self.mosaic.tiles[b-1]][3]>=top-height*2 and self.mosaic.rendered[self.mosaic.tiles[a]][1]<=top+height*3]
+                preferred=[key for key,(a,b) in self.mosaic.month_extents.items() if b>=top-height*2 and a<=top+height*3]
             elif self.mosaic.expanded_month:preferred=[self.mosaic.expanded_month]
             elif self.mosaic.expanded_year:preferred=[key for key in index.ranges if key.startswith(self.mosaic.expanded_year)]
         for key in dict.fromkeys([*preferred,*index.ranges]):
