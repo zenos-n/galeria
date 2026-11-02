@@ -109,6 +109,30 @@ class Viewer(Gtk.Overlay):
         header_motion.connect('leave',lambda *_:setattr(self,'chrome_hovered',False))
         self.header.add_controller(header_motion)
         self.update_metadata()
+        background=Gtk.GestureClick(button=1)
+        background.connect('released',self.background_released)
+        self.add_controller(background)
+
+    def background_released(self,gesture,_count,x,y):
+        if self.editing or self.stage.progress<1:return
+        node=self.pick(x,y,Gtk.PickFlags.DEFAULT)
+        while node and node!=self:
+            if isinstance(node,(Gtk.Button,Gtk.ToggleButton,Gtk.MenuButton)) or node==self.details:return
+            node=node.get_parent()
+        ok,bounds=self.stage.picture.compute_bounds(self)
+        if ok and bounds.get_x()<=x<=bounds.get_x()+bounds.get_width() and bounds.get_y()<=y<=bounds.get_y()+bounds.get_height():return
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED);self.close()
+
+    def prepare_media(self):
+        item=self.source.media_item
+        if item and item.kind=='VIDEO':
+            uri=Gio.File.new_for_path(item.path).get_uri() if item.path else self.window.get_video_proxy().register(self.window.client,item,self.window.vault)
+            self.stage.set_video(uri)
+        self.window.load_preview(self.stage,self.source)
+
+    def opened(self):
+        self.info.set_sensitive(True)
+        if self.stage.video_player:self.stage.video_player.play()
 
     def update_metadata(self):
         item=getattr(self.source,'media_item',None)
@@ -135,8 +159,8 @@ class Viewer(Gtk.Overlay):
             arrow.set_opacity(0)
         self.close_button.grab_focus()
         self.info.set_sensitive(False)
-        self.stage.animate(self.source,False,self.fade,lambda:self.info.set_sensitive(True))
-        self.window.load_preview(self.stage,self.source)
+        self.prepare_media()
+        self.stage.animate(self.source,False,self.fade,self.opened)
 
     def toggle_details(self,widget):
         if widget.get_active() and self.stage.progress<1:
@@ -157,6 +181,7 @@ class Viewer(Gtk.Overlay):
         needs_settle = self.editing or self.immersive or self.viewer_split.get_show_sidebar()
         was_immersive=self.immersive
         self.closing=True
+        if self.stage.video_player:self.stage.video_player.pause()
         if self.immersive:
             self.set_immersive(False)
         self.set_editing(False)
@@ -183,6 +208,7 @@ class Viewer(Gtk.Overlay):
         if self.stage.progress<1 or self.closing or self.media_stack.get_transition_running():
             return
         old=self.stage
+        if old.video_player:old.video_player.pause()
         self.window.mosaic.hide_tile(None)
         visible=[i for i,tile in enumerate(self.window.mosaic.tiles) if tile in self.window.mosaic.rendered]
         self.index=visible[(visible.index(self.index)+step)%len(visible)]
@@ -208,7 +234,12 @@ class Viewer(Gtk.Overlay):
         GLib.timeout_add(40,cleanup)
         self.title.set_title(f'Photo preview · {self.index+1}')
         self.update_metadata()
-        self.window.load_preview(self.stage,self.source)
+        self.prepare_media()
+        stage=self.stage
+        def play():
+            if self.stage==stage and not self.closing and stage.video_player:stage.video_player.play()
+            return False
+        GLib.timeout_add(230,play)
 
     def set_immersive(self,active):
         if self.editing or self.stage.progress<1:

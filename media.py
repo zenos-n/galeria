@@ -23,6 +23,7 @@ class PhotoStage(Gtk.Widget):
         self.bottom_inset = 0
         self.immersive = False
         self.frozen_destination = None
+        self.video_player=None
         self.picture = Gtk.Overlay()
         self.material = Gtk.Overlay(hexpand=True, vexpand=True)
         self.material.add_css_class("expanded-photo")
@@ -43,7 +44,7 @@ class PhotoStage(Gtk.Widget):
         self.thumbnail = Gtk.Picture(paintable=paintable, can_shrink=True, content_fit=Gtk.ContentFit.FILL)
         self.thumbnail.set_can_target(False)
         self.picture.add_overlay(self.thumbnail)
-        self.material.set_opacity(0)
+        self.material.set_opacity(1)
         self.symbol.set_opacity(0)
         self.image=Gtk.Picture(can_shrink=True,content_fit=Gtk.ContentFit.CONTAIN)
         self.material.set_child(self.image)
@@ -55,6 +56,12 @@ class PhotoStage(Gtk.Widget):
 
     def set_texture(self,texture):
         self.image.set_paintable(texture)
+        self.symbol.set_visible(False)
+
+    def set_video(self,uri):
+        from video_ui import VideoPlayer
+        self.video_player=VideoPlayer(uri)
+        self.material.add_overlay(self.video_player)
         self.symbol.set_visible(False)
 
     def destination(self, width, height):
@@ -121,7 +128,7 @@ class PhotoStage(Gtk.Widget):
             ease = t*t*(3-2*t)
             self.progress = initial + ((0 if reverse else 1)-initial)*ease
             self.thumbnail.set_opacity((1-self.progress)**5)
-            self.material.set_opacity(self.progress)
+            self.material.set_opacity(1)
             self.symbol.set_opacity(self.progress)
             self.symbol.set_pixel_size(round(23+35*self.progress))
             on_progress(self.progress)
@@ -160,6 +167,7 @@ class PhotoStage(Gtk.Widget):
         self.geometry_tick=self.add_tick_callback(frame)
 
     def dispose(self):
+        if self.video_player:self.video_player.stop()
         if self.geometry_tick:
             self.remove_tick_callback(self.geometry_tick)
             self.geometry_tick=0
