@@ -199,7 +199,8 @@ class Viewer(Gtk.Overlay):
                 if self.chrome_timer:
                     GLib.source_remove(self.chrome_timer)
                     self.chrome_timer=0
-                self.source.grab_focus()
+                target=next((tile for tile in self.window.mosaic.tiles if tile.media_item.id==self.source.media_item.id),None)
+                if target and target.get_child_visible():target.grab_focus()
             self.stage.animate(self.source,True,self.fade,finish)
             return GLib.SOURCE_REMOVE
         # Allow sidebar/editor/fullscreen geometry to settle before measuring the tile.

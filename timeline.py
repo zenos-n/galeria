@@ -20,6 +20,7 @@ class Mosaic(Gtk.Widget):
         self.bucket_counts={}
         self.indexed=bool(buckets and any(item.metadata.get('timeline_slot') for item in (items or [])))
         self.items=items
+        self.placeholder_paintable=Gdk.MemoryTexture.new(1,1,Gdk.MemoryFormat.R8G8B8A8,GLib.Bytes.new(bytes([58,58,61,255])),4)
         self.target=154
         self.mode='all'
         self.show_durations=True
@@ -107,6 +108,7 @@ class Mosaic(Gtk.Widget):
             for i,picture in enumerate(self.card_pictures[card]):
                 if members:
                     tile=members[min(i,len(members)-1)]
+                    if tile.media_item:picture.media_id=tile.media_item.id
                     self.cover_slots.setdefault(tile,[]).append(picture)
         motion=Gtk.EventControllerMotion()
         motion.connect('motion',self.pointer_motion)
@@ -282,7 +284,7 @@ class Mosaic(Gtk.Widget):
         if self.expanded_year and self.on_bucket:self.on_bucket('year',year)
 
     def change(self,update,kind='tier'):
-        sources=self.tier_sources if self.tier_sources is not None else self.image_occurrences(self.rendered)
+        sources=self.tier_sources if self.tier_sources is not None else [(id,paintable,tuple(a+(b-a)*self.p for a,b in zip(start,end))) for _,images,_,_ in self.tier_groups for id,paintable,start,end in images] if self.tick and self.motion_kind=='tier' and self.tier_groups else self.image_occurrences(self.rendered)
         self.tier_sources=None;self.tier_images=[];self.tier_groups=[]
         if self.tick:
             self.remove_tick_callback(self.tick)
@@ -293,20 +295,28 @@ class Mosaic(Gtk.Widget):
         update()
         self.motion_kind=kind
         self.folder_swap=any(a and b and a!=b for a,b in zip(before,(self.expanded_month,self.expanded_year)))
-        target,_=self.target_layout(self.last_width)
+        target,target_height=self.target_layout(self.last_width)
+        self.motion_widgets=tuple(widget for widget in dict.fromkeys([*self.from_map,*target]) if widget not in self.tile_set)
         if kind=='tier':
             top,page=self.visible_range()
-            sources=[(id,paintable,(rect[0],rect[1]-top,*rect[2:])) for id,paintable,rect in sources if rect[1]+rect[3]>=top and rect[1]<=top+page]
-            destinations=[value for value in self.image_occurrences(target) if value[2][1]<=page and value[2][1]+value[2][3]>=0]
+            visible=[value for value in sources if value[2][1]+value[2][3]>=top and value[2][1]<=top+page]
+            month=self.asset_months.get(min(visible,key=lambda value:value[2][1])[0],'') if visible else ''
+            if self.mode=='all':
+                anchor=next((heading for entry,heading in zip(self.months,self.headings) if entry[0]==month),None)
+            else:anchor=(self.year_cards if self.mode=='years' else self.month_cards).get(month[:4] if self.mode=='years' else month)
+            self.transition_scroll=max(0,min(target.get(anchor,(0,0))[1],target_height-page))
+            shift=self.transition_scroll-top
+            sources=[(id,paintable,(rect[0],rect[1]+shift,*rect[2:])) for id,paintable,rect in visible]
+            destinations=[value for value in self.image_occurrences(target) if value[2][1]<=self.transition_scroll+page and value[2][1]+value[2][3]>=self.transition_scroll]
             cards={key:target[card] for key,card in (self.year_cards if self.mode=='years' else self.month_cards if self.mode=='months' else {}).items() if card in target}
             previous_cards=self.year_cards if old_mode=='years' else self.month_cards if old_mode=='months' else {}
             for id,_,_ in destinations:
                 month=self.asset_months.get(id,'');card=previous_cards.get(month[:4] if old_mode=='years' else month)
                 if card in self.from_map:
-                    rect=self.from_map[card];cards[('source',id)]=(rect[0],rect[1]-top,*rect[2:])
+                    rect=self.from_map[card];cards[('source',id)]=(rect[0],rect[1]+shift,*rect[2:])
             self.tier_groups=motion_groups(sources,destinations,self.asset_months,self.mode,cards)
             self.tier_images=[(paintable,start,end) for _,images,_,_ in self.tier_groups for _,paintable,start,end in images]
-            self.from_map={widget:(rect[0],rect[1]-top,*rect[2:]) for widget,rect in self.from_map.items()}
+            self.from_map={widget:(rect[0],rect[1]+shift,*rect[2:]) for widget,rect in self.from_map.items()}
         self.folder_membership={}
         if kind=='folder':
             for widget in dict.fromkeys([*self.from_map,*target]):
@@ -342,13 +352,16 @@ class Mosaic(Gtk.Widget):
             for picture in self.card_pictures[card]:
                 if getattr(picture,'media_id',None):self.asset_months[picture.media_id]=key
         for tile in self.tiles:
-            if tile in layout and tile.media_texture:
-                result.append((tile.media_item.id,tile.media_texture,layout[tile]))
+            if tile in layout and tile.media_item:
+                result.append((tile.media_item.id,tile.media_texture or self.placeholder_paintable,layout[tile]))
         for card,pictures in self.card_pictures.items():
             if card not in layout:continue
             for i,picture in enumerate(pictures):
-                paintable=picture.get_paintable();asset=getattr(picture,'media_id',None)
-                if not paintable or asset is None:continue
+                paintable=picture.get_paintable() or self.placeholder_paintable;asset=getattr(picture,'media_id',None)
+                if asset is None:
+                    key=next((key for key,value in self.month_cards.items() if value==card),None)
+                    if key is None:key=next((key+'-01' for key,value in self.year_cards.items() if value==card),'')
+                    asset=f'cover:{key}:{i}';self.asset_months[asset]=key
                 rect=cover_slot(layout[card],i)
                 result.append((asset,paintable,rect))
         return result
@@ -435,7 +448,7 @@ class Mosaic(Gtk.Widget):
         if self.p>=1 or not self.from_map:
             return target,height
         result={}
-        for widget in dict.fromkeys([*self.from_map,*target]):
+        for widget in (self.motion_widgets if self.motion_kind=='tier' and self.tier_groups else dict.fromkeys([*self.from_map,*target])):
             if self.motion_kind=='tier' and self.tier_groups and widget in self.tile_set:continue
             old=self.from_map.get(widget)
             new=target.get(widget)

@@ -52,6 +52,18 @@ class SyncTests(unittest.TestCase):
         SyncEngine(self.client,self.journal,valid_rule=lambda _:False).run_folder(self.rule)
         self.assertEqual(self.client.requests,[])
 
+    def test_folders_map_to_separate_albums_and_respect_depth(self):
+        child=self.root/'Trips';child.mkdir();photo=child/'photo.jpg';photo.write_bytes(b'child');os.utime(photo,(time.time()-10,time.time()-10))
+        deep=child/'deep';deep.mkdir();nested=deep/'photo.jpg';nested.write_bytes(b'deep');os.utime(nested,(time.time()-10,time.time()-10))
+        engine=SyncEngine(self.client,self.journal);destinations=[]
+        def destination(rule):destinations.append((rule['id'],rule['album_name']));return rule['album_name']
+        rule={**self.rule,'folder_albums':True,'max_depth':1}
+        with patch.object(engine,'destination',side_effect=destination),patch('sync_engine.upload_file',return_value='asset'):
+            self.assertEqual(engine.run_folder(rule)['uploaded'],2)
+            self.assertEqual({name for _,name in destinations},{'photos','photos / Trips'})
+            self.assertEqual(engine.run_folder(rule)['unchanged'],2)
+        self.assertEqual(nested.read_bytes(),b'deep');self.assertFalse(any(method=='DELETE' for _,_,method in self.client.requests))
+
     def test_actual_multipart_upload_and_confirmation(self):
         from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
         from threading import Thread,Event

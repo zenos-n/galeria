@@ -208,6 +208,7 @@ class LibraryUI:
         return True
 
     def lock_folder(self,refresh=True):
+        self.timeline_pending=set()
         client=self.client
         self.sync_cancel.set();self.vault=None
         self.data_generation+=1
@@ -745,6 +746,10 @@ class LibraryUI:
     def flush_pending_media(self):
         if self.pending_media:
             items,append=self.pending_media;self.pending_media=None
+            if self.mosaic.indexed and self.timeline_index and len(self.mosaic.tiles)==len(self.timeline_index.items):
+                for key,(a,b) in self.timeline_index.ranges.items():
+                    if self.media_items[a:b]!=self.timeline_index.items[a:b]:self.mosaic.update_bucket(key,self.timeline_index.items[a:b])
+                self.load_visible_thumbnails();return
             self.set_library_items(items,append)
 
     def load_thumbnail(self,tile,mosaic,pending_key=None):

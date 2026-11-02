@@ -41,6 +41,7 @@ def unlock_folder(window,after=None):
             return MediaCache(client.identity+'|locked|'+hashlib.sha256(key).hexdigest(),key=key,budget=None) if key else None
         def done(vault):
             window.data_generation+=1
+            window.timeline_pending=set()
             window.pending_images.clear()
             window.vault=vault
             window.texture_cache.clear()
@@ -66,7 +67,7 @@ def sync_locked(window,client,vault):
             batch,next_page=client.search({'visibility':'locked'},page=page)
             items.extend(batch)
             if not next_page:break
-            page=int(next_page)
+            page=next_page
         if cancel.is_set():return None
         vault.put('index',json.dumps([item.metadata for item in items]).encode())
         for count,item in enumerate(items):

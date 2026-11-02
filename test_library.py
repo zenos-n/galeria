@@ -56,6 +56,9 @@ class ImmichFixture(BaseHTTPRequestHandler):
         if self.path=='/api/albums':return self.respond([{'id':'album','albumName':'Trips'}])
         if self.path=='/api/albums/album':return self.respond({'id':'album','albumName':'Trips','assetCount':2})
         if self.path.startswith('/api/timeline/buckets'):return self.respond([{'timeBucket':'2026-03-01','count':1},{'timeBucket':'2018-01-01','count':500}])
+        if self.path.startswith('/api/timeline/bucket?'):return self.respond({'id':['one','private'],'ratio':[.5,2.],
+            'fileCreatedAt':['2026-03-01T10:00:00Z','2026-03-01T10:00:00Z'],'localOffsetHours':[1,1],
+            'isImage':[True,False],'visibility':['timeline','locked'],'duration':[None,1000]})
         if self.path=='/api/server/about':return self.respond({'version':'3.2.0-fixture'})
         if self.path=='/api/server/statistics':return self.respond({'photos':2,'videos':0,'usage':1000000})
         if self.path=='/api/server/storage':return self.respond({'diskUse':'1 GB','diskAvailable':'9 GB','diskUsagePercentage':10})
@@ -85,6 +88,22 @@ class ImmichFixture(BaseHTTPRequestHandler):
 
 
 class LibraryTests(unittest.TestCase):
+    def test_compact_timeline_has_sizes_and_excludes_private_assets(self):
+        with TemporaryDirectory() as root,patch.dict(os.environ,{'XDG_CACHE_HOME':root}):
+            client=ImmichClient(self.address);client.token='test-session';client.user={'id':'index-test'}
+            values=client.time_bucket('2026-03')
+            self.assertEqual(len(values),1);self.assertEqual(values[0].ratio,.5)
+            self.assertEqual(values[0].created.hour,11);self.assertTrue(values[0].metadata['timeline_stub'])
+
+    def test_empty_video_thumbnail_does_not_download_whole_original(self):
+        from library import media_from_asset
+        with TemporaryDirectory() as root,patch.dict(os.environ,{'XDG_CACHE_HOME':root}):
+            client=ImmichClient(self.address);client.token='test-session';client.user={'id':'empty-test'}
+            previous=ImmichFixture.thumbnail;ImmichFixture.thumbnail=b'';ImmichFixture.requests=[]
+            try:
+                with self.assertRaises(LibraryError):client.image_bytes(media_from_asset({'id':'video','type':'VIDEO','visibility':'timeline'}))
+                self.assertFalse(any('/original' in path for _,path,_,_ in ImmichFixture.requests))
+            finally:ImmichFixture.thumbnail=previous
     def test_map_tilejson_is_inlined_cached_and_receives_no_account_token(self):
         with TemporaryDirectory() as root,patch.dict(os.environ,{'XDG_CACHE_HOME':root}):
             client=ImmichClient(self.address);client.token='test-session';client.user={'id':'map-test'}
