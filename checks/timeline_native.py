@@ -64,7 +64,7 @@ def check():
    recent=client.downloads[-20:];assert recent and sum(id.startswith(expected) for id in recent)>=15,(expected,recent)
    assert not any(size==100 for _,_,size in client.calls),client.calls
    assert expected in client.bucket_calls
-   m.select_all();assert len(m.selected)==sum(not item.metadata.get('placeholder') for item in m.items)
+   scope=m.selection_months();m.select_all();assert m.selected and all(m.items[i].created.strftime('%Y-%m') in scope for i in m.selected)
    m.set_selection(False);assert not m.selected
    assert len(m._target_cache)<=4 and len(m._row_cache)<=384
    print('10000 sized slots; active native cells',live,'; full scroll height',round(window.scroller.get_vadjustment().get_upper()),'; jump prioritizes visible month',flush=True)
@@ -78,16 +78,16 @@ def check():
    window.switcher.set_active_name('all');phase=5
   elif phase==5 and not m.tick and window.year_scrollbar.get_visible():
    rail=window.year_scrollbar;adjustment=window.scroller.get_vadjustment()
-   assert isinstance(rail.bar,Gtk.Scrollbar) and not rail.popover.get_visible()
+   assert isinstance(rail.bar,Gtk.Scrollbar) and not rail.hint_card.get_visible()
    rail.bar.get_adjustment().set_value(0);assert adjustment.get_value()==0
    rail.bar.get_adjustment().set_value(.96)
    assert abs(adjustment.get_value()-(adjustment.get_upper()-adjustment.get_page_size()))<1
    rail.motion(None,0,rail.get_height()/2);phase=6
   elif phase==6:
-   rail=window.year_scrollbar;assert rail.popover.get_visible()
-   rail.held=True;rail.leave();assert rail.popover.get_visible()
+   rail=window.year_scrollbar;assert rail.hint_card.get_visible()
+   rail.held=True;rail.leave();assert rail.hint_card.get_visible()
    rail.held=False;rail.leave();phase=7
-  elif phase==7 and not window.year_scrollbar.popover.get_visible():
+  elif phase==7 and not window.year_scrollbar.hint_card.get_visible():
    window.close();app.quit();print('INDEXED LOD/VIRTUALIZATION/PRIORITY/GROUPS/YEAR RAIL PASSED',flush=True);return False
  except Exception as error:
   import traceback;traceback.print_exc();errors.append(error);window.close();app.quit();return False

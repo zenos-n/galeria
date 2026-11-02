@@ -340,7 +340,9 @@ class ImmichClient:
                 headers={'Authorization':'Bearer '+self.token,'Content-Type':'multipart/form-data; boundary='+boundary},method='POST'),timeout=30) as response:
                 result=json.loads(response.read(1024*1024));self.user.update(result)
                 return result
-        except (HTTPError,URLError,OSError,ValueError):raise LibraryError('Could not update your profile photo. Check the image and try again.') from None
+        except HTTPError as error:
+            error.close();raise LibraryError('Could not update your profile photo. Check the image and try again.') from None
+        except (URLError,OSError,ValueError):raise LibraryError('Could not update your profile photo. Check the image and try again.') from None
 
     def check_original_access(self,item):
         if not self.token:raise LibraryError('Sign in again to download this file.')

@@ -35,7 +35,7 @@ def folder_sync(window,identity=None):
     state=Adw.PreferencesGroup(title='Status')
     state_row=Adw.ActionRow(title='Ready' if account.get('enabled') else 'Paused',subtitle=account['server'],use_markup=False)
     now=Gtk.Button(label='Sync now',valign=Gtk.Align.CENTER,sensitive=account.get('enabled',False))
-    now.connect('clicked',lambda _:window.background(wake_service,lambda _:window.notice('Sync requested.')))
+    now.connect('clicked',lambda _:window.request_folder_sync())
     state_row.add_suffix(now);state.add(state_row);page.add(state)
     folders=Adw.PreferencesGroup(title='Folders')
     add=Gtk.Button(icon_name='list-add-symbolic',tooltip_text='Add folder');folders.set_header_suffix(add)

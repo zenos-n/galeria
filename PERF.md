@@ -193,3 +193,30 @@ unchanged. The 10,000-slot date/priority/group test and existing cache/refresh/
 Trash/stack native checks also pass with fatal GTK warnings. All53unit tests pass.
 Run `checks/scrollbar_native.py` only on private DISPLAY=:91, with xdotool available
 or GALERIA_XDOTOOL set. Optional GALERIA_CHECK_SHOTS writes synthetic screenshots.
+
+## Galeria 0.10 cache-first startup and input follow-up
+
+A native private-Xvfb integration fixture blocks session validation and confirms
+that a fresh process restores all eight cached thumbnails before that HTTP call
+returns, never enters the loading status page, and retains the same mosaic after
+validation. A separate real-client test ages disk snapshots beyond their normal
+TTL and verifies startup restoration makes zero HTTP or unlock requests. These
+are behavior/request-count checks, not claims about startup latency on every
+library. Startup decodes only the initial three screens; ordinary disk/RAM
+budgets and locked-media separation remain intact.
+
+The 0.9.1 GtkPopover hint still owned a native input surface despite can_target
+being false. Replaced it with non-targetable widgets in the existing overlay.
+The real-XTest check now enters the actual hint during a held thumb drag, then
+continues moving inside it and verifies scrolling continues. No physical
+Wayland input automation is claimed. The Clapper 0.10 stylesheet applied popup
+backgrounds to every arrow, including modelbutton submenu chevrons; the scoped
+application rule clears only those chevrons. A native video-menu screenshot
+confirms the correction.
+
+All60unit tests pass on Python3.13.15/PyGObject3.56.3/GTK4.22.4/Adwaita1.9.3.
+The native integration also verifies profile photo loading/change, single Save
+As and bulk chosen-folder exports, month selection scopes and sidebar sync
+status. Tests use generated files and loopback/fake accounts; no production
+profile, original, sync service or media mutation is performed. Existing indexed
+10,000-slot and cache/refresh/Trash/stack regressions remain part of validation.

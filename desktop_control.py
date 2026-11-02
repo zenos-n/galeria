@@ -1,7 +1,7 @@
 """Session-bus controls for the GNOME helper; no media or credentials cross it."""
 import threading
 from gi.repository import Gio,GLib
-from sync_service import read_config,wake_service,install_service,command,UNIT
+from sync_service import read_config,wake_service,install_service,command,UNIT,request_sync
 from library import LibraryError
 
 INTERFACE='com.neg_zero.Galeria.Control1'
@@ -51,11 +51,11 @@ class DesktopControl:
             if not self.state()['SyncEnabled']:
                 invocation.return_dbus_error(INTERFACE+'.NotConfigured','Enable Background uploads in Folder sync first.');return
             self.busy=True;self.emit()
+            if self.app.window:self.app.window.uploads.requested()
             def work():
                 error=None
                 try:
-                    if command(['systemctl','--user','is-active','--quiet',UNIT],check=False).returncode:install_service()
-                    else:wake_service()
+                    request_sync()
                 except Exception as failure:error=str(failure) if isinstance(failure,LibraryError) else 'Could not request folder sync.'
                 def done():
                     self.busy=False

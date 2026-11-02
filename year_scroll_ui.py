@@ -1,5 +1,5 @@
 """Native scrollbar with equal year segments and a hover/drag year hint."""
-from gi.repository import Gdk,GLib,Graphene,Gtk
+from gi.repository import GLib,Graphene,Gtk
 from year_scroll import YearScale
 
 
@@ -16,10 +16,9 @@ class YearScrollbar(Gtk.Overlay):
         self.set_child(self.bar)
         self.ticks=Gtk.DrawingArea(can_target=False,visible=False)
         self.ticks.set_draw_func(self.draw_ticks);self.add_overlay(self.ticks)
-        self.hint=Gtk.Label(margin_top=4,margin_bottom=4,margin_start=8,margin_end=8)
-        self.popover=Gtk.Popover(child=self.hint,position=Gtk.PositionType.LEFT,
-            autohide=False,has_arrow=False,can_target=False)
-        self.popover.set_parent(self);self.popover.add_css_class('tooltip')
+        self.hint=Gtk.Label(margin_top=5,margin_bottom=5,margin_start=9,margin_end=9,can_target=False)
+        self.hint_card=Gtk.Box(visible=False,can_target=False,css_classes=['card','year-hint'])
+        self.hint_card.append(self.hint)
         adjustment.connect('value-changed',self.seek)
         click=Gtk.GestureClick(button=1,propagation_phase=Gtk.PropagationPhase.CAPTURE)
         click.connect('pressed',self.pressed);click.connect('released',self.released)
@@ -29,6 +28,8 @@ class YearScrollbar(Gtk.Overlay):
         scroll.connect('value-changed',self.queue_refresh);scroll.connect('changed',self.queue_refresh)
 
     def attach(self,view):
+        self.hint_layer=Gtk.Fixed(can_target=False)
+        self.hint_layer.put(self.hint_card,0,0);view.add_overlay(self.hint_layer)
         motion=Gtk.EventControllerMotion(propagation_phase=Gtk.PropagationPhase.CAPTURE)
         def moved(controller,x,y):
             if not self.get_visible():return
@@ -65,7 +66,10 @@ class YearScrollbar(Gtk.Overlay):
 
     def seek(self,*_):
         fraction=self.bar.get_adjustment().get_value()/.96
-        if not self.updating:self.window.scroller.get_vadjustment().set_value(self.model.scroll(fraction))
+        if not self.updating:
+            scroll=self.window.scroller.get_vadjustment()
+            self.model=YearScale(self.window.mosaic.month_extents,max(0,scroll.get_upper()-scroll.get_page_size()))
+            scroll.set_value(self.model.scroll(fraction))
         if self.held:self.show_hint(fraction)
 
     def motion(self,_controller,_x,y):
@@ -83,7 +87,7 @@ class YearScrollbar(Gtk.Overlay):
         self.bar.add_css_class('hovering') if expanded else self.bar.remove_css_class('hovering')
         self.bar.add_css_class('dragging') if self.held else self.bar.remove_css_class('dragging')
         self.ticks.set_visible(expanded)
-        if not expanded:self.popover.popdown()
+        if not expanded:self.hint_card.set_visible(False)
 
     def pressed(self,_gesture,_count,_x,y):
         self.held=True;self.pointer_y=y;self.engagement()
@@ -96,10 +100,14 @@ class YearScrollbar(Gtk.Overlay):
         if not self.years:return
         fraction=max(0,min(1,fraction));index=min(len(self.years)-1,int(fraction*len(self.years)))
         self.hint.set_label(self.years[index])
-        rect=Gdk.Rectangle();rect.x=0;rect.y=round(self.pointer_y);rect.width=1;rect.height=1
-        self.popover.set_pointing_to(rect)
-        if self.popover.get_visible():self.popover.present()
-        else:self.popover.popup()
+        point=Graphene.Point();point.init(0,self.pointer_y)
+        ok,point=self.compute_point(self.hint_layer,point)
+        if not ok:return
+        self.hint_card.set_visible(True)
+        width=self.hint_card.measure(Gtk.Orientation.HORIZONTAL,-1)[1]
+        height=self.hint_card.measure(Gtk.Orientation.VERTICAL,width)[1]
+        self.hint_layer.move(self.hint_card,max(4,point.x-width-8),
+            max(4,min(self.hint_layer.get_height()-height-4,point.y-height/2)))
 
     def draw_ticks(self,widget,context,width,height):
         if not self.years:return

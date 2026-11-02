@@ -174,7 +174,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.uploads = Uploads(self)
         sidebar.append(self.uploads)
         self.source_label = label("No library connected", "source-label", xalign=0)
-        sidebar.append(self.source_label)
+
         self.rows["library"].get_parent().select_row(self.rows["library"])
         for name, callback in [("source", self.welcome), ("density", self.density),
                                ("appearance", self.appearance), ("about", self.about),
@@ -265,20 +265,22 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.selection_title=label('Select items','heading')
         self.selection_bar=Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_UP)
         actionbar=Gtk.ActionBar()
-        select_all=Gtk.Button(label='Select all')
+        select_all=Gtk.Button(label='Select month');self.select_scope_button=select_all
         select_all.connect('clicked',lambda _:self.mosaic.select_all())
         actionbar.pack_start(select_all)
         cancel=Gtk.Button(label='Cancel')
         cancel.connect('clicked',lambda _:self.mosaic.set_selection(False))
         actionbar.pack_start(cancel)
         for icon,title,callback in [
+            ('folder-download-symbolic','Download selected',lambda _:self.download_items([self.mosaic.tiles[i].media_item for i in sorted(self.mosaic.selected)])),
             ('gallery-share-symbolic','Share selected',lambda _:share_sheet(self,len(self.mosaic.selected))),
             ('list-add-symbolic','Add to album',lambda _:self.add_selected_to_album()),
             ('starred-symbolic','Favorite selected',lambda _:self.selected_action('favorite')),
             ('changes-prevent-symbolic','Move to locked folder',lambda _:self.move_selected_to_locked()),
             ('user-trash-symbolic','Trash or restore selected',lambda _:self.selected_action('trash')),
         ]:
-            actionbar.pack_end(button(icon,title,callback))
+            control=button(icon,title,callback);actionbar.pack_end(control)
+            if title=='Download selected':self.download_selected_button=control
         self.selection_bar.set_child(actionbar)
         self.toolbar.add_bottom_bar(self.selection_bar)
         self.mosaic.on_selection=self.selection_changed
@@ -302,10 +304,20 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
             return True
         return False
 
+    def request_folder_sync(self):
+        from sync_service import request_sync
+        self.uploads.requested()
+        self.background(request_sync,lambda _:self.uploads.poll_sync(),self.uploads.failed)
+
+    def download_items(self,items):
+        from download_ui import download_items
+        download_items(self,items)
+
     def selection_changed(self):
         active=self.mosaic.selection_mode
         self.select_button.set_active(active)
         self.selection_bar.set_reveal_child(active)
+        self.select_scope_button.set_label('Select all from selected months' if self.mosaic.mode=='all' and len(self.mosaic.selection_months())>1 else 'Select month' if self.mosaic.mode=='all' else 'Select all')
         self.selection_title.set_label(f'{len(self.mosaic.selected)} selected' if self.mosaic.selected else 'Select items')
         self.update_header()
 
@@ -342,6 +354,36 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.hamburger_menu.append('Quit Galeria','app.quit')
         self.avatar.set_text(self.client.user.get('name','') if self.client else 'Galeria')
         self.avatar.set_show_initials(bool(self.client))
+        self.avatar.set_custom_image(None)
+        if self.client:self.load_profile_photo()
+
+    def load_profile_photo(self):
+        client=self.client;revision=client.user.get('profileChangedAt')
+        from imaging import decode_image
+        def ready(pixels):
+            if pixels is not None and self.client is client and client.user.get('profileChangedAt')==revision:
+                self.avatar.set_custom_image(self.texture_from_pixels(pixels))
+        def load():
+            data=client.profile_image(cached=True) if getattr(client,'restoring',False) else client.profile_image()
+            return decode_image(data,96) if data else None
+        self.background(load,ready,lambda _:None)
+
+    def change_profile_photo(self):
+        client=self.client
+        if not client:return
+        picker=Gtk.FileDialog(title='Choose your Immich profile photo')
+        images=Gtk.FileFilter(name='Images');images.add_mime_type('image/*')
+        filters=Gio.ListStore.new(Gtk.FileFilter);filters.append(images);picker.set_filters(filters)
+        def chosen(picker,result):
+            try:file=picker.open_finish(result)
+            except GLib.Error:return
+            if not file.get_path():self.notice('Choose an image on this device.');return
+            def work():
+                with open(file.get_path(),'rb') as stream:data=stream.read(20*1024*1024+1)
+                if len(data)>20*1024*1024:raise LibraryError('Choose a profile photo smaller than 20 MB.')
+                return client.upload_profile_image(data,file.get_basename())
+            self.background(work,lambda _:(self.remember_user(),self.load_profile_photo(),self.notice('Profile photo updated.')))
+        picker.open(self,None,chosen)
 
     def account_menu(self):
         popover=Gtk.Popover()
@@ -349,7 +391,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         if self.client:
             box.append(label(self.client.user.get('name','Account'),'heading',xalign=0))
             box.append(label(self.client.user.get('email',''),'dim-label',xalign=0,ellipsize=3))
-        for title,callback in ([('Folder sync',self.show_folder_sync),('Preferences',lambda:preferences(self)),('Switch library…',self.welcome),('Sign out',self.sign_out)] if self.client else [('Choose library…',self.welcome),('Preferences',lambda:preferences(self))]):
+        for title,callback in ([('Change profile photo…',self.change_profile_photo),('Folder sync',self.show_folder_sync),('Preferences',lambda:preferences(self)),('Switch library…',self.welcome),('Sign out',self.sign_out)] if self.client else [('Choose library…',self.welcome),('Preferences',lambda:preferences(self))]):
             item=Gtk.Button(label=title,css_classes=['flat'],halign=Gtk.Align.FILL)
             item.connect('clicked',lambda _,callback=callback:(self.account_button.popdown(),callback()))
             box.append(item)
@@ -446,7 +488,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.9.1", developer_name="Negative Zero",
+                                 version="0.10.0", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 

@@ -48,7 +48,7 @@ class Viewer(Gtk.Overlay):
         self.info.add_css_class('flat')
         self.info.connect('toggled',self.toggle_details)
         self.header.pack_end(self.info)
-        self.download = icon_button('folder-download-symbolic','Download',lambda _:window.notice('Downloads are not connected in this preview.'))
+        self.download = icon_button('folder-download-symbolic','Download',lambda _:window.download_items([self.source.media_item]))
         self.share = icon_button('gallery-share-symbolic','Share',lambda _:share_sheet(window))
         self.fullscreen_button = icon_button('view-fullscreen-symbolic','Fullscreen media',lambda _:self.set_immersive(not self.immersive))
         for widget in (self.download,self.share,self.fullscreen_button):

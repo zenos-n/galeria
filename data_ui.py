@@ -133,17 +133,39 @@ class LibraryUI:
             if done:done()
             return False
         if mode=='immich' and self.preferences.get('remember'):
+            self.stack.set_visible_child_name('library')
+            if self.get_visible() and self.scroller.get_width()<=0:
+                GLib.timeout_add(16,self.restore_last_library,done);return False
+            width=max(900,self.scroller.get_width()-20);height=max(400,self.scroller.get_height())
+            def validate(client):
+                user=client.request('/users/me')
+                if user['id']!=self.preferences['user_id']:raise LibraryError('The saved session belongs to another account.')
+                client.detect_version();client.lock_session();return user
             def restore():
                 client=ImmichClient(self.preferences['server'])
                 client.token=secret_get(client.base+'|'+self.preferences['user_id'],'session')
                 if not client.token:return None
-                client.user=client.request('/users/me')
-                client.detect_version()
-                client.lock_session()
+                client.user=dict(self.preferences.get('last_user') or {'id':self.preferences['user_id'],'name':self.preferences.get('email','Immich')})
+                client.user['id']=self.preferences['user_id'];client.user['isAdmin']=False
+                client.modern_search=self.preferences.get('modern_search',True)
+                from startup_cache import restore as cached_restore
+                client.bootstrap=cached_restore(client,width,height) if client.modern_search else None
+                client.restoring=bool(client.bootstrap)
+                if not client.bootstrap:
+                    GLib.idle_add(self.busy_library,'Reconnecting to your library…')
+                    client.user=validate(client)
                 return client
-            self.busy_library('Reconnecting to your library…')
+            self.stack.set_visible_child_name('library')
             def finished(client):
-                self.connect_immich(client) if client else self.welcome()
+                if client:
+                    self.connect_immich(client)
+                    if client.restoring:
+                        def validated(user):
+                            if self.client is not client:return
+                            client.user=user;client.restoring=False;self.remember_user();self.update_account_ui()
+                            self.refresh_connected_library();self.load_visible_thumbnails()
+                        self.background(lambda:validate(client),validated,lambda message:self.notice('Showing cached photos. '+message))
+                else:self.welcome()
                 if done:done()
             self.background(restore,finished,lambda _:finished(None))
         else:
@@ -394,24 +416,49 @@ class LibraryUI:
         self.video_prefetch.clear()
         self.timeline_buckets=[];self.dates_ready=False;self.bucket_scope={}
         client.media_cache()
+        bootstrap=getattr(client,'bootstrap',None)
+        if bootstrap:self.timeline_buckets,self.timeline_index,pixels=bootstrap;self.dates_ready=True
         self.library_mode='immich'
         self.local_items=[]
         self.page_cache.clear();self.collection_cache.clear();self.date_cover_cache.clear();self.collection_textures.clear();self.texture_cache.clear()
         self.pending_images.clear()
+        if bootstrap:
+            for id,pixel in pixels.items():self.texture_cache[id]=self.texture_from_pixels(pixel)
+            client.bootstrap=None
         self.preferences.update(mode='immich',server=client.base,user_id=client.user['id'],email=client.user.get('email',''))
+        self.remember_user()
         self.save_preferences()
         self.search.set_mode('immich')
         self.source_label.set_label(client.user.get('name') or client.user.get('email') or 'Immich')
         self.update_account_ui()
         self.current_page='library'
-        self.background(client.albums,self.album_tree.set_albums)
         self.navigate(self.rows['library'].get_parent(),self.rows['library'])
+        if not getattr(client,'restoring',False):self.refresh_connected_library()
+
+    def remember_user(self):
+        self.preferences['last_user']={key:self.client.user.get(key) for key in ('id','name','email','profileImagePath','profileChangedAt')}
+        self.preferences['modern_search']=getattr(self.client,'modern_search',True);self.save_preferences()
+
+    def refresh_connected_library(self):
+        client=self.client
+        self.background(client.albums,self.album_tree.set_albums)
         def dates_loaded(buckets):
+            previous=self.timeline_index
+            if previous and buckets==self.timeline_buckets:
+                self.dates_ready=True
+                key=next(iter(previous.ranges),None)
+                if key:previous.loaded.discard(key);self.timeline_refresh_key=key
+                self.request_timeline_metadata();return
             self.timeline_buckets=buckets;self.dates_ready=True
             if hasattr(client,'time_bucket') and client.modern_search:
                 from timeline_index import TimelineIndex
                 self.timeline_index=TimelineIndex(buckets)
-            if self.current_page=='library':self.search_library()
+                if previous:
+                    for key,(a,b) in list(self.timeline_index.ranges.items()):
+                        if key in previous.loaded and key in previous.ranges:
+                            old_a,old_b=previous.ranges[key]
+                            if b-a==old_b-old_a:self.timeline_index.apply(key,previous.items[old_a:old_b])
+            if self.current_page=='library':self.search_library(force=bool(self.media_items))
         def dates_failed(message):
             self.dates_ready=True;self.notice('Date index unavailable: '+message)
             if self.current_page=='library':self.search_library()
@@ -570,7 +617,7 @@ class LibraryUI:
 
     def request_timeline_metadata(self):
         index=self.timeline_index;client=self.client
-        if not index or not client or self.current_page!='library' or not self.mosaic.indexed:return
+        if not index or not client or getattr(client,'restoring',False) or self.current_page!='library' or not self.mosaic.indexed:return
         preferred=[]
         if self.mosaic.indexed:
             top,height=self.mosaic.visible_range()
@@ -618,6 +665,8 @@ class LibraryUI:
         mosaic.mode=self.switcher.get_active_name() if self.current_page=='library' else 'all'
         mosaic.target=old.target
         mosaic.show_durations=old.show_durations
+        for tile in mosaic.tiles:
+            if tile.media_item and self.texture_key(tile.media_item) in self.texture_cache:self.apply_texture(tile,self.texture_cache[self.texture_key(tile.media_item)])
         mosaic.expanded_month=old.expanded_month
         mosaic.expanded_year=old.expanded_year
         self.populate_date_covers(mosaic)
@@ -674,11 +723,11 @@ class LibraryUI:
         if self.client and mosaic.mode!='all':self.load_date_covers(mosaic,top,height,wanted)
         for _,tile,key in sorted(tiles,key=lambda row:row[0]):
             if tile.media_texture is None and self.texture_key(tile.media_item) in self.texture_cache:self.apply_texture(tile,self.texture_cache[self.texture_key(tile.media_item)])
-            if tile.media_texture is None and time.monotonic()>=getattr(tile,'retry_after',0) and (tile.media_item.kind=='IMAGE' or self.client):
+            if tile.media_texture is None and not getattr(self.client,'restoring',False) and time.monotonic()>=getattr(tile,'retry_after',0) and (tile.media_item.kind=='IMAGE' or self.client):
                 key=(id(mosaic),tile.media_item.id)
                 if key not in self.pending_images:
                     self.pending_images.add(key);self.load_thumbnail(tile,mosaic,key)
-            if tile.media_item.kind=='VIDEO':self.preload_video(tile.media_item,job_key=key)
+            if tile.media_item.kind=='VIDEO' and not getattr(self.client,'restoring',False):self.preload_video(tile.media_item,job_key=key)
 
     def load_date_covers(self,mosaic,top,height,wanted):
         from datetime import datetime,timedelta

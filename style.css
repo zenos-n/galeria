@@ -87,3 +87,5 @@
 .map-photo { padding: 0; min-width: 50px; min-height: 50px; border: 3px solid @accent_bg_color; box-shadow: 0 2px 5px alpha(black,.3); }
 .map-note { padding: 7px 12px; border-radius: 8px; }
 .galeria-video clapper-gtk-buffering-animation { opacity: 0; }
+.year-hint { border-radius: 10px; }
+.galeria-video clapper-gtk-video .osd popover modelbutton arrow { background: none; box-shadow: none; }

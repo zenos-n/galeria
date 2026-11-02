@@ -49,9 +49,9 @@ Galeria 0.5 fetches the complete month/year catalog before loading the first pag
 
 Search toggles from the sidebar and replaces the main header controls; Escape or the toggle closes it. Signed-in accounts have a context menu with sign-out and folder sync. Clicking the viewer backdrop closes focused media. Media stays opaque during its grid transition.
 
-**Hamburger → Folder sync** configures upload-only rules per account: library or album destination, include/exclude subfolders, and maximum subfolder depth (0 is unlimited). Enabling uploads explicitly stores the session in the system keyring and installs/enables the app-owned `gallery-folder-sync.service` user service. It continues while the app is closed. A private SQLite journal skips unchanged files, checksum checks avoid duplicate uploads, changed files upload as new assets, and a stable-file check defers files still being written. The service never edits originals or mirrors deletions. Pausing/removing a rule stops it at file boundaries; an in-flight upload can finish. Disabling all accounts stops the service. No service was enabled against a production account during development.
+**Hamburger → Folder sync** configures upload-only rules per account: library or album destination, include/exclude subfolders, and an explicit unlimited-depth switch or maximum subfolder depth. Enabling uploads explicitly stores the session in the system keyring and installs/enables the app-owned `gallery-folder-sync.service` user service. It continues while the app is closed. A private SQLite journal skips unchanged files, checksum checks avoid duplicate uploads, changed files upload as new assets, and a stable-file check defers files still being written. The service never edits originals or mirrors deletions. Pausing/removing a rule stops it at file boundaries; an in-flight upload can finish. Disabling all accounts stops the service. No service was enabled against a production account during development.
 
-Folder sync, sharing and remote playback were verified against loopback fixtures, not the user's production server. Google Photos processing/AI parity, offline locked-vault browsing and viewer downloads remain unfinished.
+Folder sync, sharing and remote playback were verified against loopback fixtures, not the user's production server. Google Photos processing/AI parity, offline locked-vault browsing remain unfinished.
 
 The app is now **Galeria**, application ID `com.neg-zero.Galeria`, executable `galeria`. Desktop Open With accepts supported image/video files and directories; a single file opens in the viewer. Existing `gallery` configuration/cache/state directories and the folder-sync service name are retained for compatibility. Keyring reads fall back to the old schema and migrate entries to the Galeria schema; sign-out clears both. No stored library, sync rule, or encrypted vault key is discarded.
 
@@ -131,3 +131,25 @@ native overlay-indicator styling: a narrow indicator at rest, an expanded track
 and year divisions on hover/drag, and a year hint anchored to the actual cursor.
 The hint follows the pointer even when dragging outside the track; release
 outside collapses the scrollbar and hides its year divisions.
+
+Galeria 0.10 restores the saved account's ordinary date index and cached visible
+thumbnail pixels before session validation or network refresh. Existing disk
+snapshots are usable past their refresh age; network revalidation updates the
+same grid in place when its date catalog is unchanged. It decodes the first three
+screens on a worker; the existing bounded RAM cache handles navigation afterward.
+Missing or evicted thumbnails still need downloading. Cold accounts and cleared
+caches still show loading feedback. Locked media is excluded from this bootstrap.
+
+The user menu loads the Immich profile photo and offers **Change profile photo…**
+with a native image chooser. Photos are cached by account and profile revision.
+The sidebar shows actual folder-sync activity, uploaded/already-saved counts and
+errors, including immediately after Sync now. It no longer repeats the username.
+
+The viewer's Download action uses native Save As for the original. Multi-selection
+has Download selected, which chooses a destination directory and preserves name
+collisions with numbered copies. Transfers stream with cancellation and atomic
+completion; failure never replaces an existing destination. Grid selection offers
+Select month for the current/selected month, or Select all from selected months.
+The year hint is an input-transparent overlay in the same window, so dragging
+through it does not cross a separate popup input surface. Playback submenu
+chevrons keep their transparent background.

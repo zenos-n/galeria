@@ -1,5 +1,6 @@
 """Streaming, atomic original downloads; never overwrite a source file."""
 import os
+from http.client import HTTPException
 from pathlib import Path
 import tempfile
 from library import LibraryError
@@ -43,6 +44,8 @@ def save_original(client,item,destination,cancel,progress=lambda *_:None,overwri
                     target=destination.with_name(destination.stem+f' ({number})'+destination.suffix);number+=1
             destination=target
         return destination
+    except HTTPException:
+        raise LibraryError('The download ended before the file was complete. Try again.') from None
     except OSError as error:
         raise LibraryError('Not enough space to save the download.' if error.errno==28 else 'Could not save the download. Check the selected location.') from None
     finally:

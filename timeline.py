@@ -214,9 +214,17 @@ class Mosaic(Gtk.Widget):
             self.selected.clear()
         self.update_selection()
 
+    def selection_months(self):
+        chosen={self.tiles[i].media_item.created.strftime('%Y-%m') for i in self.selected if self.tiles[i].media_item}
+        if chosen:return chosen
+        top,_=self.visible_range()
+        current=next((key for key,(start,end) in self.month_extents.items() if end>top),self.months[0][0] if self.months else None)
+        return {current} if current else set()
+
     def select_all(self):
         self.selection_mode=True
-        eligible=range(len(self.tiles)) if self.mode=='all' else [i for key,_,year,a,b in self.months if key==self.expanded_month or year==self.expanded_year for i in range(a,b)]
+        months=self.selection_months()
+        eligible=[i for key,_,_,a,b in self.months if key in months for i in range(a,b)] if self.mode=='all' else [i for key,_,year,a,b in self.months if key==self.expanded_month or year==self.expanded_year for i in range(a,b)]
         self.selected={i for i in eligible if self.query.casefold() in self.tiles[i].filename.casefold() and not (self.tiles[i].media_item and self.tiles[i].media_item.metadata.get('placeholder'))}
         self.update_selection()
 

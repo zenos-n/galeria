@@ -44,23 +44,23 @@ def check():
   if phase==0:
    move(100,100);phase=1
   elif phase==1:
-   assert not rail.ticks.get_visible() and not rail.popover.get_visible()
+   assert not rail.ticks.get_visible() and not rail.hint_card.get_visible()
    assert rail.bar.has_css_class('overlay-indicator') and not rail.bar.has_css_class('hovering')
    full_width=window.view.get_width();assert window.scroller.get_width()==full_width
    collapsed=rail.bar.get_width();rail_rect=bounds(rail);screenshot('scrollbar-rest')
    move(rail_rect.get_x()+rail_rect.get_width()/2,rail_rect.get_y()+rail_rect.get_height()*.25);phase=2
   elif phase==2:
-   assert rail.hovered and rail.popover.get_visible() and rail.ticks.get_visible()
+   assert rail.hovered and rail.hint_card.get_visible() and rail.ticks.get_visible()
    expanded=rail.bar.get_width();assert expanded>collapsed,(collapsed,expanded)
    assert window.scroller.get_width()==full_width
-   first_cursor=rail.pointer_y;first_hint=rail.popover.get_surface().get_position_y()
-   assert abs(rail.popover.get_pointing_to()[1].y-first_cursor)<2
+   first_cursor=rail.pointer_y;first_hint=bounds(rail.hint_card).get_y()
+   assert not rail.hint_layer.get_can_target() and not rail.hint_card.get_can_target()
    screenshot('scrollbar-hover')
    move(rail_rect.get_x()+rail_rect.get_width()/2,rail_rect.get_y()+rail_rect.get_height()*.75);phase=3
   elif phase==3:
    assert rail.pointer_y>first_cursor+rail.get_height()*.4
-   assert rail.popover.get_surface().get_position_y()>first_hint+rail.get_height()*.35
-   assert abs(rail.popover.get_pointing_to()[1].y-rail.pointer_y)<2
+   assert bounds(rail.hint_card).get_y()>first_hint+rail.get_height()*.35
+   assert abs(bounds(rail.hint_card).get_y()+rail.hint_card.get_height()/2-(rail_rect.get_y()+rail.pointer_y))<2
    slider=find(rail.bar,'slider');assert slider
    rect=bounds(slider);move(rect.get_x()+rect.get_width()/2,rect.get_y()+rect.get_height()/2)
    input('mousedown',1);phase=4
@@ -69,15 +69,20 @@ def check():
    move(rail_rect.get_x()+rail_rect.get_width()/2,rail_rect.get_y()+rail_rect.get_height()*.65);phase=5
   elif phase==5:
    assert rail.held and window.scroller.get_vadjustment().get_value()>0
-   assert abs(rail.popover.get_pointing_to()[1].y-rail.pointer_y)<2
-   move(rail_rect.get_x()-40,rail_rect.get_y()+rail_rect.get_height()*.85);phase=6
+   assert abs(bounds(rail.hint_card).get_y()+rail.hint_card.get_height()/2-(rail_rect.get_y()+rail.pointer_y))<2
+   hint=bounds(rail.hint_card);move(hint.get_x()+hint.get_width()/2,hint.get_y()+hint.get_height()/2);phase=6
   elif phase==6:
-   assert rail.held and not rail.hovered and rail.ticks.get_visible() and rail.popover.get_visible()
-   assert abs(rail.pointer_y-rail.get_height()*.85)<3
+   assert rail.held and not rail.hovered and rail.ticks.get_visible() and rail.hint_card.get_visible()
+   node=window.pick(bounds(rail.hint_card).get_x()+rail.hint_card.get_width()/2,bounds(rail.hint_card).get_y()+rail.hint_card.get_height()/2,Gtk.PickFlags.DEFAULT)
+   assert node is not rail.hint_card and node is not rail.hint
+   before=window.scroller.get_vadjustment().get_value();window._before_hint_drag=before
+   move(bounds(rail.hint_card).get_x()+rail.hint_card.get_width()/2,rail_rect.get_y()+rail.pointer_y+70);phase=8
+  elif phase==8:
+   assert rail.held and window.scroller.get_vadjustment().get_value()!=window._before_hint_drag
    input('mouseup',1);phase=7
   elif phase==7:
    assert not rail.held and not rail.hovered
-   assert not rail.ticks.get_visible() and not rail.popover.get_visible()
+   assert not rail.ticks.get_visible() and not rail.hint_card.get_visible()
    assert rail.bar.get_width()==collapsed,(rail.bar.get_width(),collapsed)
    assert window.scroller.get_width()==full_width
    print('REAL POINTER: overlay width preserved; native track/expansion',collapsed,'->',expanded,'; hint follows cursor/drag; ticks hide; release collapses',flush=True)

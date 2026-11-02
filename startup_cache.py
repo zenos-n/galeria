@@ -6,9 +6,11 @@ from library import LibraryError
 
 
 def restore(client,width,height,target=154):
-    buckets=client.time_buckets(cached=True)
-    if not buckets:return None
-    index=TimelineIndex(buckets)
+    try:
+        buckets=client.time_buckets(cached=True)
+        if not buckets:return None
+        index=TimelineIndex(buckets)
+    except (LibraryError,ValueError,TypeError,KeyError):return None
     for key in list(index.ranges):
         try:items=client.time_bucket(key,cached=True)
         except (LibraryError,ValueError,TypeError):continue

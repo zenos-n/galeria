@@ -1,5 +1,6 @@
 """Native album navigation and utility panels; writes remain preview controls."""
 import gi
+import time
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
@@ -31,7 +32,7 @@ class Uploads(Gtk.MenuButton):
         self.ring = Gtk.DrawingArea(content_width=18, content_height=18)
         self.ring.add_css_class("upload-ring")
         self.ring.set_draw_func(self.draw_ring)
-        self.summary = text("Uploading 4 items", xalign=0, hexpand=True)
+        self.summary = text("Folder sync", xalign=0, hexpand=True)
         summary.append(self.ring)
         summary.append(self.summary)
         self.set_child(summary)
@@ -41,9 +42,9 @@ class Uploads(Gtk.MenuButton):
                        margin_bottom=12, margin_start=12, margin_end=12, width_request=330)
         line = Gtk.Box(spacing=16)
         column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, hexpand=True)
-        self.title = text("Uploading 4 items", xalign=0)
-        self.progress = Gtk.ProgressBar(fraction=.25)
-        self.count = text("1 / 4", "caption dim-label", xalign=0)
+        self.title = text("Folder sync", xalign=0)
+        self.progress = Gtk.ProgressBar()
+        self.count = text("", "caption dim-label", xalign=0)
         column.append(self.title)
         column.append(self.progress)
         column.append(self.count)
@@ -54,11 +55,56 @@ class Uploads(Gtk.MenuButton):
         cancel.set_valign(Gtk.Align.CENTER)
         line.append(cancel)
         body.append(line)
-        body.append(text("Progress preview · no files are being uploaded", "caption dim-label", xalign=0))
+        self.note=text('', 'caption dim-label',xalign=0,wrap=True);body.append(self.note)
         popover.set_child(body)
         self.set_popover(popover)
+        self.sync_requested_at=0;self.manual=False;self.request_error=None
+        GLib.timeout_add_seconds(1,self.poll_sync)
+
+    def requested(self):
+        self.request_error=None
+        self.sync_requested_at=time.time();self.set_visible(True)
+        self.summary.set_label('Syncing folders…');self.title.set_label('Sync requested')
+        self.progress.pulse();self.note.set_label('Waiting for the background service…')
+
+    def failed(self,message):
+        client=self.window.client
+        self.sync_requested_at=0;self.request_error=(client.identity,message) if client else None
+        self.poll_sync();self.window.notice(message)
+
+    def poll_sync(self):
+        if getattr(self.window,'data_stopped',False):return False
+        client=getattr(self.window,'client',None)
+        if not client:
+            if not self.manual:self.set_visible(False)
+            return True
+        from sync_service import read_config,read_status
+        account=read_config().get('accounts',{}).get(client.identity,{})
+        status=read_status();value=status.get('accounts',{}).get(client.identity,{})
+        pending=self.sync_requested_at and status.get('updated',0)<self.sync_requested_at
+        enabled=account.get('enabled') and account.get('folders')
+        request_error=self.request_error[1] if self.request_error and self.request_error[0]==client.identity else ''
+        if not enabled and not pending and not request_error:
+            if not self.manual:self.set_visible(False)
+            return True
+        self.set_visible(True)
+        folders=value.get('folders',[])+([value.get('progress',{})] if value.get('busy') else [])
+        uploaded=sum(row.get('uploaded',0) for row in folders)
+        errors=[str(error) for row in folders for error in row.get('errors',[])];error=request_error or value.get('error') or (errors[0] if errors else '')
+        busy=pending or status.get('active',False) and value.get('busy',False)
+        title='Sync needs attention' if error else 'Syncing folders…' if busy else 'Folders up to date'
+        self.summary.set_label(title);self.title.set_label(title)
+        self.count.set_label(f'{uploaded} uploaded · '+str(sum(row.get('existing',0)+row.get('unchanged',0) for row in folders))+' already saved')
+        self.note.set_label(error or value.get('current_folder','') if busy else error or 'New and changed files upload automatically. Originals are unchanged.')
+        self.progress.pulse() if busy else self.progress.set_fraction(0 if error else 1)
+        self.ring.set_visible(busy)
+        return True
 
     def cancel(self):
+        self.sync_requested_at=0;self.request_error=None
+        if self.window.client and not self.manual:
+            from sync_service import disable_account
+            self.window.background(lambda:disable_account(self.window.client.identity),lambda _:self.poll_sync())
         self.popdown()
         self.set_visible(False)
         self.title.set_label("No uploads in progress")
@@ -77,6 +123,7 @@ class Uploads(Gtk.MenuButton):
         context.stroke()
 
     def preview(self, count=4, popup=True):
+        self.manual=True
         self.set_visible(count>0)
         self.title.set_label(f"Uploading {count} items")
         self.progress.set_fraction(.25)
