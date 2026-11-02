@@ -36,3 +36,25 @@ The native 150-item fixture also checks that initial image requests stay below a
 Thumbnail requests now cover the visible viewport plus two viewport heights above and below. Nearby videos use a separate two-worker queue to preload at most 2 MiB per video into the existing account cache (encrypted for locked media). Viewer playback streams subsequent byte ranges instead of waiting for a whole download. The range fixture verifies that an in-prefix seek causes zero additional upstream requests and a full read reuses the prefix before requesting the remaining range. These are request-count/behavior checks, not production latency or memory benchmarks.
 
 The packaged GTK 4.22.4 disables its GStreamer media backend, which explains the nonfunctional Gtk.Video path. Gallery 0.4 instead packages Clapper 0.10.0/ClapperGtk with GStreamer 1.26.11 and its playback plugins. Native generated-MP4 playback reached position 0.6 seconds and hid the loading spinner. This verifies the installed playback pipeline, not every codec in a user's library.
+
+## Galeria 0.7 date views and visited pages
+
+Date covers now request four assets for each date card within the two-screen
+loading window, independently of the paginated all-photos results. Decoded date
+covers (96cards), collection thumbnails (256), grid textures (768), and24visited
+query results have bounded in-memory caches. Lock/sign-out/account changes clear
+those caches. Re-entering a cached query issues no initial media request; active
+views check remote changes every15seconds without hiding cached content.
+
+Native synthetic checks verified30date buckets/600photos, unloaded month covers,
+opening-animation intermediate frames despite a40ms data response, cached base
+view reuse after a folder query, stack closure on tier changes, a successful
+Trash thumbnail flight/reflow, and a new simulated phone upload appearing after
+an automatic refresh. No production assets were mutated.
+
+Tier motion matches source asset IDs with individual folder-cover quadrants.
+Per-frame drawing clips to the viewport; allocation retains two screens above
+and below. Animated tile imagery uses its existing texture directly, avoiding
+layout of each tile widget during the tier motion. The controlled1200-image,
+60-month comparison uses software GL and measures CPU allocation/snapshot time,
+not production GPU frame rate; logs are /tmp/gallery-app-identification/bench-tier-{before,after}.log.

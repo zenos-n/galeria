@@ -314,6 +314,7 @@ class LibraryUI:
         self.lock_button.set_visible(False)
         self.data_generation+=1
         self.client=None
+        self.media_items=[]
         self.video_prefetch.clear()
         self.update_account_ui()
         self.timeline_buckets=[];self.dates_ready=True;self.bucket_scope={}
@@ -352,6 +353,7 @@ class LibraryUI:
         self.data_generation+=1
         self.search_generation+=1
         self.client=client
+        self.media_items=[]
         self.video_prefetch.clear()
         self.timeline_buckets=[];self.dates_ready=False;self.bucket_scope={}
         client.media_cache()
@@ -469,7 +471,9 @@ class LibraryUI:
                 self.loading_more=False
             else:self.set_library_items(result,append=append or force)
         def failed(message):
-            if request_id==self.search_generation:self.library_failed(message)
+            if request_id==self.search_generation:
+                if force:self.loading_more=False;self.notice(message)
+                else:self.library_failed(message)
         count=len(self.media_items) if force else 0
         def load():
             items,cursor=client.search(filters,query,next_page)
@@ -488,6 +492,12 @@ class LibraryUI:
             return True
         if self.current_page not in ('library','photos','videos','favorites','archive','trash') and not self.current_page.startswith('album-'):return True
         self.client.refresh_serial=getattr(self.client,'refresh_serial',0)+1
+        if self.current_page=='library':
+            def dates(buckets):
+                if buckets!=self.timeline_buckets:
+                    self.timeline_buckets=buckets
+                    if not self.viewer:self.set_library_items(self.media_items,append=True)
+            self.background(self.client.time_buckets,dates,lambda _:None)
         self.search_library(preserve_folder=True,force=True)
         return True
 
@@ -507,6 +517,7 @@ class LibraryUI:
         mosaic.show_durations=old.show_durations
         mosaic.expanded_month=old.expanded_month
         mosaic.expanded_year=old.expanded_year
+        self.populate_date_covers(mosaic)
         mosaic.rebuild()
         if reflow or old.tick or mosaic.mode!='all' and (mosaic.expanded_month or mosaic.expanded_year):mosaic.continue_from(old,'reflow' if reflow else None)
         mosaic.on_selection=self.selection_changed
@@ -584,12 +595,26 @@ class LibraryUI:
                 values=[(asset,self.texture_from_pixels(value)) for asset,value in values]
                 self.date_cover_cache[cache_key]=values;self.date_cover_cache.move_to_end(cache_key)
                 while len(self.date_cover_cache)>96:self.date_cover_cache.popitem(last=False)
+                if cache_key[0]=='months':
+                    year=cache_key[1][:4]
+                    newest=next((month[0] for month in mosaic.months if month[2]==year),None)
+                    if newest==cache_key[1]:self.date_cover_cache[('years',year)]=values
                 for i,picture in enumerate(mosaic.card_pictures[card]):
                     if values:
                         picture.media_id,texture=values[min(i,len(values)-1)];picture.set_paintable(texture)
+                self.populate_date_covers(mosaic)
             self.background(load,ready,lambda _:None,images=True)
 
+    def populate_date_covers(self,mosaic):
+        for mode,cards in [('months',mosaic.month_cards),('years',mosaic.year_cards)]:
+            for key,card in cards.items():
+                values=self.date_cover_cache.get((mode,key),[])
+                for i,picture in enumerate(mosaic.card_pictures[card]):
+                    if values:
+                        picture.media_id,texture=values[min(i,len(values)-1)];picture.set_paintable(texture)
+
     def scroll_changed(self,*_):
+        self.mosaic.queue_allocate()
         self.load_visible_thumbnails()
         if not self.client and not self.local_items:return
         if self.stack.get_visible_child_name()!='library' or self.viewer:return

@@ -13,7 +13,7 @@ The welcome dialog routes **Yes, use Immich** to server/email/password sign-in a
 
 Local mode recursively discovers images and videos without modifying files or following symlinks. Images render thumbnails/previews, including WebP and AVIF, decoded off the GTK thread. Dates currently use filesystem modification times; filename search is local and case-insensitive. Scrolling near the end automatically loads the next batch, preserving scroll position. Images within two viewports above/below are requested; viewer previews have a separate worker queue. Clapper/GStreamer plays local and authenticated remote videos with buffering feedback and native controls. Nearby videos preload a bounded 2 MiB prefix. The loopback range bridge keeps credentials out of player URLs and uses encrypted caching for locked videos.
 
-Ordinary thumbnails/previews are cached on disk with a 512 MB limit, account/server/revision-separated keys and 256 in-memory textures. Metadata snapshots expire after 30 seconds; Refresh bypasses them. Concurrent identical requests are coalesced. Preferences has Clear cache. This does not remove encrypted device copies. Measurements and limits are in PERF.md.
+Ordinary thumbnails/previews are cached on disk with a 512 MB limit, account/server/revision-separated keys and 768 in-memory textures. Metadata snapshots expire after 30 seconds; Refresh bypasses them. Concurrent identical requests are coalesced. Preferences has Clear cache. This does not remove encrypted device copies. Measurements and limits are in PERF.md.
 
 **Hamburger → Administration**, visible only to administrators, has Overview, Users, Job queues, Libraries and Settings. Click a user to edit name/email, role, quota and password, view storage/session information, or soft-delete/restore the account. Create user adds an account without sending email. Queues support Pause/Resume; older servers without `/queues` have read-only `/jobs` statistics. External libraries can be created, their server paths/exclusions edited, and scans started. Server scalar settings and string lists have native editors; nested object arrays are displayed as advanced entries, not edited. Save merges only changed fields into a fresh configuration. Server permissions remain authoritative and each section has its own error/retry state.
 
@@ -41,7 +41,7 @@ The welcome question has an illustration slot above the text for a user-supplied
 
 Date folders reveal their photo rows directly downward at the media's normal size. Expanded years contain all that year's photos, without nested month folders or subgroups. Tier geometry is cached and intermediate frames reuse stable child sizes; measured CPU results and limits are in PERF.md. Fullscreen animates media bounds, the black backdrop and control visibility.
 
-The crop tool has draggable corners, a movable crop area, locked/free aspect ratios and guides reaching the media edges. It previews crop bounds; image processing and saving remain unconnected. Hover checkboxes are independent circular controls, so clicking one selects rather than opening the viewer.
+The image crop tool has draggable corners, a movable crop area, locked/free aspect ratios and guides reaching the media edges. It previews crop bounds; image processing and saving remain unconnected. Hover checkboxes are independent circular controls, so clicking one selects rather than opening the viewer.
 
 Run the tests in the packaged Python environment (Pillow and cryptography required) with `python3 -m unittest -v`. They cover layout/crop geometry, discovery, HTTP requests, WebP/AVIF/JPEG decoding, cache persistence/isolation/coalescing and encrypted copy integrity. Native tests use generated media and a loopback fixture, including actual pointer album navigation, infinite scroll, account create/edit, utility results, PIN elevation and encrypted originals. No production account was mutated during verification.
 
@@ -67,3 +67,20 @@ in the background**. Closing the window hides it when background mode is enabled
 Ctrl+Q or Quit Galeria exits. Folder uploads use their independent sync service.
 The optional [GNOME helper](https://github.com/zenos-n/galeria-gnome-extension)
 adds Open, Folder sync, Sync now and background controls to Quick Settings.
+
+Video editing supports trim start/end, free or fixed-ratio crop, quarter-turn
+rotation, Original/Vivid/Warm/Cool/Mono/Noir filters, and a five-second encoded
+preview. Save a copy exports H.264/AAC MP4 using FFmpeg, with cancellation and
+atomic replacement. It refuses to overwrite the original. Remote edits read the
+original through the authenticated loopback bridge; tokens never reach FFmpeg.
+The existing image editor remains a preview; this video export path is connected.
+
+Visited grid results, date covers and collection thumbnails stay in bounded RAM
+caches. Returning to a cached grid does not replace it with the loading page.
+Active, visible views check for remote changes every15seconds and preserve the
+loaded page count and scroll position. These checks pause while viewing/editing
+media. Month/year covers load separately from their complete date catalog.
+Changing date tiers closes the expanded folder; transitions match asset IDs
+between the actual grid images and cover quadrants. Only the viewport is drawn,
+with two screens above/below allocated. Successful batch Trash animates thumbnail
+snapshots into the sidebar, then rearranges the remaining tiles without refetching.

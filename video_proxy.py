@@ -22,10 +22,13 @@ class VideoProxy:
         self.server.daemon_threads=True
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
 
-    def register(self,client,item,vault=None):
+    def register(self,client,item,vault=None,original=False):
         key=secrets.token_urlsafe(24)
-        with self.lock:self.sources[key]=(client,item,vault)
+        with self.lock:self.sources[key]=(client,item,vault,original)
         return f'http://127.0.0.1:{self.server.server_port}/{key}'
+
+    def unregister(self,uri):
+        with self.lock:self.sources.pop(uri.rsplit('/',1)[-1],None)
 
     def close(self):
         with self.lock:self.sources.clear()
@@ -50,19 +53,19 @@ class VideoProxy:
                 return len(metadata).to_bytes(4,'big')+metadata+body
         cache.fetch(key,load)
 
-    def open(self,client,item,range_header=None,head=False):
+    def open(self,client,item,range_header=None,head=False,original=False):
         headers={'Authorization':'Bearer '+client.token}
         if range_header:headers['Range']=range_header
-        return client.http.open(Request(client.base+'/assets/'+quote(item.id,safe='')+'/video/playback',headers=headers,method='HEAD' if head else 'GET'),timeout=20)
+        return client.http.open(Request(client.base+'/assets/'+quote(item.id,safe='')+('/original' if original else '/video/playback'),headers=headers,method='HEAD' if head else 'GET'),timeout=20)
 
     def serve(self,handler,head):
         if handler.headers.get('Host')!=f'127.0.0.1:{self.server.server_port}':handler.send_error(403);return
         with self.lock:source=self.sources.get(handler.path.lstrip('/'))
         if not source:handler.send_error(404);return
-        client,item,vault=source
+        client,item,vault,original=source
         if not self.authorized(client,item):handler.send_error(403);return
         cache=vault if item.metadata.get('visibility')=='locked' else client.media_cache()
-        packet=cache.get(self.prefix_key(item)) if cache else None
+        packet=cache.get(self.prefix_key(item)) if cache and not original else None
         prefix=b'';metadata=None
         if packet:
             try:
@@ -92,7 +95,7 @@ class VideoProxy:
                             if response.status!=206:return
                             self.copy(response,handler,client,item)
                     return
-            with self.open(client,item,requested,head) as response:
+            with self.open(client,item,requested,head,original) as response:
                 handler.send_response(response.status)
                 for name in ('Content-Type','Content-Length','Content-Range','Accept-Ranges'):
                     if response.headers.get(name):handler.send_header(name,response.headers[name])

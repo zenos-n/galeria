@@ -68,4 +68,4 @@ def collection_view(window,kind,refresh=False):
     if cached is not None and not refresh:loaded(cached)
     def updated(data):
         if data!=cached or cached is None:loaded(data)
-    window.background(lambda:client.collection(kind),updated,window.library_failed)
+    window.background(lambda:client.collection(kind),updated,window.notice if cached is not None else window.library_failed)

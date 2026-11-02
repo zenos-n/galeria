@@ -9,6 +9,10 @@ ACTIONS = ['Magic Eraser','Unblur','Portrait blur','Portrait light','Color focus
 
 
 def build_editor(viewer):
+    if getattr(viewer.source,'media_item',None) and viewer.source.media_item.kind=='VIDEO':
+        from video_editor import VideoEditor
+        viewer.video_editor=VideoEditor(viewer)
+        return viewer.video_editor
     box=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=12)
     box.add_css_class('editor-bar')
     categories=Adw.ToggleGroup(halign=Gtk.Align.CENTER)

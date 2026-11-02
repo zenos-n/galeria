@@ -60,6 +60,8 @@ class PhotoStage(Gtk.Widget):
 
     def set_video(self,uri):
         from video_ui import VideoPlayer
+        if self.video_player:
+            self.video_player.stop();self.material.remove_overlay(self.video_player)
         self.video_player=VideoPlayer(uri)
         self.material.add_overlay(self.video_player)
         self.symbol.set_visible(False)

@@ -14,11 +14,12 @@ from video_proxy import VideoProxy
 
 class VideoTests(unittest.TestCase):
     def test_authenticated_range_cache_head_and_revocation(self):
-        data=bytes(range(256))*10000;calls=[]
+        data=bytes(range(256))*10000;calls=[];paths=[]
         class Handler(BaseHTTPRequestHandler):
             def log_message(self,*_):pass
             def respond(self,head=False):
                 calls.append((self.headers.get('Range'),self.headers.get('Authorization')))
+                paths.append(self.path)
                 if self.headers.get('Authorization')!='Bearer fixture':self.send_error(403);return
                 start,end=0,len(data)-1
                 if self.headers.get('Range'):
@@ -47,6 +48,13 @@ class VideoTests(unittest.TestCase):
                 with urlopen(Request(uri,method='HEAD')) as response:self.assertEqual(int(response.headers['Content-Length']),len(data))
                 with urlopen(uri) as response:self.assertEqual(response.read(),data)
                 self.assertEqual(len(calls),2)
+                original=proxy.register(client,item,original=True)
+                with urlopen(Request(original,headers={'Range':'bytes=10-99'})) as response:self.assertEqual(response.read(),data[10:100])
+                self.assertEqual(paths[-1],'/api/assets/video/original')
+                self.assertEqual(len(calls),3)
+                proxy.unregister(original)
+                with self.assertRaises(HTTPError) as error:urlopen(original)
+                self.assertEqual(error.exception.code,404);error.exception.close()
                 self.assertTrue(all(auth=='Bearer fixture' for _,auth in calls))
                 item.metadata['visibility']='locked';client.locked_until=time.monotonic()-1
                 with self.assertRaises(HTTPError) as error:urlopen(uri)

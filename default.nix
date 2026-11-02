@@ -3,7 +3,7 @@
 } }:
 pkgs.stdenv.mkDerivation {
   pname = "galeria";
-  version = "0.6.0";
+  version = "0.7.0";
   src = pkgs.lib.cleanSource ./.;
   nativeBuildInputs = with pkgs; [ wrapGAppsHook4 gobject-introspection makeWrapper ];
   buildInputs = with pkgs; [ gtk4 libadwaita libsecret libshumate clapper-unwrapped.lib gst_all_1.gstreamer gst_all_1.gst-plugins-base gst_all_1.gst-libav gst_all_1.gst-plugins-good gst_all_1.gst-plugins-bad ];
@@ -16,7 +16,7 @@ pkgs.stdenv.mkDerivation {
     cp data/com.neg-zero.Galeria.metainfo.xml $out/share/metainfo/
     cp icons/hicolor/scalable/apps/com.neg-zero.Galeria.svg $out/share/icons/hicolor/scalable/apps/
     makeWrapper ${pkgs.python3.withPackages (ps: with ps; [ pygobject3 pycairo pillow cryptography ])}/bin/python3 $out/bin/galeria \
-      --add-flags "$out/lib/galeria/app.py"
+      --add-flags "$out/lib/galeria/app.py" --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.ffmpeg-headless ]}
     makeWrapper ${pkgs.python3.withPackages (ps: with ps; [ pygobject3 pycairo pillow cryptography ])}/bin/python3 $out/bin/galeria-sync \
       --add-flags "$out/lib/galeria/sync_service.py"
   '';

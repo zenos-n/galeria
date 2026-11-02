@@ -21,7 +21,7 @@
         let pkgs = packagesFor system;
         in { default = pkgs.mkShell {
           inputsFrom = [ self.packages.${system}.galeria ];
-          packages = [ (pkgs.python3.withPackages (ps: with ps; [ pygobject3 pycairo pillow cryptography ])) ];
+          packages = [ pkgs.ffmpeg-headless (pkgs.python3.withPackages (ps: with ps; [ pygobject3 pycairo pillow cryptography ])) ];
         }; });
       checks = eachSystem (system: { inherit (self.packages.${system}) galeria; });
     };

@@ -7,4 +7,4 @@ cloud-deploy-symbolic retains the requested upstream name. Markup uses pencil,
 large-brush, eye-crossed and text from the same kit.
 # Galeria application icon
 
-`hicolor/scalable/apps/com.neg-zero.Galeria.svg` composes the bundled image paths by Jakub Steiner from GNOME's Icon Development Kit (CC0-1.0) with a purple app tile. The derivative is also CC0-1.0.
+`hicolor/scalable/apps/com.neg-zero.Galeria.svg` is the user-supplied Galeria icon, copied unchanged from the project root `com.neg-zero.Galeria.svg`. Its provenance/license is not asserted by the bundled GNOME symbolic-icon attribution above.

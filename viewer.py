@@ -144,7 +144,7 @@ class Viewer(Gtk.Overlay):
                 ', '.join(str(exif[key]) for key in ('city','state','country') if exif.get(key)) or 'No location',
                 ' '.join(str(exif[key]) for key in ('make','model') if exif.get(key)) or 'No camera information']
         for widget,value in zip(self.detail_labels,values):widget.set_label(value)
-        self.edit_button.set_sensitive(item.kind=='IMAGE')
+        self.edit_button.set_sensitive(item.kind in ('IMAGE','VIDEO'))
         self.favorite.set_active(bool(item.metadata.get('isFavorite')))
         self.favorite.set_sensitive(False)
 
@@ -192,6 +192,7 @@ class Viewer(Gtk.Overlay):
                 self.window.mosaic.hide_tile(None)
                 self.window.root_overlay.remove_overlay(self)
                 self.stage.dispose()
+                if getattr(self,'video_editor',None):self.video_editor.close()
                 self.window.split.set_can_target(True)
                 self.window.viewer=None
                 self.window.flush_pending_media()
@@ -214,6 +215,9 @@ class Viewer(Gtk.Overlay):
         self.index=visible[(visible.index(self.index)+step)%len(visible)]
         self.source=self.window.mosaic.tiles[self.index]
         self.stage=PhotoStage(self.source,self.index)
+        if getattr(self,'video_editor',None):self.video_editor.close();self.video_editor=None
+        self.editor.set_child(self.make_editor())
+        self.editor_categories.connect('notify::active-name',self.sync_editor_inset)
         self.window.mosaic.hide_tile(self.source)
         self.stage.progress=1
         self.stage.set_opacity(1)
@@ -328,14 +332,17 @@ class Viewer(Gtk.Overlay):
         return build_editor(self)
 
     def set_editing(self, active):
+        if active==self.editing:return
         if active:
             self.stage.crop_ratio=None
-        elif self.editing:
+        elif self.editing and not getattr(self,'video_editor',None):
             x0,y0,x1,y1=self.stage.crop_frame.bounds
             self.stage.crop_ratio=self.stage.ratio*(x1-x0)/max(.001,y1-y0)
         if active and self.immersive:
             self.set_immersive(False)
         self.editing = active
+        if getattr(self,'video_editor',None):
+            self.video_editor.enter() if active else self.video_editor.leave()
         if active:
             self.info.set_active(False)
         for widget in self.viewing_controls + self.arrows:
@@ -345,7 +352,7 @@ class Viewer(Gtk.Overlay):
         self.sync_editor_inset()
         self.stage.queue_allocate()
         self.edit_button.set_label('Done' if active else 'Edit')
-        self.title.set_title('Edit photo' if active else getattr(self.source,'filename','Photo preview'))
+        self.title.set_title(('Edit video' if getattr(self,'video_editor',None) else 'Edit photo') if active else getattr(self.source,'filename','Photo preview'))
 
     def sync_editor_inset(self, *_):
         before=self.stage.last_rect
@@ -367,6 +374,7 @@ class Viewer(Gtk.Overlay):
         self.stage.crop_frame.set_aspect([None,self.stage.ratio,1,4/3,16/9][dropdown.get_selected()])
 
     def reset_edits(self):
+        if getattr(self,'video_editor',None):self.video_editor.reset_edits();return
         self.stage.rotation, self.stage.flipped, self.stage.crop_ratio = 0, False, None
         self.stage.symbol.set_from_icon_name("image-x-generic-symbolic")
         self.stage.crop_frame.reset()
