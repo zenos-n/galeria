@@ -30,3 +30,9 @@ Kept: warm reuse removes the network requests and beats run-to-run variance. Col
 Cache keys include server, account, asset ID, revision and image size. Ordinary media has a 512 MB disk budget and 256-texture memory limit; search/album metadata expires after 30 seconds and Refresh bypasses it. Locked media uses a separate authenticated encrypted store; it never enters the ordinary store. Unlock clears ordinary cached copies to remove potentially stale copies of media moved into the locked folder outside Gallery. Original encrypted device copies are retained separately rather than evicted as thumbnails. Local image keys include file path, modification nanoseconds and size.
 
 The native 150-item fixture also checks that initial image requests stay below a full page, scrolling appends the second page without resetting position, and viewer previews use a separate worker queue. Production latency still requires user verification after signing in.
+
+## Gallery 0.4 loading window and video path
+
+Thumbnail requests now cover the visible viewport plus two viewport heights above and below. Nearby videos use a separate two-worker queue to preload at most 2 MiB per video into the existing account cache (encrypted for locked media). Viewer playback streams subsequent byte ranges instead of waiting for a whole download. The range fixture verifies that an in-prefix seek causes zero additional upstream requests and a full read reuses the prefix before requesting the remaining range. These are request-count/behavior checks, not production latency or memory benchmarks.
+
+The packaged GTK 4.22.4 disables its GStreamer media backend, which explains the nonfunctional Gtk.Video path. Gallery 0.4 instead packages Clapper 0.10.0/ClapperGtk with GStreamer 1.26.11 and its playback plugins. Native generated-MP4 playback reached position 0.6 seconds and hid the loading spinner. This verifies the installed playback pipeline, not every codec in a user's library.
