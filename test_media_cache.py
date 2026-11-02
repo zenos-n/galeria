@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from PIL import Image
 from cache import MediaCache
 from imaging import decode_image,duration_label
@@ -39,6 +40,23 @@ class MediaTests(unittest.TestCase):
             with ThreadPoolExecutor(4) as pool:
                 results=list(pool.map(lambda _:cache.fetch('same',load),range(4)))
             self.assertEqual(results,[b'image']*4);self.assertEqual(len(calls),1)
+
+    def test_cache_writes_scan_once_and_keep_eviction_accounting(self):
+        with TemporaryDirectory() as root:
+            cache=MediaCache('account',root,budget=100)
+            with patch('cache.os.scandir',wraps=os.scandir) as scans:
+                for i in range(200):cache.put(str(i),b'1234')
+                self.assertEqual(scans.call_count,1)
+            self.assertEqual(sum(p.stat().st_size for p in cache.root.iterdir()),100)
+            self.assertIsNone(cache.get('0'));self.assertEqual(cache.get('199'),b'1234')
+            cache.put('199',b'12');cache.remove('198')
+            self.assertEqual(cache.total_bytes,94)
+            # Another writer is reconciled without evicting an updated entry as stale.
+            cache.path('199').write_bytes(b'123456')
+            cache.scanned_at=0;cache.prune()
+            self.assertEqual(cache.total_bytes,98)
+            cache.clear();cache.put('new',b'fresh')
+            self.assertEqual(cache.total_bytes,5)
 
     def test_locked_cache_and_original_are_authenticated_ciphertext(self):
         with TemporaryDirectory() as root:

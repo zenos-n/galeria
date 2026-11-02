@@ -1,5 +1,6 @@
 """Private, bounded, account-separated disk cache. Locked media is encrypted."""
 import hashlib
+import heapq
 import json
 import os
 from pathlib import Path
@@ -31,6 +32,7 @@ class MediaCache:
         self.lock=threading.RLock()
         self.key_locks=weakref.WeakValueDictionary()
         self.epoch=0;self.forbidden=set()
+        self.inventory=None;self.eviction=[];self.total_bytes=0;self.scanned_at=0
 
     def path(self,key):return self.root/hashlib.sha256(key.encode()).hexdigest()
 
@@ -52,7 +54,14 @@ class MediaCache:
             if self.key:
                 nonce=os.urandom(12)
                 data=nonce+AESGCM(self.key).encrypt(nonce,data,key.encode())
-            atomic_write(self.path(key),data)
+            if self.budget is not None:self._inventory()
+            path=self.path(key)
+            atomic_write(path,data)
+            if self.budget is not None:
+                previous=self.inventory.get(path.name,(0,0))
+                stamp=path.stat().st_mtime_ns;size=len(data)
+                self.total_bytes+=size-previous[1];self.inventory[path.name]=(stamp,size)
+                heapq.heappush(self.eviction,(stamp,path.name,size))
             self.prune()
 
     def fetch(self,key,loader,max_age=None):
@@ -72,19 +81,46 @@ class MediaCache:
 
     def prune(self):
         if self.budget is None:return
-        files=sorted((p for p in self.root.iterdir() if p.is_file()),key=lambda p:p.stat().st_mtime)
-        total=sum(p.stat().st_size for p in files)
-        for path in files:
-            if total<=self.budget:break
-            total-=path.stat().st_size;path.unlink(missing_ok=True)
+        with self.lock:
+            self._inventory()
+            while self.total_bytes>self.budget and self.eviction:
+                stamp,name,size=heapq.heappop(self.eviction)
+                if self.inventory.get(name)!=(stamp,size):continue
+                path=self.root/name
+                try:stat=path.stat()
+                except FileNotFoundError:stat=None
+                if stat and (stat.st_mtime_ns,stat.st_size)!=(stamp,size):
+                    self.total_bytes+=stat.st_size-size;self.inventory[name]=(stat.st_mtime_ns,stat.st_size)
+                    heapq.heappush(self.eviction,(stat.st_mtime_ns,name,stat.st_size));continue
+                path.unlink(missing_ok=True);self.inventory.pop(name,None);self.total_bytes-=size
+            if len(self.eviction)>len(self.inventory)*2+128:
+                self.eviction=[(stamp,name,size) for name,(stamp,size) in self.inventory.items()];heapq.heapify(self.eviction)
 
-    def remove(self,key):self.path(key).unlink(missing_ok=True)
+    def _inventory(self):
+        # One scan initially, then occasional reconciliation with other processes.
+        if self.inventory is not None and time.monotonic()-self.scanned_at<30:return
+        entries={}
+        with os.scandir(self.root) as files:
+            for file in files:
+                if len(file.name)!=64 or not file.is_file(follow_symlinks=False):continue
+                try:stat=file.stat(follow_symlinks=False)
+                except FileNotFoundError:continue
+                entries[file.name]=(stat.st_mtime_ns,stat.st_size)
+        self.inventory=entries;self.total_bytes=sum(size for _,size in entries.values())
+        self.eviction=[(stamp,name,size) for name,(stamp,size) in entries.items()];heapq.heapify(self.eviction)
+        self.scanned_at=time.monotonic()
+
+    def remove(self,key):
+        with self.lock:
+            path=self.path(key);path.unlink(missing_ok=True)
+            if self.inventory is not None:self.total_bytes-=self.inventory.pop(path.name,(0,0))[1]
 
     def clear(self):
         with self.lock:
             self.epoch+=1
             for path in self.root.iterdir():
                 if path.is_file():path.unlink(missing_ok=True)
+            self.inventory={};self.eviction=[];self.total_bytes=0;self.scanned_at=time.monotonic()
 
     def forbid(self,prefixes):
         with self.lock:self.forbidden.update(prefixes);self.clear()
