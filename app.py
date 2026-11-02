@@ -441,7 +441,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.7.0", developer_name="Negative Zero",
+                                 version="0.8.0", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 
@@ -641,18 +641,19 @@ class Gallery(Adw.Application):
             if monitor:
                 # Wayland permits choosing a monitor for fullscreen before first map.
                 self.window.fullscreen_on_monitor(monitor)
-                def mapped(*_):
+                def mapped(window):
+                    window.disconnect(handler)
                     def restore():
                         if self.window:self.window.unfullscreen();GLib.timeout_add(350,verify)
                         return False
                     GLib.timeout_add(250,restore)
                 def verify():
-                    if not self.window:return False
+                    if not self.window or not self.window.get_surface():return False
                     actual=Gdk.Display.get_default().get_monitor_at_surface(self.window.get_surface())
-                    if actual!=monitor:self.window.fullscreen_on_monitor(monitor)
-                    print('Galeria monitor: '+monitor.get_connector(),flush=True)
+                    if actual!=monitor:self.window.fullscreen_on_monitor(monitor);GLib.timeout_add(350,verify)
+                    else:print('Galeria monitor: '+actual.get_connector()+(' (fullscreen)' if self.window.is_fullscreen() else ' (windowed)'),flush=True)
                     return False
-                self.window.connect('map',mapped)
+                handler=self.window.connect('map',mapped)
         self.window.present()
         return True
 

@@ -84,3 +84,29 @@ Changing date tiers closes the expanded folder; transitions match asset IDs
 between the actual grid images and cover quadrants. Only the viewport is drawn,
 with two screens above/below allocated. Successful batch Trash animates thumbnail
 snapshots into the sidebar, then rearranges the remaining tiles without refetching.
+
+Galeria0.8 uses Immich's compact timeline metadata (IDs, ratios, dates and types)
+to create the library's complete scroll range before thumbnail downloads.
+Unfetched months start with lightweight size estimates; their exact geometry
+arrives with compact metadata. Only cells within two screens of the viewport
+construct buttons/pictures. Pending image jobs follow the current viewport;
+abandoned jobs are skipped, and folder covers load for the visible date tier.
+The indexed library currently applies to the unfiltered Immich Library; filtered
+search/other collections retain paginated results. Legacy servers retain the
+previous search path. Media details are hydrated when opening an indexed item.
+
+Folder rules use explicit Unlimited subfolder depth and Folders to albums
+switches. Album mode can map every directory to its own album, use a single named
+album, or target an existing album. Subfolder names use `Root / relative/path`
+so identical directory names under different parents remain distinct. Existing
+rules retain their destinations; originals/deletions remain untouched.
+Selection also offers Move to locked folder, using PIN/password elevation when
+needed and invalidating ordinary cached copies and in-flight writes on success.
+The main header is46px; sidebar hover restores the actual active item on leave.
+Empty video thumbnails try a preview/frame fallback instead of downloading the
+whole original as an image or repeatedly displaying error toasts.
+
+`nix run -- --monitor DP-2` opens on a chosen connector. On Wayland the initial
+fullscreen placement selects the display before mapping, then restores a normal
+window; if the compositor moves it elsewhere, it retains fullscreen on the chosen
+monitor. It does not change monitor configuration or control other windows.

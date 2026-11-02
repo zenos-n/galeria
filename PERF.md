@@ -58,3 +58,23 @@ and below. Animated tile imagery uses its existing texture directly, avoiding
 layout of each tile widget during the tier motion. The controlled1200-image,
 60-month comparison uses software GL and measures CPU allocation/snapshot time,
 not production GPU frame rate; logs are /tmp/gallery-app-identification/bench-tier-{before,after}.log.
+
+## Galeria0.8 indexed lightweight cells
+
+The0.7 implementation still constructed a full button/overlay/picture/check tree
+for every item and allowed queued image work to outlive the viewport. The new
+cells create native children only in the two-screen allocation band. A10000-slot
+native fixture had90live button trees after a jump to an older month, a280450px
+scroll extent and no full-media search requests; recent thumbnail requests
+followed that older month. Compact metadata loaded separately. A read-only
+Immich3.3.3 check decoded27compact entries with valid ratios in0.232s without any
+thumbnail requests. That sample is not a throughput estimate for the full library.
+
+The same1200-photo softwareGL tier benchmark now reports allocation median1.19,
+p953.24,max29.03ms; snapshot median0.75,p951.29,max21.05ms. Typical passes are
+smaller than0.7, but first-layout/outlier stalls remain and no guaranteed production
+frame rate is claimed. Sources/logs: /tmp/gallery-app-identification/indexed-native.py,
+indexed-native.log, bench-tier-08.log. Header/sync/locked/hover and video editor
+native checks pass with fatal GTK criticals;49Python tests cover compact parsing,
+full placeholder range, grouped month→year destinations, dynamic job priority,
+folder-album mapping/depth, and cache invalidation during in-flight writes.
