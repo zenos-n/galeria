@@ -38,7 +38,7 @@ def unlock_folder(window):
             try:key=vault_key(client.identity) if keep else None
             except Exception:raise LibraryError('The system keyring is unavailable. Disable device copies to view without saving.') from None
             client.unlock(value,password)
-            return MediaCache(client.identity+'|locked|'+hashlib.sha256(key).hexdigest(),key=key,budget=256*1024*1024) if key else None
+            return MediaCache(client.identity+'|locked|'+hashlib.sha256(key).hexdigest(),key=key,budget=None) if key else None
         def done(vault):
             window.vault=vault
             window.texture_cache.clear()
@@ -68,7 +68,7 @@ def sync_locked(window,client,vault):
         vault.put('index',json.dumps([item.metadata for item in items]).encode())
         for count,item in enumerate(items):
             if cancel.is_set():return None
-            revision=item.metadata.get('updatedAt','')
+            revision=item.metadata.get('checksum') or item.metadata.get('updatedAt','')
             key='original:'+item.id+revision
             if not vault.has(key):
                 request=Request(client.base+'/assets/'+quote(item.id,safe='')+'/original',headers={'Authorization':'Bearer '+client.token})

@@ -5,6 +5,7 @@ from collections import OrderedDict
 import json
 import threading
 import time
+import errno
 from gi.repository import Adw, Gdk, GdkPixbuf, GLib, Gtk
 from library import ImmichClient, LibraryError, scan_folders
 from timeline import Mosaic
@@ -191,7 +192,7 @@ class LibraryUI:
             try:
                 value=result.result()
             except Exception as error:
-                message=str(error) if isinstance(error,LibraryError) else f'Could not load this data ({type(error).__name__}).'
+                message=str(error) if isinstance(error,LibraryError) else 'Not enough free space to save device copies.' if isinstance(error,OSError) and error.errno==errno.ENOSPC else f'Could not load this data ({type(error).__name__}).'
                 GLib.idle_add(deliver,failed or self.notice,message)
             else:
                 GLib.idle_add(deliver,done,value)

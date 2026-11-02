@@ -66,6 +66,7 @@ class MediaCache:
         return json.loads(self.fetch(key,lambda:json.dumps(loader()).encode(),ttl))
 
     def prune(self):
+        if self.budget is None:return
         files=sorted((p for p in self.root.iterdir() if p.is_file()),key=lambda p:p.stat().st_mtime)
         total=sum(p.stat().st_size for p in files)
         for path in files:

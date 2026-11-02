@@ -52,5 +52,19 @@ class MediaTests(unittest.TestCase):
             self.assertIsNone(cache.get('original'))
             self.assertEqual(os.stat(cache.path('metadata')).st_mode&0o777,0o600)
 
+    def test_device_copies_are_retained_and_cancelled_writes_are_removed(self):
+        with TemporaryDirectory() as root:
+            cache=MediaCache('copies',root,key=os.urandom(32),budget=None)
+            cache.sync_encrypted('original',BytesIO(b'original'*1000),threading.Event())
+            cache.put('thumbnail',b'image')
+            self.assertEqual(cache.get('original'),b'original'*1000)
+            cancel=threading.Event()
+            class CancelledStream(BytesIO):
+                def read(self,*args):
+                    data=super().read(*args);cancel.set();return data
+            with self.assertRaises(InterruptedError):cache.sync_encrypted('cancelled',CancelledStream(b'private'),cancel)
+            self.assertFalse(cache.has('cancelled'))
+            self.assertEqual(len(list(cache.root.iterdir())),2)
+
 
 if __name__=='__main__':unittest.main()
