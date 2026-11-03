@@ -195,6 +195,8 @@ class AlbumTree(Gtk.ListView):
         item.arrow.connect('clicked',lambda _:item.tree_row.set_expanded(not item.tree_row.get_expanded()))
         line.append(item.arrow)
         item.set_child(line)
+        from collection_widgets import album_context
+        album_context(self.window,line,lambda:next((album for album in getattr(self,'albums',[]) if item.get_item() and 'album-'+album['id']==item.get_item().get_item().key),None))
 
     def bind(self, _factory, item):
         row = item.get_item()

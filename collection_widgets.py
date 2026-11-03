@@ -1,5 +1,5 @@
 """Collection-specific native layouts with lazy, recycling-safe cover loading."""
-from gi.repository import Adw,Gio,GObject,Gtk
+from gi.repository import Adw,Gdk,Gio,GLib,GObject,Gtk
 from urllib.parse import quote
 from imaging import decode_image
 from library import media_from_asset
@@ -75,14 +75,26 @@ def picture_frame(square=True):
     return frame,image
 
 
-def menu_button(window,kind,value,refresh):
+def collection_menu(window,kind,value,refresh):
     from collections_ui import edit_name
     popover=Gtk.Popover()
     actions=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=4,margin_top=6,margin_bottom=6,margin_start=6,margin_end=6)
     def action(title,callback):
         item=Gtk.Button(label=title,css_classes=['flat'])
-        item.connect('clicked',lambda _:(popover.popdown(),callback()));actions.append(item)
+        def activate(_):
+            if not popover.get_visible():callback();return
+            def closed(*_):
+                popover.disconnect(handler)
+                GLib.idle_add(lambda:(callback(),False)[1])
+            handler=popover.connect('closed',closed);popover.popdown()
+        item.connect('clicked',activate);actions.append(item)
+        return item
     if kind in ('albums','sharing'):
+        pin=action('Pin album',lambda:window.toggle_album_pin(value['id']))
+        def update_pin(*_):
+            selected=value['id'] in window.preferences.get('pins',{}).get(window.client.identity,[])
+            pin.set_label('Unpin album' if selected else 'Pin album')
+        update_pin();popover.connect('show',update_pin)
         from sharing_ui import share_album
         action('Share album…',lambda:share_album(window,value))
     action('Rename',lambda:edit_name(window,'albums' if kind=='sharing' else kind,value))
@@ -103,8 +115,31 @@ def menu_button(window,kind,value,refresh):
             confirm.present(window)
         action(title,remove)
     popover.set_child(actions)
+    return popover
+
+
+def menu_button(window,kind,value,refresh):
+    popover=collection_menu(window,kind,value,refresh)
     return Gtk.MenuButton(icon_name='view-more-symbolic',popover=popover,tooltip_text='Collection actions',
                           css_classes=['flat','circular'],valign=Gtk.Align.CENTER)
+
+
+def album_context(window,widget,value):
+    gesture=Gtk.GestureClick(button=3)
+    def pressed(gesture,_count,x,y):
+        album=value()
+        if not album:return
+        from collections_ui import collection_view
+        def refresh():
+            if window.current_page in ('albums','sharing'):collection_view(window,window.current_page)
+            elif window.current_page=='album-'+album['id']:window.navigate(window.album_tree,window.rows['albums'])
+        popover=collection_menu(window,'albums',album,refresh)
+        popover.set_parent(widget)
+        rect=Gdk.Rectangle();rect.x=round(x);rect.y=round(y);rect.width=rect.height=1
+        popover.set_pointing_to(rect)
+        popover.connect('closed',lambda *_:popover.unparent() if popover.get_parent() else None)
+        popover.popup();gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+    gesture.connect('pressed',pressed);widget.add_controller(gesture)
 
 
 def grid_card(window,client,kind,value,alive,refresh):
@@ -132,6 +167,7 @@ def grid_card(window,client,kind,value,alive,refresh):
     else:button.connect('clicked',lambda _:window.activate_album(value['id']))
     outer=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=0)
     outer.append(button);info.set_margin_start(12);info.set_margin_end(8);info.set_margin_bottom(12);outer.append(info)
+    if not person:album_context(window,outer,lambda:value)
     return outer
 
 

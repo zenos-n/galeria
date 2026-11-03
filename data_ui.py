@@ -195,26 +195,20 @@ class LibraryUI:
         for album in getattr(self.album_tree,'albums',[]):
             if album['id'] not in selected:continue
             row=Gtk.ListBoxRow();row.key='album-'+album['id']
-            body=Gtk.Box(spacing=10,margin_start=10,margin_end=8)
+            body=Gtk.Box(spacing=10)
             body.append(Gtk.Image(icon_name='folder-pictures-symbolic',pixel_size=16))
             body.append(Gtk.Label(label=album.get('albumName','Untitled album'),xalign=0,ellipsize=3,hexpand=True))
             row.set_child(body);self.pin_nav.append(row);self.pin_rows.append(row)
+            from collection_widgets import album_context
+            album_context(self,row,lambda album=album:album)
+        self.pin_section.set_visible(bool(self.pin_rows))
 
-    def manage_pins(self):
-        if not self.client:self.login();return
-        dialog=Adw.PreferencesDialog(title='Pin albums',content_width=460,content_height=500)
-        page=Adw.PreferencesPage();group=Adw.PreferencesGroup()
-        identity=self.client.identity
-        selected=self.preferences.setdefault('pins',{}).setdefault(identity,[])
-        for album in getattr(self.album_tree,'albums',[]):
-            row=Adw.SwitchRow(title=album.get('albumName','Untitled album'),use_markup=False,active=album['id'] in selected)
-            def toggle(row,_param,album=album):
-                ids=self.preferences['pins'][identity]
-                if row.get_active() and album['id'] not in ids:ids.append(album['id'])
-                elif not row.get_active() and album['id'] in ids:ids.remove(album['id'])
-                self.save_preferences();self.refresh_pins()
-            row.connect('notify::active',toggle);group.add(row)
-        page.add(group);dialog.add(page);self.dialog=dialog;dialog.present(self)
+    def toggle_album_pin(self,album_id):
+        if not self.client:return
+        pins=self.preferences.setdefault('pins',{}).setdefault(self.client.identity,[])
+        if album_id in pins:pins.remove(album_id)
+        else:pins.append(album_id)
+        self.save_preferences();self.refresh_pins()
 
     def open_collection(self,title,filters=None,items=None):
         self.search_generation+=1
@@ -580,7 +574,7 @@ class LibraryUI:
             if self.viewer:
                 self.pending_media=(result,append)
                 self.loading_more=False
-            else:self.set_library_items(result,append=append or force)
+            else:self.set_library_items(result,append=append or force,reflow=force)
         def failed(message):
             if request_id==self.search_generation:
                 if force:self.loading_more=False;self.notice(message)
@@ -605,25 +599,64 @@ class LibraryUI:
         self.client.refresh_serial=getattr(self.client,'refresh_serial',0)+1
         if self.current_page=='library':
             if self.timeline_index and self.mosaic.indexed:
-                index=self.timeline_index
+                index=self.timeline_index;client=self.client;generation=self.search_generation
+                if getattr(self,'timeline_refresh_pending',None) is index:return True
+                self.timeline_refresh_pending=index
+                def current():return self.timeline_index is index and self.client is client and self.current_page=='library' and self.search_generation==generation and self.mosaic.indexed
+                def failed(_):
+                    if self.timeline_refresh_pending is index:self.timeline_refresh_pending=None
                 def refresh(buckets):
-                    if self.timeline_index is not index:return
+                    if not current():failed(None);return
                     if buckets!=self.timeline_buckets:
                         from timeline_index import TimelineIndex
                         replacement=TimelineIndex(buckets)
                         counts={key:b-a for key,(a,b) in index.ranges.items()}
-                        for key,(a,b) in list(replacement.ranges.items()):
-                            if key in index.loaded and counts.get(key)==b-a:
-                                start,end=index.ranges[key];replacement.apply(key,index.items[start:end])
-                        self.timeline_index=replacement;self.timeline_pending=set();self.timeline_buckets=buckets
-                        self.set_library_items(replacement.items,append=True)
+                        def populated(key):
+                            a,b=index.ranges.get(key,(0,0))
+                            return a<b and not index.items[a].metadata.get('placeholder')
+                        changed=[key for key,(a,b) in replacement.ranges.items() if counts.get(key)!=b-a and (populated(key) or key==next(iter(replacement.ranges)))]
+                        top,height=self.mosaic.visible_range()
+                        visible={key for key,(a,b) in self.mosaic.month_extents.items() if b>=top and a<=top+height}
+                        if self.mosaic.expanded_month:visible.add(self.mosaic.expanded_month)
+                        if top==0:visible.add(next(iter(replacement.ranges),''))
+                        existing={item.id for item in index.items}
+                        def load():
+                            updates={key:client.time_bucket(key,fresh=True) for key in changed};pixels={}
+                            incoming=[item for key,items in updates.items() if key in visible for item in items if item.id not in existing][:24]
+                            for item in incoming:
+                                try:pixels[self.texture_key(item)]=decode_image(client.image_bytes(item))
+                                except (LibraryError,OSError,ValueError):pass
+                            return updates,pixels
+                        def ready(value):
+                            failed(None)
+                            if not current():return
+                            updates,pixels=value
+                            for tile in self.mosaic.active_widgets & self.mosaic.tile_set:
+                                key=self.texture_key(tile.media_item)
+                                if key in self.texture_cache:self.texture_cache.move_to_end(key)
+                            for key,pixel in pixels.items():self.texture_cache[key]=self.texture_from_pixels(pixel)
+                            while len(self.texture_cache)>768:self.texture_cache.popitem(last=False)
+                            # Publish complete changed months together; never blank a loaded month.
+                            for key,(a,b) in list(replacement.ranges.items()):
+                                if key in updates:replacement.apply(key,updates[key])
+                                elif populated(key) and counts.get(key)==b-a:
+                                    start,end=index.ranges[key];replacement.apply(key,index.items[start:end])
+                            self.timeline_index=replacement;self.timeline_pending=set();self.timeline_buckets=buckets
+                            self.page_cache.clear()
+                            for key in changed:
+                                self.date_cover_cache.pop(('months',key),None);self.date_cover_cache.pop(('years',key[:4]),None)
+                            if self.viewer:self.pending_media=(replacement.items,True)
+                            else:self.set_library_items(replacement.items,append=True,reflow=True)
+                            self.request_timeline_metadata()
+                        self.background(load,ready,failed)
                     else:
+                        failed(None)
                         top,height=self.mosaic.visible_range()
                         key=next((key for key,(a,b) in self.mosaic.month_extents.items() if b>=top),next(iter(index.ranges),None))
                         if key:
                             index.loaded.discard(key);self.timeline_refresh_key=key
                     self.request_timeline_metadata()
-                self.background(lambda:self.client.time_buckets(fresh=True),refresh,lambda _:None)
+                self.background(lambda:client.time_buckets(fresh=True),refresh,failed)
                 return True
             def dates(buckets):
                 if buckets!=self.timeline_buckets:
@@ -653,7 +686,7 @@ class LibraryUI:
                 a,b=index.ranges[key];previous=index.items[a:b];changed=index.apply(key,items)
                 if self.mosaic.indexed and self.current_page=='library':
                     if self.viewer:self.pending_media=(index.items,True)
-                    elif changed:self.set_library_items(index.items,append=True)
+                    elif changed or [item.id for item in previous]!=[item.id for item in index.items[index.ranges[key][0]:index.ranges[key][1]]]:self.set_library_items(index.items,append=True,reflow=True)
                     elif previous!=index.items[index.ranges[key][0]:index.ranges[key][1]]:
                         a,b=index.ranges[key];self.media_items[a:b]=index.items[a:b]
                         self.mosaic.update_bucket(key,index.items[a:b])
@@ -692,12 +725,25 @@ class LibraryUI:
         mosaic.expanded_year=old.expanded_year
         self.populate_date_covers(mosaic)
         mosaic.rebuild()
-        if reflow or old.tick or mosaic.mode!='all' and (mosaic.expanded_month or mosaic.expanded_year):mosaic.continue_from(old,'reflow' if reflow else None)
+        animate=reflow or old.tick or mosaic.mode!='all' and (mosaic.expanded_month or mosaic.expanded_year)
+        anchor=None
+        if reflow and position>0 and old.mode=='all':
+            visible=[tile for tile in old.active_widgets & old.tile_set if tile in old.rendered and old.rendered[tile][1]+old.rendered[tile][3]>=position]
+            if visible:
+                tile=min(visible,key=lambda tile:(old.rendered[tile][1],old.rendered[tile][0]))
+                anchor=(tile.media_item.id,position-old.rendered[tile][1])
         mosaic.on_selection=self.selection_changed
         mosaic.on_window=lambda:GLib.idle_add(self.load_visible_thumbnails)
         self.mosaic=mosaic
         self.pending_images.clear()
         self.scroller.set_child(mosaic)
+        if anchor:
+            tile=next((tile for tile in mosaic.tiles if tile.media_item.id==anchor[0]),None)
+            rect=mosaic.target_layout(old.last_width)[0].get(tile)
+            if rect:
+                position=rect[1]+anchor[1]
+                mosaic._target_cache.clear()
+        if animate:mosaic.continue_from(old,'reflow' if reflow else None,scroll_shift=position-self.scroller.get_vadjustment().get_value())
         old.dispose()
         mosaic.update_selection()
         self.selection_changed()

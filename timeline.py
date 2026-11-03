@@ -286,7 +286,7 @@ class Mosaic(Gtk.Widget):
             self.expanded_month=self.expanded_year=None
         self.change(update)
 
-    def continue_from(self,old,kind=None):
+    def continue_from(self,old,kind=None,scroll_shift=0):
         pairs=[(old.panel_month,self.panel_month),(old.panel_year,self.panel_year),
                (old.pointer_month,self.pointer_month),(old.pointer_year,self.pointer_year),(old.loading,self.loading)]
         for previous,current in [(old.month_cards,self.month_cards),(old.year_cards,self.year_cards)]:
@@ -295,7 +295,7 @@ class Mosaic(Gtk.Widget):
         pairs.extend((heading,headings[month[0]]) for month,heading in zip(old.months,old.headings) if month[0] in headings)
         tiles={tile.media_item.id:tile for tile in self.tiles if tile.media_item}
         pairs.extend((tile,tiles[tile.media_item.id]) for tile in old.tiles if tile.media_item and tile.media_item.id in tiles)
-        self.rendered={new:old.rendered[previous] for previous,new in pairs if previous in old.rendered}
+        self.rendered={new:(rect[0],rect[1]+scroll_shift,*rect[2:]) for previous,new in pairs if (rect:=old.rendered.get(previous)) is not None}
         self.last_width=old.last_width;self.last_height=old.last_height
         self.tier_sources=old.image_occurrences(old.rendered)
         self.change(lambda:None,kind or old.motion_kind)
@@ -325,6 +325,7 @@ class Mosaic(Gtk.Widget):
         self.motion_kind=kind
         self.folder_swap=any(a and b and a!=b for a,b in zip(before,(self.expanded_month,self.expanded_year)))
         target,target_height=self.target_layout(self.last_width)
+        if kind=='reflow':self.from_height=max(self.from_height,target_height)
         if kind=='tier':
             top,page=self.visible_range()
             visible=[value for value in sources if value[2][1]+value[2][3]>=top and value[2][1]<=top+page]
@@ -478,6 +479,9 @@ class Mosaic(Gtk.Widget):
 
     def anchor(self,widget,other,fallback):
         if widget in self.caption_widgets:return (*fallback[:4],0)
+        if self.motion_kind=='reflow':
+            x,y,w,h,_=fallback
+            return x,y-18,w,h,0
         owners=self.owners.get(widget,())
         owners=sorted(owners,key=lambda node:0 if (self.mode=='years' and node in self.year_cards.values()) else 1)
         for owner in owners:

@@ -138,7 +138,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         for heading, items in [
             (None, [("library", "Library", "folder-pictures-symbolic"), ("favorites", "Favorites", "starred-symbolic"),
                     ("map", "Map", "find-location-symbolic"), ("sharing", "Sharing", "emblem-shared-symbolic")]),
-            ("Pinned", [("pinned", "Pin an album…", "view-pin-symbolic")]),
+            ("Pinned", []),
             ("Collections", []),
             ("Media types", [("photos", "Photos", "image-x-generic-symbolic"), ("videos", "Videos", "video-x-generic-symbolic"),
                               ("screenshots", "Screenshots", "camera-photo-symbolic"), ("live", "Live Photos", "media-playback-start-symbolic")]),
@@ -147,8 +147,14 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
                            ("trash", "Trash", "user-trash-symbolic")]),
             ("More", [("archive", "Archive", "folder-symbolic"), ("locked", "Locked folder", "changes-prevent-symbolic")]),
         ]:
+            section=Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            body.append(section)
             if heading:
-                body.append(label(heading, "sidebar-section", xalign=0))
+                section.append(label(heading, "sidebar-section", xalign=0))
+            if heading == "Collections":
+                self.album_tree = AlbumTree(self)
+                section.append(self.album_tree)
+                continue
             nav = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
             nav.add_css_class("navigation-sidebar")
             nav.set_activate_on_single_click(True)
@@ -163,14 +169,13 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
                 nav.append(row)
                 self.rows[key] = row
             nav.connect("row-activated", self.navigate)
-            body.append(nav)
+            section.append(nav)
             self.lists.append(nav)
             if heading=='Pinned':
                 self.pin_nav=nav
                 self.pin_rows=[]
-            if heading == "Collections":
-                self.album_tree = AlbumTree(self)
-                body.append(self.album_tree)
+                self.pin_section=section
+                section.set_visible(False)
         self.uploads = Uploads(self)
         sidebar.append(self.uploads)
         self.source_label = label("No library connected", "source-label", xalign=0)
@@ -437,15 +442,13 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.update_header()
         self.stack.set_visible_child_name("library" if has_grid else "status")
         self.status_actions.set_visible(row.key == "locked")
-        if row.key in ('albums','people','tags','duplicates','sharing','map','pinned'):
-            if row.key=='pinned':self.manage_pins();return
+        if row.key in ('albums','people','tags','duplicates','sharing','map'):
             collection_view(self,row.key);return
         if not has_grid:
             titles = {
                 "favorites": ("starred-symbolic", "Your favorites", "The photos you love will live here."),
                 "map": ("find-location-symbolic", "Your places", "A map of the places in your library."),
                 "sharing": ("emblem-shared-symbolic", "Shared with you", "Your shared albums, together in one place."),
-                "pinned": ("view-pin-symbolic", "Keep an album close", "Pin albums here for quick access."),
                 "albums": ("folder-pictures-symbolic", "Your albums", "A home for your collections."),
                 "duplicates": ("edit-copy-symbolic", "Review duplicates", "Compare similar photos side by side."),
                 "archive": ("folder-symbolic", "Your archive", "Photos kept out of the main library."),
@@ -489,7 +492,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.11.1", developer_name="Negative Zero",
+                                 version="0.11.2", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 

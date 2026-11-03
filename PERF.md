@@ -300,6 +300,29 @@ unfocused-update tests also pass with fatal GTK warnings. No synthetic productio
 media changes or automated physical-display input.0.10.3 resize measurements and
 remaining ratio-scan limit are unchanged; live GPU performance is not remeasured.
 
+## Galeria0.11.2 upload arrivals and album pins
+
+Count changes previously published a replacement date index with placeholders for
+the entire changed month, then fetched its metadata separately. Keep the current
+grid while changed populated months load, merge unchanged populated months at
+commit, and animate the complete result with the existing reflow mechanism.
+New cells fade/slide at full dimensions; existing cells retain opacity and RAM
+textures. Prepare at most24 incoming thumbnails from visible months before
+publication, preserve the768-texture limit, and retain selection by asset ID and
+the visible scroll anchor. Reserve the final scroll height during insertions so
+the adjustment can retain an anchor near the bottom. Refresh jobs are scoped to
+their date-index instance; stale/failed jobs cannot clear a newer job's state.
+
+The1440-photo native fixture blocks a changed-month response and verifies the
+original grid, cached images and absence of loading screens while waiting. It
+checks a half-frame insertion at full dimensions, selection, new-month arrival,
+scroll anchoring, failure/retry and no media mutation. Real private-display pointer
+checks pin/unpin through ellipsis, grid and both sidebar surfaces; verify persisted
+account isolation, hidden empty pins and equal Collections/Media types gaps.
+65unit checks and existing native album-delete, group-frame, motion/media-action
+and startup/cache/unfocused-refresh checks pass. No live frame-time improvement is
+claimed; previous resize measurements and limits remain unchanged.
+
 ## Galeria0.11.1 complete folder geometry and group captions
 
 The previous transition captured only viewport-adjacent date-card source rects.
