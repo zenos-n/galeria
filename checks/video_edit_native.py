@@ -24,6 +24,8 @@ def check():
    editor=viewer.video_editor;assert editor.save.get_sensitive()
    editor.start.set_value(.4);editor.end.set_value(1.7);editor.rotate(90);editor.filter_buttons[4].set_active(True)
    viewer.editor_categories.set_active_name('Crop');viewer.stage.crop_frame.bounds=(.1,.1,.9,.9)
+   edited=editor.edits();editor.undo_edits();assert editor.rotation==0 and editor.filter=='Original' and editor.start.get_value()==0
+   editor.undo_edits(True);assert editor.edits()==edited
    a,b=editor.trim_range.points();assert b>a
    span=max(1,editor.trim_range.get_width()-20)
    for active,value in ((0,.5),(1,1.8)):

@@ -65,6 +65,8 @@ class LibraryUI:
         from copy_ui import clear_locked_clipboard
         clear_locked_clipboard(self)
         self.data_stopped=True
+        if getattr(self,'action_motion',None):self.action_motion.cancel()
+        if getattr(self,'upload_cancel',None):self.upload_cancel.set()
         if hasattr(self,'date_motion'):self.date_motion.clear()
         if self.viewer:self.viewer.dispose_editors()
         if self.refresh_timer:GLib.source_remove(self.refresh_timer);self.refresh_timer=0
@@ -112,6 +114,8 @@ class LibraryUI:
         self.background(store,lambda _:None,lambda message:self.notice(message))
 
     def sign_out(self):
+        if getattr(self,'action_motion',None):self.action_motion.cancel()
+        self.media_action_pending=False
         from copy_ui import clear_locked_clipboard
         clear_locked_clipboard(self)
         client=self.client
@@ -238,6 +242,8 @@ class LibraryUI:
         return True
 
     def lock_folder(self,refresh=True):
+        if getattr(self,'action_motion',None):self.action_motion.cancel()
+        self.media_action_pending=False
         from copy_ui import clear_locked_clipboard
         clear_locked_clipboard(self)
         self.timeline_pending=set()
@@ -262,8 +268,22 @@ class LibraryUI:
             self.status.set_description('A private space for your photos.')
             self.status_actions.set_visible(True)
 
-    def selected_action(self,action,items=None):
+    def mutate_media(self,work,done):
+        if getattr(self,'media_action_pending',False):return
+        scope=(self.data_generation,self.mosaic)
+        if getattr(self,'mutation_pending',None)==scope:return
+        self.mutation_pending=scope
+        def complete(value):
+            if self.mutation_pending==scope:self.mutation_pending=None
+            done(value)
+        def failed(message):
+            if self.mutation_pending==scope:self.mutation_pending=None
+            self.notice(message)
+        self.background(work,complete,failed)
+
+    def selected_action(self,action,items=None,target=None):
         if not self.client:self.notice('Local files are read-only.');return
+        if getattr(self,'media_action_pending',False):return
         ids=[item.id for item in items] if items is not None else [self.mosaic.tiles[i].media_item.id for i in self.mosaic.selected]
         if not ids:return
         mosaic=self.mosaic
@@ -278,27 +298,20 @@ class LibraryUI:
             if action=='trash' or action=='archive' and not unarchive:self.remove_from_timeline(ids)
             self.client.refresh_serial=getattr(self.client,'refresh_serial',0)+1
             if self.mosaic==mosaic:
-                def remove():
-                    if self.mosaic==mosaic:self.set_library_items(self.timeline_index.items if self.timeline_index and mosaic.indexed else [item for item in self.media_items if item.id not in ids],append=True,reflow=True)
-                if action in ('trash','archive') and self.viewer:
-                    self.pending_media=([item for item in self.media_items if item.id not in ids],True)
-                    self.viewer.close()
-                elif action=='trash' and not restore:
-                    from trash_motion import TrashMotion
-                    TrashMotion(self,[tile for tile in mosaic.tiles if tile.media_item.id in ids],remove)
-                elif restore or action=='archive':remove()
+                if action in ('trash','archive'):
+                    self.animate_media_removal(ids,mosaic,action,target)
                 else:
                     for item in self.media_items:
                         if item.id in ids:item.metadata['isFavorite']=True
-                self.mosaic.set_selection(False)
+                    self.mosaic.set_selection(False)
             self.notice('Items restored.' if restore else 'Favorites updated.' if action=='favorite' else 'Items removed from archive.' if unarchive else 'Items archived.' if action=='archive' else 'Items moved to trash.')
         if action=='trash' and not restore:
             confirm=Adw.AlertDialog(heading=f'Move {len(ids)} items to trash?',body='You can restore them from Trash.')
             confirm.add_response('cancel','Cancel');confirm.add_response('trash','Move to trash')
             confirm.set_response_appearance('trash',Adw.ResponseAppearance.DESTRUCTIVE)
-            confirm.connect('response',lambda _,value:self.background(perform,done) if value=='trash' else None)
+            confirm.connect('response',lambda _,value:self.mutate_media(perform,done) if value=='trash' else None)
             confirm.present(self)
-        else:self.background(perform,done)
+        else:self.mutate_media(perform,done)
 
     def add_selected_to_album(self):
         if not self.client:self.notice('Connect Immich to add items to albums.');return
@@ -313,13 +326,15 @@ class LibraryUI:
             group.add(row)
         page.add(group);dialog.add(page);dialog.present(self)
 
-    def move_selected_to_locked(self):
+    def move_selected_to_locked(self,items=None,target=None):
         if not self.client:self.notice('Connect Immich to use the locked folder.');return
+        if getattr(self,'media_action_pending',False):return
         client=self.client;mosaic=self.mosaic
-        ids=[mosaic.tiles[i].media_item.id for i in mosaic.selected if not mosaic.tiles[i].media_item.metadata.get('placeholder')]
+        ids=[item.id for item in items] if items is not None else [mosaic.tiles[i].media_item.id for i in mosaic.selected if not mosaic.tiles[i].media_item.metadata.get('placeholder')]
         if not ids:return
         moved=set(ids)
-        retained=[item for item in self.media_items if item.id not in moved and item.metadata.get('visibility')!='locked' and not item.metadata.get('placeholder')]
+        known=[*self.media_items,*(self.timeline_index.items if self.timeline_index else []),*(item for values,_ in self.page_cache.values() for item in values)]
+        retained=[item for item in known if item.id not in moved and item.metadata.get('visibility')!='locked' and not item.metadata.get('placeholder')]
         image_keys=[client.image_key(item,preview) for item in retained for preview in (False,True)]
         video_keys=['video-prefix:'+item.id+str(item.metadata.get('updatedAt') or item.metadata.get('checksum','')) for item in retained if item.kind=='VIDEO']
         def move():
@@ -337,18 +352,41 @@ class LibraryUI:
                     if key[0]=='asset' and key[1] in moved:self.collection_textures.pop(key,None)
                 client.refresh_serial=getattr(client,'refresh_serial',0)+1
                 if self.mosaic==mosaic:
-                    self.mosaic.set_selection(False);self.set_library_items(self.timeline_index.items if self.timeline_index and mosaic.indexed else [item for item in self.media_items if item.id not in ids],append=True,reflow=True)
+                    self.animate_media_removal(ids,mosaic,'locked',target)
                 self.notice('Items moved to the locked folder.')
             def work():
                 result=client.update_assets(ids,{'visibility':'locked'})
                 client.media_cache().forbid((id+':' for id in ids),preserve=image_keys)
                 client.video_cache().forbid(('video-prefix:'+id for id in ids),preserve=video_keys)
                 return result
-            self.background(work,done)
+            self.mutate_media(work,done)
         if client.locked_until<=time.monotonic():
             from vault_ui import unlock_folder
             unlock_folder(self,after=move)
         else:move()
+
+    def animate_media_removal(self,ids,mosaic,action,target=None):
+        viewer=self.viewer if self.viewer and self.viewer.source.media_item.id in ids else None
+        if target is None:target=getattr(viewer,'lock' if action=='locked' else action,None) if viewer else self.selection_controls.get(action)
+        if not viewer and not mosaic.selection_mode:
+            mosaic.selected={tile.index for tile in mosaic.tiles if tile.media_item.id in ids};mosaic.set_selection(True)
+        if viewer:
+            viewer.closing=True;viewer.show_chrome(True)
+            if viewer.stage.video_player:viewer.stage.video_player.pause()
+        self.media_action_pending=True
+        def finish():
+            self.media_action_pending=False
+            if self.mosaic!=mosaic:return
+            if viewer and self.viewer==viewer:viewer.dismiss_action()
+            self.pending_media=None
+            values=self.timeline_index.items if self.timeline_index and mosaic.indexed else [item for item in self.media_items if item.id not in ids]
+            mosaic.set_selection(False);self.set_library_items(values,append=True,reflow=True)
+        def begin():
+            if self.data_stopped or self.mosaic!=mosaic:self.media_action_pending=False;return False
+            from trash_motion import ActionMotion
+            sources=[viewer.stage.picture] if viewer else [tile.get_child() for tile in mosaic.active_widgets & mosaic.tile_set if tile.media_item.id in ids]
+            ActionMotion(self,sources,target,finish,viewer);return False
+        GLib.timeout_add(180 if not viewer and not self.selection_bar.get_child_revealed() else 20,begin)
 
     def remove_from_timeline(self,ids):
         if self.timeline_index:
@@ -617,7 +655,7 @@ class LibraryUI:
 
     def refresh_remote(self,*_):
         if self.data_stopped:return False
-        if not self.client or getattr(self.client,'restoring',False) or self.viewer or self.loading_more or not self.get_visible():return True
+        if not self.client or getattr(self.client,'restoring',False) or self.viewer or self.loading_more or getattr(self,'media_action_pending',False) or not self.get_visible():return True
         if self.current_page in ('albums','people','tags','duplicates','sharing','map'):
             if self.current_page!='map':
                 from collections_ui import collection_view
@@ -736,6 +774,8 @@ class LibraryUI:
         self.loading_more=True
         self.media_items=sorted({item.id:item for item in items}.values(),key=lambda item:item.created,reverse=True)
         old=self.mosaic
+        top,height=old.visible_range()
+        visible_pixels={self.texture_key(tile.media_item):tile.media_texture for tile in old.active_widgets & old.tile_set if tile.media_texture is not None and (rect:=old.rendered.get(tile)) and rect[1]+rect[3]>=top-old.target*2 and rect[1]<=top+height+old.target*2}
         buckets=self.timeline_buckets if self.current_page=='library' and not self.search.entry.get_text() else None
         mosaic=Mosaic(self.open_viewer,self.media_items,buckets,self.open_date_bucket if buckets else None)
         mosaic.cached_texture=lambda item:self.texture_cache.get(self.texture_key(item))
@@ -750,7 +790,8 @@ class LibraryUI:
         mosaic.target=old.target
         mosaic.show_durations=old.show_durations
         for tile in mosaic.tiles:
-            if tile.media_item and self.texture_key(tile.media_item) in self.texture_cache:self.apply_texture(tile,self.texture_cache[self.texture_key(tile.media_item)])
+            texture=visible_pixels.get(self.texture_key(tile.media_item)) or self.texture_cache.get(self.texture_key(tile.media_item))
+            if texture:self.apply_texture(tile,texture)
         mosaic.expanded_month=old.expanded_month
         mosaic.expanded_year=old.expanded_year
         self.populate_date_covers(mosaic)
@@ -893,7 +934,16 @@ class LibraryUI:
         if self.next_page and not self.loading_more and adjustment.get_value()>0 and adjustment.get_value()+adjustment.get_page_size()>=adjustment.get_upper()-400:
             self.search_library(append=True)
 
+    def upload_finished(self,client):
+        if self.client!=client:return
+        client.refresh_serial=getattr(client,'refresh_serial',0)+1
+        if self.viewer:self.refresh_after_viewer=True
+        else:self.refresh_remote()
+
     def flush_pending_media(self):
+        if getattr(self,'refresh_after_viewer',False):
+            self.refresh_after_viewer=False
+            GLib.timeout_add(100,lambda:(self.refresh_remote(),False)[1])
         if self.pending_media:
             items,append=self.pending_media;self.pending_media=None
             if self.mosaic.indexed and self.timeline_index and len(self.mosaic.tiles)==len(self.timeline_index.items):
@@ -959,7 +1009,7 @@ class LibraryUI:
         tile.photo_picture.set_paintable(texture)
         tile.media_icon.set_visible(False)
         tile.set_tooltip_text(tile.filename)
-        for picture in self.mosaic.cover_slots.get(tile,[]):
+        for picture in tile.owner.cover_slots.get(tile,[]):
             picture.media_id=tile.media_item.id;picture.set_paintable(texture)
 
     def load_preview(self,stage,source):

@@ -8,6 +8,7 @@ from imaging import decode_image
 from library import LibraryError
 from video_edit import Edits,FILTERS,probe,frame,export,Cancelled
 from trim_ui import TrimRange
+from edit_history import History
 
 
 def time_label(seconds):
@@ -18,6 +19,7 @@ def time_label(seconds):
 class VideoEditor(Gtk.Box):
     def __init__(self,viewer):
         super().__init__(orientation=Gtk.Orientation.VERTICAL,spacing=10,css_classes=['editor-bar'])
+        self.history=None;self.history_timer=0;self.restoring=False
         self.viewer=viewer;self.uri=None;self.original=None;self.duration=0;self.rotation=0;self.filter='Original'
         self.generation=0;self.debounce=0;self.cancel=None;self.running=False;self.syncing=False;self.playing=False;self.play_timer=0;self.playback_original=False
         self.temporary=tempfile.TemporaryDirectory(prefix='galeria-video-');self.original_ratio=viewer.stage.ratio
@@ -66,12 +68,39 @@ class VideoEditor(Gtk.Box):
         self.preview=Gtk.Button(label='Preview 5 seconds');self.preview.connect('clicked',lambda _:self.render(None,True));footer.append(self.preview)
         self.save=Gtk.Button(label='Save a copy…',css_classes=['suggested-action']);self.save.connect('clicked',self.save_copy);footer.append(self.save)
         self.cancel_button=Gtk.Button(label='Cancel export',visible=False);self.cancel_button.connect('clicked',lambda _:self.cancel.set() if self.cancel else None);footer.append(self.cancel_button)
+        self.undo=Gtk.Button(label='Undo',sensitive=False);self.undo.connect('clicked',lambda _:self.undo_edits());footer.prepend(self.undo)
+        self.redo=Gtk.Button(label='Redo',sensitive=False);self.redo.connect('clicked',lambda _:self.undo_edits(True));footer.insert_child_after(self.redo,self.undo)
+        viewer.stage.crop_frame.changed=self.queue_preview
         self.append(footer);self.set_ready(False)
         categories.connect('notify::active-name',lambda group,_:(stack.set_visible_child_name(group.get_active_name()),viewer.stage.crop_frame.set_visible(viewer.editing and group.get_active_name()=='Crop'),self.queue_preview()))
         categories.set_active_name('Trim')
 
+    def snapshot(self):return self.edits(),self.viewer.stage.crop_frame.aspect,self.viewer.crop_dropdown.get_selected()
+
+    def remember(self):
+        if self.restoring or not self.history:return
+        if self.history_timer:GLib.source_remove(self.history_timer)
+        def commit():
+            self.history_timer=0;self.history.record(self.snapshot());self.undo.set_sensitive(len(self.history.past)>1);self.redo.set_sensitive(bool(self.history.future));return False
+        self.history_timer=GLib.timeout_add(300,commit);self.undo.set_sensitive(True)
+
+    def undo_edits(self,redo=False):
+        if not self.history or self.running:return
+        if self.history_timer:GLib.source_remove(self.history_timer);self.history_timer=0
+        state=(self.history.redo if redo else self.history.undo)(self.snapshot())
+        if state is None:return
+        edits,aspect,choice=state;self.restoring=self.syncing=True
+        self.rotation=edits.rotation;self.filter=edits.filter;self.start.set_value(edits.start);self.end.set_value(edits.end)
+        self.position.set_range(edits.start,max(edits.start+.01,edits.end));self.position.set_value(edits.start)
+        self.viewer.crop_dropdown.set_selected(choice);self.viewer.stage.crop_frame.bounds=edits.crop;self.viewer.stage.crop_frame.aspect=aspect
+        self.filter_buttons[list(FILTERS).index(self.filter)].set_active(True);self.syncing=False;self.queue_preview();self.restoring=False
+        self.undo.set_sensitive(len(self.history.past)>1);self.redo.set_sensitive(bool(self.history.future))
+
     def set_ready(self,ready):
         for widget in [self.controls,self.reset,self.preview,self.save]:widget.set_sensitive(ready and not self.running)
+        self.viewer.stage.crop_frame.set_can_target(ready and not self.running)
+        self.undo.set_sensitive(bool(ready and not self.running and self.history and len(self.history.past)>1))
+        self.redo.set_sensitive(bool(ready and not self.running and self.history and self.history.future))
 
     def enter(self):
         stage=self.viewer.stage
@@ -87,7 +116,7 @@ class VideoEditor(Gtk.Box):
             for widget in [self.start,self.end]:widget.set_range(0,self.duration)
             self.end.set_value(self.duration);self.position.set_range(0,self.duration)
             self.trim_range.set_duration(self.duration)
-            self.syncing=False;self.set_ready(True);self.queue_preview()
+            self.syncing=False;self.history=History(self.snapshot());self.set_ready(True);self.queue_preview()
         window.background(lambda:probe(self.uri),ready,lambda message:self.message.set_label(message),images='preview')
 
     def edits(self):return Edits(self.start.get_value(),self.end.get_value(),self.rotation,self.filter,tuple(self.viewer.stage.crop_frame.bounds))
@@ -109,7 +138,7 @@ class VideoEditor(Gtk.Box):
         else:self.queue_preview()
 
     def toggle_playback(self):
-        if not self.duration:return
+        if not self.duration or self.running:return
         stage=self.viewer.stage
         if self.playing:
             self.playing=False;stage.video_player.pause();self.play_button.set_icon_name('media-playback-start-symbolic');return
@@ -141,7 +170,7 @@ class VideoEditor(Gtk.Box):
 
     def aspect_changed(self,dropdown,*_):
         ratio=self.original_ratio if self.rotation%180==0 else 1/self.original_ratio
-        self.viewer.stage.crop_frame.set_aspect([None,ratio,1,4/3,16/9][dropdown.get_selected()])
+        self.viewer.stage.crop_frame.set_aspect([None,ratio,1,4/3,16/9][dropdown.get_selected()]);self.queue_preview()
 
     def rotate(self,angle):
         self.rotation=(self.rotation+angle)%360;self.viewer.stage.crop_frame.reset();self.queue_preview()
@@ -149,7 +178,8 @@ class VideoEditor(Gtk.Box):
     def choose_filter(self,name):self.filter=name;self.queue_preview()
 
     def queue_preview(self,*_):
-        if self.syncing or not self.duration or not self.viewer.editing:return
+        if self.syncing or self.running or not self.duration or not self.viewer.editing:return
+        self.remember()
         if self.playing:self.toggle_playback()
         if self.debounce:GLib.source_remove(self.debounce)
         self.generation+=1;generation=self.generation
@@ -231,6 +261,7 @@ class VideoEditor(Gtk.Box):
         if not self.viewer.closing:stage.video_player.play()
 
     def close(self):
+        if self.history_timer:GLib.source_remove(self.history_timer);self.history_timer=0
         if self.play_timer:GLib.source_remove(self.play_timer);self.play_timer=0
         if self.cancel:self.cancel.set()
         if self.original and self.original.startswith('http:'):self.viewer.window.get_video_proxy().unregister(self.original)

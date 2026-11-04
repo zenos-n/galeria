@@ -34,17 +34,19 @@ The sidebar includes a native Gtk.TreeListModel album tree with a disclosure but
 
 Immersive fullscreen uses a black background and fits the media to the full viewport. Controls hide and reappear on pointer motion; Esc first exits fullscreen. Details uses an Adw.OverlaySplitView with a material sidebar and a responsive overlay on narrow windows. Share creates real Immich links for the focused or selected media. Album sharing is available from the album menu and its header button; owners can invite server users, change viewer/editor roles, remove members, and create/revoke password-protected links with download/upload/metadata/expiration controls.
 
-The native drop target accepts Gdk.FileList, including both files and folders. Drops and the upload picker open an import review sheet. Only item names and file types are inspected; directory contents are not scanned, and nothing is imported or uploaded.
+The native drop target accepts files and folders in both the grid and viewer. Drops and the upload picker open a review sheet; Upload scans supported media and sends originals to Immich off the GTK thread. SHA-1 preflight skips files already on the server. Transfers can be cancelled and never modify source files. A signed-in account is required.
 
-The photo editor exposes Crop, Adjust and Markup. Light/Color/Detail controls apply distinct tonal, color and detail operations, retain independent values and snap to neutral during dragging; keyboard steps remain precise. Pen, highlighter, opaque redaction and placed text draw on the photo, with color selection and Undo. Compare shows the source and Reset clears edits. Save a copy exports a PNG to a chosen location, applying adjustments, markup, crop, rotation, mirror and straighten while preserving the original. Unsupported remote originals use the server preview and report the lower-resolution export. Previews run off the GTK thread, coalesce pending changes and use at most1200pixels per side. The separate video editor retains its functional trim, crop, rotation and filter export controls.
+The photo editor exposes Crop, Adjust and Markup. Light/Color/Detail controls apply distinct tonal, color and detail operations, retain independent values and snap to neutral during dragging; keyboard steps remain precise. Pen, highlighter, opaque redaction and placed text draw on the photo, with a highlighted selected color and Undo/Redo (Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y). The Text tool opens an inline entry where you click; drag the caption to move it or its handles to rotate and scale. Compare shows the source and Reset clears edits. Save a copy uploads an edited PNG directly to Immich from memory, applying adjustments, markup, crop, rotation, mirror and straighten while preserving the original. Locked sources create locked copies. Unsupported remote originals use the server preview and report the lower-resolution copy. Previews run off the GTK thread, coalesce pending changes and use at most1200pixels per side. The separate video editor retains its functional trim, crop, rotation and filter export controls.
 
 Multi-selection supports the header selection toggle, checkboxes, Ctrl-click, Shift-click ranges, Ctrl+A, Escape, and a batch-action bar. Local files remain read-only. Trash uses a confirmation and restores from the Trash page rather than deleting permanently.
 
 Shift+D downloads the expanded media or the current selection through the
 save-location picker. It is inactive while editing, typing, or using a dialog.
-Copy media puts image pixels first on the clipboard, alongside the original
-file. If an Immich original cannot be decoded locally, its rendered preview
-supplies the image pixels. Locked images never create ordinary clipboard files.
+Copy media supplies image pixels only, with no file paths or URI formats.
+Videos have no Copy action. If an Immich original cannot be decoded locally, its
+rendered preview supplies the image pixels. Locked images stay in memory and
+the app-owned clipboard provider is cleared when locked. Right-click Share
+works for both images and videos.
 Loading month metadata fills existing cells in place; it does not animate a new
 upload. Pending scroll restoration yields to newer scroll input or a held year
 scrollbar. The hamburger menu has no Quit item; Ctrl+Q remains available.
@@ -98,8 +100,9 @@ loaded page count and scroll position. These checks pause while viewing/editing
 media. Month/year covers load separately from their complete date catalog.
 Changing date tiers closes the expanded folder; transitions match asset IDs
 between the actual grid images and cover quadrants. Only the viewport is drawn,
-with two screens above/below allocated. Successful batch Trash animates thumbnail
-snapshots into the sidebar, then rearranges the remaining tiles without refetching.
+with two screens above/below allocated. Successful Trash, Archive and Move to locked folder actions animate visible
+media into the invoked action icon, in selection and viewing mode, then rearrange
+the remaining tiles without refetching.
 
 Galeria0.8 uses Immich's compact timeline metadata (IDs, ratios, dates and types)
 to create the library's complete scroll range before thumbnail downloads.
@@ -172,9 +175,8 @@ chevrons keep their transparent background.
 
 Galeria0.10.1 refreshes visible libraries/albums even while another application
 has focus, so uploads appear when Galeria is on a secondary display. Refresh
-still pauses for hidden windows and focused-media viewing/editing. Folder sync
-rescans enabled rules every30seconds by default; recent or changing files wait
-until stable. After validating a saved account, Galeria resumes its already
+still pauses for hidden windows and focused-media viewing/editing. Folder sync now uses directory notifications (since0.13.0); recent or changing
+files wait until stable, with an infrequent recovery scan. After validating a saved account, Galeria resumes its already
 opted-in sync rules and updates an older service runtime. Installing the service
 no longer immediately sends SIGUSR1 before its signal handler is ready; its first
 scan starts automatically. Existing running services use the normal wake signal.
@@ -199,12 +201,10 @@ allocation exception. The compact row-index resize fix remains in place.
 Selection and focused media both offer Archive (unarchive from Archive) and Trash
 (restore from Trash), using the real Immich asset APIs and the existing Trash
 confirmation. Right-click a grid item or focused media for Copy media, Download,
-Archive and Trash; Ctrl+C copies focused media. Clipboard formats include the
-original file and, when decodable, image pixels up to4096px. Remote originals use
-one private per-account clipboard directory, replaced on the next copy or Clear
-cache. Locked images use in-memory pixels; locked video export files and the
-app-owned clipboard provider are cleared on lock, sign-out, library switch or
-shutdown. Other applications' clipboard histories are outside Galeria's control.
+Archive and Trash; Ctrl+C copies focused images. Version0.13.0 supplies image
+pixels only, without file/URI formats. Locked pixels and the app-owned private
+clipboard provider are cleared on lock, sign-out, library switch or shutdown.
+Other applications' clipboard histories are outside Galeria's control.
 
 Video editing has separate trim and playback controls: two draggable start/end
 handles with an accent-colored selected span, numeric times, and a playhead with
@@ -228,3 +228,28 @@ Empty cached album views remain visible after deleting the last album.
 The timeline date follows the newest visible month in All Photos and visible year in the date tiers. The newest month appears only in the header, with no duplicate inline heading or reserved gap. Older month labels move vertically from their exact inline position into the header and reverse with scrolling. Both use the same left edge; fast skips exchange header labels in the actual scroll direction.
 
 Moving assets to Locked retains other assets’ RAM textures and known disk thumbnails/previews/video prefixes. Only moved assets leave RAM cover caches; metadata snapshots and unclassified disk entries are invalidated for privacy, and pending pre-move writes are blocked. The remaining grid reflows with its scroll anchor intact.
+
+
+Galeria0.13.0 adds working file/folder drop uploads, including drops onto focused
+media, and event-driven folder syncing. Gio directory monitors wake the service
+after a250ms debounce; a two-second stable-file check avoids uploading half-written
+files. Pending files retry after2.2seconds, errors after30seconds, and a600second
+recovery pass covers missed/unavailable notifications. Recursive monitors follow
+the existing include-subfolders/depth rules, including new directories. Scanning,
+hashing and duplicate checks do not show an upload indicator.
+
+Photo copies now upload PNG bytes directly to Immich without a local save dialog
+or plaintext staging file. Both editors have bounded Undo/Redo history; photo
+markup supports inline text entry, move, rotate and scale. Focused media offers
+working Favorite, Archive, Trash and Locked actions. Space toggles video playback
+without leaving focus; Replay restarts ended videos and Loop repeats the item.
+Mouse-wheel zoom and pinch zoom span1–8x, with drag panning and a reset control.
+Zoom transforms the existing widget rather than reallocating a larger player.
+
+Action animations target the actual toolbar icon. Moving assets to Locked also
+retains currently displayed textures evicted from the LRU; metadata-only arrivals
+reuse existing cells and pixels. The year-scroll hint has an explicit popover
+background.78unit checks and native action-target, real cross-window drop/upload,
+clipboard receiver, viewer controls, editor, Locked retention and scrolling/date
+regressions pass. Pinch/pan callbacks were simulated; physical touchpad/touch
+hardware and production-server mutations were not tested.

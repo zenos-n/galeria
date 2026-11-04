@@ -17,43 +17,49 @@ from library import LibraryError,media_paths
 def signature(stat):return stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime_ns
 
 
-def upload_file(client,path,checksum,expected,cancel):
+def post_asset(client,filename,size,modified,checksum,source,cancel,visibility=None,check=None):
     boundary='gallery-'+secrets.token_hex(16)
-    stamp=datetime.fromtimestamp(expected.st_mtime,timezone.utc).isoformat(timespec='milliseconds').replace('+00:00','Z')
-    fields={'fileCreatedAt':stamp,'fileModifiedAt':stamp,'filename':path.name}
-    if not client.modern_search:
-        fields.update(deviceId='gallery-folder-sync',deviceAssetId=checksum)
+    stamp=datetime.fromtimestamp(modified,timezone.utc).isoformat(timespec='milliseconds').replace('+00:00','Z')
+    fields={'fileCreatedAt':stamp,'fileModifiedAt':stamp,'filename':filename}
+    if visibility:fields['visibility']=visibility
+    if not client.modern_search:fields.update(deviceId='gallery-folder-sync',deviceAssetId=checksum)
     prefix=b''
     for name,value in fields.items():
         prefix+=f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
-    mime=mimetypes.guess_type(path.name)[0] or 'application/octet-stream'
-    filename='upload'+path.suffix
-    prefix+=(f'--{boundary}\r\nContent-Disposition: form-data; name="assetData"; filename="{filename}"; filename*=UTF-8\'\'{quote(path.name)}\r\nContent-Type: {mime}\r\n\r\n').encode()
-    suffix=f'\r\n--{boundary}--\r\n'.encode()
+    mime=mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+    suffix=Path(filename).suffix
+    prefix+=(f'--{boundary}\r\nContent-Disposition: form-data; name="assetData"; filename="upload{suffix}"; filename*=UTF-8\'\'{quote(filename)}\r\nContent-Type: {mime}\r\n\r\n').encode()
+    ending=f'\r\n--{boundary}--\r\n'.encode()
     def chunks():
-        fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
-        with os.fdopen(fd,'rb') as stream:
-            if signature(os.fstat(stream.fileno()))!=signature(expected):raise LibraryError('File changed before upload; retrying later.')
-            yield prefix
-            remaining=expected.st_size
+        with source() as stream:
+            if check:check(stream)
+            yield prefix;remaining=size
             while remaining:
-                if cancel.is_set():raise InterruptedError('Sync cancelled')
+                if cancel.is_set():raise InterruptedError('Upload cancelled')
                 chunk=stream.read(min(1024*1024,remaining))
                 if not chunk:raise LibraryError('File changed during upload; retrying later.')
                 remaining-=len(chunk);yield chunk
-            yield suffix
-    request=Request(client.base+'/assets',data=chunks(),headers={
-        'Authorization':'Bearer '+client.token,'Content-Type':'multipart/form-data; boundary='+boundary,
-        'Content-Length':str(len(prefix)+expected.st_size+len(suffix)),'x-immich-checksum':checksum},method='POST')
+            yield ending
+    request=Request(client.base+'/assets',data=chunks(),headers={'Authorization':'Bearer '+client.token,
+        'Content-Type':'multipart/form-data; boundary='+boundary,'Content-Length':str(len(prefix)+size+len(ending)),
+        'x-immich-checksum':checksum},method='POST')
     try:
         with client.http.open(request,timeout=60) as response:result=json.loads(response.read(1024*1024))
     except InterruptedError:raise
     except Exception as error:
         if hasattr(error,'close'):error.close()
-        raise LibraryError('Upload failed; the original is untouched and will be retried.') from None
-    if signature(path.stat())!=signature(expected):raise LibraryError('File changed during upload; retrying later.')
+        raise LibraryError('Upload failed; the original is untouched and can be retried.') from None
     if not result.get('id'):raise LibraryError('Immich did not confirm the uploaded asset.')
     return result['id']
+
+
+def upload_file(client,path,checksum,expected,cancel,visibility=None):
+    def source():return os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW),'rb')
+    def check(stream):
+        if signature(os.fstat(stream.fileno()))!=signature(expected):raise LibraryError('File changed before upload; retrying later.')
+    id=post_asset(client,path.name,expected.st_size,expected.st_mtime,checksum,source,cancel,visibility,check)
+    if signature(path.stat())!=signature(expected):raise LibraryError('File changed during upload; retrying later.')
+    return id
 
 
 class SyncJournal:

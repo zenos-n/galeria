@@ -260,9 +260,13 @@ class Mosaic(Gtk.Widget):
         offset=top-self.rendered[anchor][1] if anchor else 0
         geometry_changed=any(self.tiles[i].photo_ratio!=item.ratio or self.query and self.tiles[i].filename!=item.filename for i,item in enumerate(items,start))
         for i,item in enumerate(items,start):
-            tile=self.tiles[i];tile.media_item=item;tile.photo_ratio=item.ratio;tile.filename=item.filename
+            tile=self.tiles[i];previous=tile.media_item
+            same=previous.id==item.id and previous.metadata.get('updatedAt')==item.metadata.get('updatedAt')
+            rebuild=not same or previous.kind!=item.kind or previous.filename!=item.filename or previous.metadata.get('duration')!=item.metadata.get('duration')
+            texture=tile.media_texture if same else None
+            if rebuild:tile.release();tile.media_texture=texture
+            tile.media_item=item;tile.photo_ratio=item.ratio;tile.filename=item.filename
             self.asset_months[item.id]=key
-            if tile.button:tile.release()
             self.items[i]=item
         if geometry_changed:
             self._target_cache.clear()

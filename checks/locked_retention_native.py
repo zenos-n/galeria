@@ -29,7 +29,11 @@ def check():
   elif phase==1:
    visible=sorted((tile for tile in m.active_widgets & m.tile_set if m.rendered[tile][1]>=scroll.get_value()),key=lambda tile:tile.index)
    moved=[tile.media_item for tile in visible[:2]];retained=visible[3].media_item
-   position=scroll.get_value();m.selected={tile.index for tile in visible[:2]};m.set_selection(True)
+   position=scroll.get_value()
+   for tile in m.active_widgets & m.tile_set:
+    rect=m.rendered[tile]
+    if rect[1]+rect[3]>=position and rect[1]<=position+scroll.get_page_size():w.texture_cache.pop(w.texture_key(tile.media_item),None)
+   m.selected={tile.index for tile in visible[:2]};m.set_selection(True)
    for item in moved:
     w.texture_cache[(item.id,'old')]=texture
     client.media_cache().put(client.image_key(item),b'private')
@@ -56,8 +60,13 @@ def check():
    assert client.media_cache().get('stale-metadata') is None
    assert ('months','keep') in w.date_cover_cache and ('months','remove') not in w.date_cover_cache
    assert ('asset',retained.id) in w.collection_textures and ('asset',moved[0].id) not in w.collection_textures
+   before={tile:(tile.media_texture,tile.button) for tile in m.active_widgets & m.tile_set}
+   from dataclasses import replace
+   key=m.months[0][0];month=next(month for month in m.months if month[0]==key);a,b=month[3:]
+   m.update_bucket(key,[replace(item,metadata={**item.metadata,'isFavorite':True}) for item in m.items[a:b]])
+   assert all(tile.media_texture is pixels and tile.button is button for tile,(pixels,button) in before.items())
    assert path.read_bytes()==original
-   print('TWO LOCKED MOVES: ALL OTHER RAM/DISK PIXELS RETAINED, ZERO DOWNLOADS/BLANK CELLS, SCROLL HELD; PRIVATE REVISIONS/METADATA/COVERS PURGED, ORIGINAL UNTOUCHED PASSED',flush=True)
+   print('TWO LOCKED MOVES: VISIBLE PIXELS SURVIVE LRU EVICTION/REBUILD/METADATA REFRESH; OTHER RAM/DISK PIXELS RETAINED, ZERO DOWNLOADS/BLANK CELLS, SCROLL HELD; PRIVATE REVISIONS/METADATA/COVERS PURGED, ORIGINAL UNTOUCHED PASSED',flush=True)
    w.close();app.quit();return False
  except Exception as error:
   import traceback;traceback.print_exc();errors.append(error);w.close();app.quit();return False

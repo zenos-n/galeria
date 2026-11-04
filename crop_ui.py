@@ -8,11 +8,12 @@ class CropOverlay(Gtk.DrawingArea):
         self.bounds=(0.,0.,1.,1.)
         self.aspect=None
         self.start=None
-        self.handle=None
+        self.handle=None;self.changed=lambda:None
         self.set_draw_func(self.draw)
         drag=Gtk.GestureDrag(button=1)
         drag.connect('drag-begin',self.begin)
         drag.connect('drag-update',self.update)
+        drag.connect('drag-end',lambda *_:self.changed())
         self.add_controller(drag)
         motion=Gtk.EventControllerMotion()
         motion.connect('motion',self.motion)

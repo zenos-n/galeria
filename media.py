@@ -16,6 +16,7 @@ class PhotoStage(Gtk.Widget):
         self.geometry_rect = None
         self.last_rect = None
         self.set_opacity(0)
+        self.zoom=1.;self.pan_x=self.pan_y=0.
         self.rotation = 0
         self.flipped = False
         self.crop_ratio = None
@@ -185,12 +186,15 @@ class PhotoStage(Gtk.Widget):
 
     def do_size_allocate(self, width, height, baseline):
         x,y,w,h = self.rect(width,height)
-        self.last_rect=(x,y,w,h)
+        base_w,base_h=w,h
+        x+=(w-w*self.zoom)/2+self.pan_x;y+=(h-h*self.zoom)/2+self.pan_y
+        self.last_rect=(x,y,w*self.zoom,h*self.zoom)
         self.picture.measure(Gtk.Orientation.HORIZONTAL,-1)
         self.picture.measure(Gtk.Orientation.VERTICAL,round(w))
         point=Graphene.Point()
         point.init(x,y)
-        self.picture.allocate(max(1,round(w)),max(1,round(h)),-1,Gsk.Transform.new().translate(point))
+        self.picture.allocate(max(1,round(base_w)),max(1,round(base_h)),-1,Gsk.Transform.new().translate(point).scale(self.zoom,self.zoom))
 
     def do_snapshot(self,snapshot):
-        self.snapshot_child(self.picture,snapshot)
+        snapshot.push_clip(Graphene.Rect().init(0,0,self.get_width(),self.get_height()))
+        self.snapshot_child(self.picture,snapshot);snapshot.pop()

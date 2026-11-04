@@ -482,3 +482,35 @@ left edges across long/short month titles and the year label in Months. Native
 photo, startup/status, Locked retention, pins/insertion and selection/motion
 regressions pass.70unit checks pass. Screenshots were visually inspected; no
 performance gain is claimed.
+
+
+## Galeria0.13.0 retained pixels, transforms and file notifications
+
+Locked moves now transfer visible textures directly from existing cells before
+rebuilding, even after those pixels leave the bounded LRU. A two-row margin
+covers the selection toolbar's height change. Metadata updates retain native
+cells and pictures when asset ID/revision are unchanged; changed native badge
+content still rebuilds controls. The strengthened indexed fixture evicts active
+textures before moving two files and checks zero blank cells/downloads, privacy
+purge, stable scroll and unchanged buttons/pixels on metadata-only replacement.
+
+Wheel/pinch zoom applies a GSK transform to the existing base-size media widget.
+The native control check verifies zoom1–8x, cursor anchoring, bounded panning,
+reset and unchanged player allocation. Pinch callbacks are simulated; no physical
+touchpad/touch device was tested. This verifies geometry and avoids large widget
+allocations; it does not establish a new frame-time result.
+
+Directory notifications replace the normal30second sync poll. A private GLib
+context owns recursive Gio monitors and debounces changes250ms before waking
+the existing worker. The two-second file stability check remains, pending files
+retry after2.2seconds, errors after30seconds and a600second recovery pass covers
+missed/unavailable monitors. Real filesystem tests cover enabled/depth rules,
+new files/subdirectories and config changes. No polling benchmark is claimed.
+
+78unit checks pass. Native cross-window file/folder dragging reaches actual
+loopback multipart uploads and skips duplicate bytes. Independent-process
+clipboard reads receive image pixels and no FileList. Native selection/viewer
+action checks target the actual toolbar icon, while editor/controller regressions
+cover inline text transforms/history, direct in-memory private PNG uploads,
+video Space/replay/loop and favorite persistence. Existing startup/cache/scroll,
+group/date motion and reconnect checks pass. No production media was changed.

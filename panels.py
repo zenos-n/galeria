@@ -72,6 +72,7 @@ class Uploads(Gtk.MenuButton):
 
     def poll_sync(self):
         if getattr(self.window,'data_stopped',False):return False
+        if self.manual:return True
         client=getattr(self.window,'client',None)
         if not client:
             if not self.manual:self.set_visible(False)
@@ -100,7 +101,19 @@ class Uploads(Gtk.MenuButton):
         self.ring.set_visible(busy)
         return True
 
+    def manual_progress(self,name,count,total):
+        self.manual=True;self.set_visible(True);self.ring.set_visible(True)
+        self.summary.set_label('Uploading files…');self.title.set_label(name)
+        self.count.set_label(f'{count} / {total}');self.progress.set_fraction(count/max(1,total))
+        self.note.set_label('Original files stay on this device.')
+
+    def manual_finished(self):
+        self.manual=False;self.popdown();self.set_visible(False);self.poll_sync()
+
     def cancel(self):
+        if self.manual:
+            if getattr(self.window,'upload_cancel',None):self.window.upload_cancel.set()
+            self.manual_finished();return
         self.sync_requested_at=0;self.request_error=None
         if self.window.client and not self.manual:
             from sync_service import disable_account
@@ -217,31 +230,9 @@ def share_sheet(window,count=1):
     share_media(window)
 
 
-def import_sheet(window, files):
-    dialog = Adw.Dialog(title="Add to library", content_width=460, content_height=430)
-    toolbar = Adw.ToolbarView()
-    toolbar.add_top_bar(Adw.HeaderBar())
-    body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18, margin_top=18,
-                   margin_bottom=24, margin_start=24, margin_end=24)
-    body.append(text(f"{len(files)} items selected", "title-2"))
-    group = Adw.PreferencesGroup()
-    for file in files[:5]:
-        is_folder = file.query_file_type(Gio.FileQueryInfoFlags.NONE, None) == Gio.FileType.DIRECTORY
-        row = Adw.ActionRow(title=file.get_basename() or file.get_uri(), subtitle="Folder" if is_folder else "File")
-        row.add_prefix(Gtk.Image(icon_name="folder-symbolic" if is_folder else "gallery-image-symbolic"))
-        group.add(row)
-    if len(files)>5:
-        group.add(Adw.ActionRow(title=f"And {len(files)-5} more items"))
-    body.append(group)
-    body.append(text("Design preview — files and folders stay untouched.", "dim-label", wrap=True))
-    add = Gtk.Button(label="Preview import", height_request=42)
-    add.add_css_class("suggested-action")
-    add.connect("clicked", lambda _: (dialog.close(), window.uploads.preview(len(files))))
-    body.append(add)
-    toolbar.set_content(Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, child=body))
-    dialog.set_child(toolbar)
-    window.dialog=dialog
-    dialog.present(window)
+def import_sheet(window,files):
+    from import_ui import import_sheet as show
+    show(window,files)
 
 
 def preferences(window):

@@ -132,15 +132,20 @@ def main():
     try:fcntl.flock(lock_fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except BlockingIOError:
         os.close(lock_fd);journal.close();return
+    from folder_watch import FolderWatch
+    watcher=None if args.once else FolderWatch(config_path(),wake.set)
     try:
         while not stop.is_set():
             def current(identity,rule):
                 account=read_config().get('accounts',{}).get(identity,{})
                 return account.get('enabled',False) and rule in account.get('folders',[])
-            wake.clear();config=read_config();run_cycle(config,journal,stop,valid_rule=current)
+            wake.clear();config=read_config();result=run_cycle(config,journal,stop,valid_rule=current)
             if args.once:break
-            wake.wait(max(10,min(3600,int(config.get('interval',30)))))
+            pending=any(folder.get('pending') for value in result['accounts'].values() for folder in value.get('folders',[]))
+            errors=any(value.get('error') or any(folder.get('errors') for folder in value.get('folders',[])) for value in result['accounts'].values())
+            wake.wait(2.2 if pending else 30 if errors else 600)
     finally:
+        if watcher:watcher.close()
         journal.close()
         os.close(lock_fd)
         status=read_status();status['running']=False

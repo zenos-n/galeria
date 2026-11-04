@@ -77,13 +77,14 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.drop_hint.set_can_target(False)
         self.root_overlay.add_overlay(self.drop_hint)
         self.drop_target = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
-        self.drop_target.connect("accept", lambda *_: self.viewer is None)
+        self.drop_target.connect("accept", lambda *_: self.get_visible_dialog() is None)
         self.drop_target.connect("enter", self.drop_enter)
         self.drop_target.connect("leave", lambda *_: self.drop_hint.set_visible(False))
         self.drop_target.connect("drop", self.drop_files)
-        self.root_overlay.add_controller(self.drop_target)
+        self.add_controller(self.drop_target)
 
     def drop_enter(self, *_):
+        self.root_overlay.remove_overlay(self.drop_hint);self.root_overlay.add_overlay(self.drop_hint)
         self.drop_hint.set_visible(True)
         return Gdk.DragAction.COPY
 
@@ -283,17 +284,20 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         cancel=Gtk.Button(label='Cancel')
         cancel.connect('clicked',lambda _:self.mosaic.set_selection(False))
         actionbar.pack_start(cancel)
+        self.selection_controls={}
         for icon,title,callback in [
             ('folder-download-symbolic','Download selected',lambda _:self.download_items([self.mosaic.tiles[i].media_item for i in sorted(self.mosaic.selected)])),
             ('gallery-share-symbolic','Share selected',lambda _:share_sheet(self,len(self.mosaic.selected))),
             ('list-add-symbolic','Add to album',lambda _:self.add_selected_to_album()),
             ('starred-symbolic','Favorite selected',lambda _:self.selected_action('favorite')),
-            ('folder-symbolic','Archive or unarchive selected',lambda _:self.selected_action('archive')),
-            ('changes-prevent-symbolic','Move to locked folder',lambda _:self.move_selected_to_locked()),
-            ('user-trash-symbolic','Trash or restore selected',lambda _:self.selected_action('trash')),
+            ('folder-symbolic','Archive or unarchive selected',lambda widget:self.selected_action('archive',target=widget)),
+            ('changes-prevent-symbolic','Move to locked folder',lambda widget:self.move_selected_to_locked(target=widget)),
+            ('user-trash-symbolic','Trash or restore selected',lambda widget:self.selected_action('trash',target=widget)),
         ]:
             control=button(icon,title,callback);actionbar.pack_end(control)
             if title=='Download selected':self.download_selected_button=control
+            for action,symbol in [('trash','user-trash-symbolic'),('archive','folder-symbolic'),('locked','changes-prevent-symbolic')]:
+                if icon==symbol:self.selection_controls[action]=control
         self.selection_bar.set_child(actionbar)
         self.toolbar.add_bottom_bar(self.selection_bar)
         self.mosaic.on_selection=self.selection_changed
@@ -499,7 +503,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.12.2", developer_name="Negative Zero",
+                                 version="0.13.0", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 

@@ -45,5 +45,14 @@ class PhotoEditTests(unittest.TestCase):
         cropped=render(image,{},rotation=90,crop=(.25,.25,.75,.75))
         self.assertEqual(cropped.size,(50,100))
 
+    def test_text_transform_changes_size_direction_and_position(self):
+        image=Image.new('RGBA',(400,300),'white');stroke={'tool':'Text','color':'black','width':.008,'text':'Caption','points':[(.5,.5)]}
+        def bounds(value):return ImageChops.difference(annotate(image,[value]),image).convert('RGB').getbbox()
+        normal=bounds(stroke);rotated=bounds({**stroke,'rotation':90});scaled=bounds({**stroke,'scale':2});moved=bounds({**stroke,'points':[(.7,.5)]})
+        self.assertGreater(normal[2]-normal[0],normal[3]-normal[1])
+        self.assertGreater(rotated[3]-rotated[1],rotated[2]-rotated[0])
+        self.assertGreater(scaled[2]-scaled[0],(normal[2]-normal[0])*1.5)
+        self.assertAlmostEqual(moved[0]-normal[0],80,delta=2)
+
 
 if __name__=='__main__':unittest.main()

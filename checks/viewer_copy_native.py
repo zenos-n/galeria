@@ -16,7 +16,7 @@ if '--clipboard-read' in sys.argv:
  def ready(clipboard,value):
   try:
    texture=clipboard.read_texture_finish(value);result['size']=[texture.get_width(),texture.get_height()]
-   clipboard.read_value_async(Gdk.FileList.__gtype__,GLib.PRIORITY_DEFAULT,None,files)
+   result['has_files']=clipboard.get_formats().contain_gtype(Gdk.FileList.__gtype__);loop.quit()
   except Exception as error:result['error']=str(error);loop.quit()
  def files(clipboard,value):
   try:result['files']=[file.get_path() for file in clipboard.read_value_finish(value).get_files()]
@@ -47,7 +47,7 @@ class Client(ImmichClient):
  def open_original(self,item):
   stream=BytesIO(original);stream.headers={'Content-Length':str(len(original))};return stream
 app=Adw.Application(application_id='com.neg-zero.Galeria.ViewerCopyTest',flags=Gio.ApplicationFlags.NON_UNIQUE)
-phase=0;start=time.monotonic();errors=[];notices=[];downloads=[];which=0;mark=0
+phase=0;start=time.monotonic();errors=[];notices=[];downloads=[];shares=[];which=0;mark=0
 def walk(widget):
  yield widget
  child=widget.get_first_child()
@@ -80,8 +80,7 @@ def check():
    reader=subprocess.Popen([sys.executable,__file__,'--clipboard-read',root.name+'/read.json']);phase=4
   elif phase==4 and reader.poll() is not None:
    result=json.loads(Path(root.name+'/read.json').read_text());assert reader.returncode==0,result
-   assert result['size']==[120,80] and len(result['files'])==1,result
-   copied=Path(result['files'][0]);assert copied.read_bytes()==(path.read_bytes() if which==0 else original)
+   assert result['size']==[120,80] and not result['has_files'],result
    if which==0:
     which=1;w.get_clipboard().set_content(None);w.viewer.move(1);mark=time.monotonic();phase=1;return True
    click(w.viewer.stage.picture,1);keys('shift+d');phase=5
@@ -117,8 +116,31 @@ def check():
    assert downloads==[['remote'],['local','remote']],downloads
    assert w.get_clipboard().get_content()
    assert all(w.hamburger_menu.get_item_attribute_value(i,'action',None).unpack()!='app.quit' for i in range(w.hamburger_menu.get_n_items()))
-   assert 'Media copied.' in notices
-   print('REAL EXPANDED/GRID COPY; CROSS-PROCESS IMAGE/ORIGINAL READS INCLUDING UNDECODABLE ORIGINAL; SHIFT+D CURRENT/SELECTION; PHOTO CROP/ADJUST/MARKUP ONLY; NO QUIT MENU PASSED',flush=True)
+   assert 'Image copied.' in notices
+   import sharing_ui
+   sharing_ui.share_media=lambda window,items:shares.append([item.id for item in items])
+   w.mosaic.set_selection(False);w.open_viewer(0);phase=10
+  elif phase==10 and w.viewer.stage.progress==1:
+   click(w.viewer.stage.picture,3);phase=11
+  elif phase==11:
+   context=next((widget for widget in walk(w.viewer) if isinstance(widget,Gtk.Popover) and widget.get_visible()),None)
+   if not context:return True
+   click(next(widget for widget in walk(context) if isinstance(widget,Gtk.Button) and widget.get_label()=='Share…'),1);phase=12
+  elif phase==12 and shares:
+   assert shares==[['local']],shares
+   from copy_ui import media_menu
+   video=MediaItem('video','movie.mp4',datetime(2026,11,1),1.5,kind='VIDEO')
+   context=media_menu(w,w.viewer,video,50,150)
+   labels=[widget.get_label() for widget in walk(context) if isinstance(widget,Gtk.Button)]
+   assert 'Copy media' not in labels and 'Share…' in labels,labels
+   phase=13
+  elif phase==13:
+   context=next((widget for widget in walk(w.viewer) if isinstance(widget,Gtk.Popover) and widget.get_visible()),None)
+   if not context or not context.get_mapped():return True
+   click(next(widget for widget in walk(context) if isinstance(widget,Gtk.Button) and widget.get_label()=='Share…'),1);phase=14
+  elif phase==14 and len(shares)==2:
+   assert shares==[['local'],['video']],shares
+   print('REAL EXPANDED/GRID COPY; CROSS-PROCESS IMAGE-ONLY READS INCLUDING UNDECODABLE ORIGINAL; SHIFT+D CURRENT/SELECTION; IMAGE/VIDEO CONTEXT SHARE; VIDEO COPY ABSENT; PHOTO CROP/ADJUST/MARKUP ONLY; NO QUIT MENU PASSED',flush=True)
    w.close();app.quit();return False
  except Exception as error:
   import traceback;traceback.print_exc();errors.append(error);w.close();app.quit();return False

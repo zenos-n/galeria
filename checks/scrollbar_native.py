@@ -94,6 +94,7 @@ def check():
 def activate(app):
  global window,rail
  Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+ css=Gtk.CssProvider();css.load_from_path(str(Path(__file__).resolve().parents[1]/'style.css'));Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(),css,Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
  window=Adw.ApplicationWindow(application=app,default_width=800,default_height=700)
  window.user_scrolled=lambda *args:False
  window.scroller=Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,hexpand=True,vexpand=True)

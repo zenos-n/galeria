@@ -147,9 +147,9 @@ def share_album(window,album):
     dialog=SharingDialog(window,album=album);window.dialog=dialog;dialog.present(window)
 
 
-def share_media(window):
+def share_media(window,items=None):
     if not window.client:window.notice('Connect Immich to share media.');return
-    items=[window.viewer.source.media_item] if window.viewer else [window.mosaic.tiles[index].media_item for index in window.mosaic.selected]
+    if items is None:items=[window.viewer.source.media_item] if window.viewer else [window.mosaic.tiles[index].media_item for index in window.mosaic.selected]
     if not items:return
     if any(item.metadata.get('visibility') in ('locked','hidden') for item in items):window.notice('Move private items out of the locked folder before sharing.');return
     dialog=SharingDialog(window,asset_ids=[item.id for item in items]);window.dialog=dialog;dialog.present(window)

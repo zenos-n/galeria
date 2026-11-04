@@ -18,7 +18,7 @@ path=Path(root.name)/'original.png';picture=Image.new('RGB',(320,240));picture.p
 items=[MediaItem(str(i),'original.png',datetime(2016,8-i//80,25-i%20),4/3,path=str(path)) for i in range(160)]
 target=Path(root.name)/'edited.png'
 class Remote(ImmichClient):
- def __init__(self):super().__init__('https://fixture.invalid');self.token='fixture';self.user={'id':'fixture'}
+ def __init__(self):super().__init__('https://fixture.invalid');self.token='fixture';self.user={'id':'fixture'};self.locked_until=time.monotonic()+600
  def open_original(self,item):return BytesIO(b'original format without a local decoder')
  def image_bytes(self,*args,**kwargs):return path.read_bytes()
 class Picker:
@@ -29,7 +29,7 @@ class Picker:
  def save(self,window,cancel,callback):GLib.idle_add(callback,self,None)
  def save_finish(self,_):return Gio.File.new_for_path(str(target))
 app=Adw.Application(application_id='com.neg-zero.Galeria.PhotoHeaderCheck',flags=Gio.ApplicationFlags.NON_UNIQUE)
-phase=0;start=time.monotonic();errors=[];mark=0
+phase=0;start=time.monotonic();errors=[];mark=0;uploaded=[]
 tool='/tmp/gallery-app-identification/xdotool/bin/xdotool'
 def walk(widget):
  yield widget
@@ -110,38 +110,54 @@ def check():
    assert len(photo.markup.strokes)==2
    pointer(next(widget for widget in walk(w.viewer.editor) if isinstance(widget,Gtk.ToggleButton) and widget.get_tooltip_text()=='Text'));mark=time.monotonic();phase=150
   elif phase==150 and time.monotonic()-mark>.1:
-   entry=next(widget for widget in walk(w.viewer.editor) if isinstance(widget,Gtk.Entry) and widget.get_placeholder_text()=='Add text')
-   entry.set_text('Galeria');assert photo.markup.tool=='Text'
-   pointer(photo.markup,.5,.8);mark=time.monotonic();phase=16
+   assert photo.markup.tool=='Text'
+   pointer(photo.markup,.5,.8);mark=time.monotonic();phase=151
+  elif phase==151 and time.monotonic()-mark>.1:
+   assert photo.markup.entry.get_visible() and isinstance(w.get_focus(),Gtk.Editable)
+   subprocess.run([tool,'type','Galeria'],check=True);subprocess.run([tool,'key','Return'],check=True);mark=time.monotonic();phase=16
   elif phase==16 and time.monotonic()-mark>.1:
-   assert len(photo.markup.strokes)==3 and photo.markup.strokes[-1]['text']=='Galeria'
-   with patch.object(Gtk,'FileDialog',Picker):photo.save_copy()
+   assert len(photo.markup.strokes)==3 and photo.markup.strokes[-1]['text']=='Galeria' and not photo.markup.entry.get_visible()
+   drag(photo.markup,(.5,.8),(.65,.7));mark=time.monotonic();phase=160
+  elif phase==160 and time.monotonic()-mark>.1:
+   stroke=photo.markup.strokes[-1];assert abs(stroke['points'][0][0]-.65)<.02
+   _,tw,th,_=photo.markup.geometry(stroke);cx,cy=stroke['points'][0];mw,mh=photo.markup.get_width(),photo.markup.get_height()
+   drag(photo.markup,(cx+tw/2/mw,cy+th/2/mh),(cx+tw*.8/mw,cy+th*.8/mh));mark=time.monotonic();phase=161
+  elif phase==161 and time.monotonic()-mark>.1:
+   stroke=photo.markup.strokes[-1];assert stroke['scale']>1.2
+   _,tw,th,_=photo.markup.geometry(stroke);cx,cy=stroke['points'][0];mw,mh=photo.markup.get_width(),photo.markup.get_height()
+   offset=th/2+24;drag(photo.markup,(cx,cy-offset/mh),(cx+offset/mw,cy));mark=time.monotonic();phase=162
+  elif phase==162 and time.monotonic()-mark>.1:
+   assert 60<photo.markup.strokes[-1]['rotation']<120
+   w.client=Remote()
+   def transfer(client,data,name,modified,cancel,**kwargs):uploaded.append((name,data,kwargs));return 'saved',True
+   import upload_media;upload_media.upload_bytes=transfer
+   with patch.object(Gtk,'FileDialog',side_effect=AssertionError('Save must upload directly')):photo.save_copy()
    phase=17
-  elif phase==17 and target.exists():
-   output=Image.open(target).convert('RGBA');assert output.size==(320,240)
+  elif phase==17 and uploaded and photo.save_button.get_sensitive():
+   output=Image.open(BytesIO(uploaded[0][1])).convert('RGBA');assert output.size==(320,240)
    assert output.getpixel((160,60))==(237,51,59,255)
    assert output.getpixel((140,120))==(0,0,0,255)
-   assert path.read_bytes()==original
+   assert path.read_bytes()==original and not Path(uploaded[0][0]).exists()
+   assert 'Immich' in w.viewer.tool_message.get_label()
    pointer(photo.undo);mark=time.monotonic();phase=170
   elif phase==170 and time.monotonic()-mark>.1:
-   assert len(photo.markup.strokes)==2
-   target=path
-   with patch.object(Gtk,'FileDialog',Picker):photo.save_copy()
-   mark=time.monotonic();phase=171
+   assert len(photo.markup.strokes)==3 and abs(photo.markup.strokes[-1].get('rotation',0))<5
+   subprocess.run([tool,'key','ctrl+shift+z'],check=True);mark=time.monotonic();phase=171
   elif phase==171 and time.monotonic()-mark>.1:
-   assert path.read_bytes()==original and 'preserve the original' in w.viewer.tool_message.get_label()
-   w.client=Remote();w.viewer.source.media_item=MediaItem('remote','phone.heic',datetime(2016,8,25),4/3,metadata={'visibility':'timeline'})
-   target=Path(root.name)/'preview-edited.png'
-   with patch.object(Gtk,'FileDialog',Picker):photo.save_copy()
+   assert photo.markup.strokes[-1]['text']=='Galeria' and photo.markup.strokes[-1]['rotation']>60
+   w.viewer.source.media_item=MediaItem('remote','phone.heic',datetime(2016,8,25),4/3,metadata={'visibility':'locked'})
+   def transfer(client,data,name,modified,cancel,**kwargs):uploaded.append((name,data,kwargs));return 'saved-preview',True
+   import upload_media;upload_media.upload_bytes=transfer;photo.save_copy()
    phase=172
-  elif phase==172 and target.exists() and photo.save_button.get_sensitive():
+  elif phase==172 and len(uploaded)>1 and photo.save_button.get_sensitive():
    assert 'server preview resolution' in w.viewer.tool_message.get_label()
-   assert Image.open(target).size==(320,240) and path.read_bytes()==original
+   assert uploaded[-1][2].get('visibility')=='locked' and not Path(uploaded[-1][0]).exists()
+   assert Image.open(BytesIO(uploaded[-1][1])).size==(320,240) and path.read_bytes()==original
    photo.reset();phase=18
   elif phase==18 and settle(photo):
    assert not any(photo.values.values()) and not photo.markup.strokes
    assert w.viewer.stage.image.get_paintable().get_intrinsic_width()==320
-   print('DATE AUGUST/JULY HANDOFF HIDES DUPLICATE LABEL; PER-TOOL VALUES/PREVIEW; NEUTRAL SNAP/FINE KEYBOARD; REAL PEN/REDACT/TEXT INPUT; FULL-SIZE PNG COPY/ORIGINAL PRESERVED; UNDO/RESET PASSED',flush=True)
+   print('DATE AUGUST/JULY HANDOFF HIDES DUPLICATE LABEL; PER-TOOL VALUES/PREVIEW; NEUTRAL SNAP/FINE KEYBOARD; REAL PEN/REDACT/INLINE TEXT MOVE/SCALE/ROTATE; DIRECT IN-MEMORY IMMICH PNG UPLOAD/PRIVATE VISIBILITY; UNDO/REDO/RESET PASSED',flush=True)
    w.close();app.quit();return False
  except Exception as error:
   import traceback;traceback.print_exc();errors.append(error);w.close();app.quit();return False

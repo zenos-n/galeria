@@ -4,6 +4,7 @@ from panels import text, icon_button
 
 from photo_edit import ADJUSTMENTS
 from photo_markup import PALETTE
+from edit_history import History
 CATEGORIES = ['Crop','Adjust','Markup']
 
 
@@ -152,21 +153,18 @@ def build_editor(viewer):
     markup=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=18)
     markup.append(choices(['Pen','Highlight','Redact','Text'],'Markup'))
     tools=Gtk.Box(spacing=10,halign=Gtk.Align.CENTER)
-    viewer.color_swatches=[]
+    viewer.color_swatches=[];swatches={}
     for color in ['white','black','red','blue','yellow']:
         swatch=Gtk.ToggleButton(tooltip_text=color.title(),width_request=28,height_request=28,valign=Gtk.Align.CENTER)
         swatch.add_css_class('color-swatch')
         swatch.add_css_class('swatch-'+color)
         if viewer.color_swatches:swatch.set_group(viewer.color_swatches[0])
         else:swatch.set_active(True)
-        swatch.connect('toggled',lambda widget,color=color:setattr(photo.markup,'color',PALETTE[color]) if widget.get_active() else None)
-        viewer.color_swatches.append(swatch)
+        swatch.connect('toggled',lambda widget,color=color:photo.markup.set_color(PALETTE[color]) if widget.get_active() else None)
+        viewer.color_swatches.append(swatch);swatches[PALETTE[color]]=swatch
         frame=Gtk.AspectFrame(child=swatch,ratio=1,obey_child=False,halign=Gtk.Align.CENTER,valign=Gtk.Align.CENTER)
         tools.append(frame)
-    entry=Gtk.Entry(placeholder_text='Add text',width_chars=14,max_length=256)
-    entry.connect('changed',lambda widget:setattr(photo.markup,'text',widget.get_text()));tools.append(entry)
-    photo.undo=Gtk.Button(label='Undo',sensitive=False)
-    photo.undo.connect('clicked',lambda _:photo.markup.undo());tools.append(photo.undo)
+    photo.markup.select_color=lambda color:swatches[color].set_active(True) if color in swatches else None
     markup.append(tools)
     add_page('Markup',markup)
     clamp=Adw.Clamp(maximum_size=850,tightening_threshold=650,child=stack,hexpand=True)
@@ -178,9 +176,11 @@ def build_editor(viewer):
     compare=Gtk.ToggleButton(label='Compare',tooltip_text='Compare with original')
     photo.compare_button=compare
     compare.connect('toggled',lambda w:photo.compare(w.get_active()))
-    for widget in [reset,compare]:
+    photo.undo=Gtk.Button(label='Undo',sensitive=False,tooltip_text='Undo (Ctrl+Z)');photo.undo.connect('clicked',lambda _:photo.undo_edits())
+    photo.redo=Gtk.Button(label='Redo',sensitive=False,tooltip_text='Redo (Ctrl+Shift+Z)');photo.redo.connect('clicked',lambda _:photo.undo_edits(True))
+    for widget in [photo.undo,photo.redo,reset,compare]:
         footer.append(widget)
-    photo.save_button=Gtk.Button(label='Save a copy…',sensitive=False,css_classes=['suggested-action'])
+    photo.save_button=Gtk.Button(label='Save a copy',sensitive=False,css_classes=['suggested-action'])
     photo.save_button.connect('clicked',lambda _:photo.save_copy());footer.append(photo.save_button)
     box.append(footer)
 
@@ -191,4 +191,5 @@ def build_editor(viewer):
         notify('')
     categories.connect('notify::active-name',switch_category)
     categories.set_active_name('Crop')
+    photo.history=History(photo.snapshot())
     return box

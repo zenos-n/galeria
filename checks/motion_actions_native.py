@@ -62,7 +62,7 @@ def check():
    copy_media(window,items[0]);phase=10
   elif phase==10 and window.get_clipboard().get_content():
    formats=window.get_clipboard().get_formats()
-   assert formats.contain_gtype(Gdk.Texture.__gtype__) and formats.contain_gtype(Gdk.FileList.__gtype__),formats.to_string()
+   assert formats.contain_gtype(Gdk.Texture.__gtype__) and not formats.contain_gtype(Gdk.FileList.__gtype__),formats.to_string()
    media_menu(window,m,items[0],30,60)
    window.client=client;m.set_selection(True);m.toggle(0);window.selected_action('archive');phase=11
   elif phase==11 and len(window.media_items)==479 and not window.loading_more:
@@ -81,11 +81,9 @@ def check():
   elif phase==16 and getattr(window,'locked_clipboard',None):
    assert window.get_clipboard().get_formats().contain_gtype(Gdk.Texture.__gtype__)
    clear_locked_clipboard(window);assert window.get_clipboard().get_content() is None
-   copy_media(window,MediaItem('locked-video','locked.mp4',datetime.now(),kind='VIDEO',metadata={'visibility':'locked'}));phase=17
-  elif phase==17 and getattr(window,'locked_clipboard',None):
-   folder=Path(window.locked_clipboard[1].name);assert (folder/'locked.mp4').read_bytes()==b'locked original'
-   clear_locked_clipboard(window);assert not folder.exists() and window.get_clipboard().get_content() is None
-   print('MONTH/YEAR -> ALL USES RAM PIXELS; INTERRUPTED FOLD/REBUILD CLIPS ALL PHOTO ROWS; CLOSED FOLDER HAS NO PHOTO CELLS; CLIPBOARD TEXTURE/FILE; BULK/VIEWER ARCHIVE; VIEWER TRASH PASSED',flush=True)
+   copy_media(window,MediaItem('locked-video','locked.mp4',datetime.now(),kind='VIDEO',metadata={'visibility':'locked'}))
+   assert window.get_clipboard().get_content() is None
+   print('MONTH/YEAR -> ALL USES RAM PIXELS; INTERRUPTED FOLD/REBUILD CLIPS ALL PHOTO ROWS; CLOSED FOLDER HAS NO PHOTO CELLS; CLIPBOARD IMAGE ONLY/VIDEO COPY DISABLED; BULK/VIEWER ARCHIVE; VIEWER TRASH PASSED',flush=True)
    window.close();app.quit();return False
  except Exception as error:
   import traceback;traceback.print_exc();errors.append(error);window.close();app.quit();return False

@@ -49,6 +49,14 @@ def adjust(image,values):
     return image
 
 
+def text_tile(stroke):
+    font=ImageFont.load_default(size=96)
+    box=font.getbbox(stroke.get('text') or 'Text')
+    tile=Image.new('RGBA',(max(1,box[2]-box[0]+8),max(1,box[3]-box[1]+8)))
+    ImageDraw.Draw(tile).text((4-box[0],4-box[1]),stroke.get('text') or 'Text',fill=stroke['color'],font=font)
+    return tile
+
+
 def annotate(image,strokes):
     image=image.convert('RGBA');width,height=image.size
     for stroke in strokes:
@@ -59,8 +67,11 @@ def annotate(image,strokes):
         if tool=='Redact':
             a,b=points[0],points[-1];draw.rectangle((min(a[0],b[0]),min(a[1],b[1]),max(a[0],b[0]),max(a[1],b[1])),fill='black')
         elif tool=='Text':
-            font=ImageFont.load_default(size=max(8,round(min(width,height)*.045)))
-            draw.text(points[0],stroke['text'],fill=color,font=font,anchor='mm',stroke_width=0)
+            if not stroke.get('text'):continue
+            tile=text_tile(stroke);scale=min(width,height)*.045*stroke.get('scale',1)/96
+            angle=math.radians(stroke.get('rotation',0));c=math.cos(angle)/scale;s=math.sin(angle)/scale;x,y=points[0]
+            matrix=(c,s,tile.width/2-c*x-s*y,-s,c,tile.height/2+s*x-c*y)
+            layer=tile.transform(image.size,Image.Transform.AFFINE,matrix,Image.Resampling.BICUBIC)
         else:
             if tool=='Highlight':color=(*Image.new('RGB',(1,1),color).getpixel((0,0)),90)
             if len(points)>1:draw.line(points,fill=color,width=size,joint='curve')

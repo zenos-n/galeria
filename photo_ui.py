@@ -1,5 +1,5 @@
 """Photo edit state, coalesced previews and explicit save-copy export."""
-import copy,os,tempfile
+import copy,threading
 from io import BytesIO
 from pathlib import Path
 from PIL import Image
@@ -7,6 +7,7 @@ from gi.repository import Gio,GLib,Gtk
 from library import LibraryError
 from photo_edit import ADJUSTMENTS,POSITIVE,render
 from photo_markup import Markup
+from edit_history import History
 
 
 class PhotoEditor:
@@ -17,6 +18,33 @@ class PhotoEditor:
         self.generation=0;self.debounce=0;self.running=False;self.closed=False
         self.markup=Markup(self.markup_changed,self.notice);self.markup.set_can_target(False)
         self.stage.picture.add_overlay(self.markup)
+        self.history=History(self.snapshot());self.history_timer=0;self.restoring=False;self.upload_cancel=threading.Event()
+        self.stage.crop_frame.changed=self.remember
+
+    def snapshot(self):
+        return (dict(self.values),copy.deepcopy([stroke for stroke in self.markup.strokes if stroke['tool']!='Text' or stroke.get('text')]),self.stage.rotation,self.stage.flipped,self.straighten,tuple(self.stage.crop_frame.bounds),self.stage.crop_frame.aspect,getattr(self.viewer,'crop_dropdown',None).get_selected() if hasattr(self.viewer,'crop_dropdown') else 1)
+
+    def remember(self):
+        if self.restoring or self.closed:return
+        if self.history_timer:GLib.source_remove(self.history_timer)
+        def commit():
+            self.history_timer=0;self.history.record(self.snapshot());self.history_buttons();return False
+        self.history_timer=GLib.timeout_add(300,commit)
+        if hasattr(self,'undo'):self.undo.set_sensitive(True)
+
+    def history_buttons(self):
+        if hasattr(self,'undo'):self.undo.set_sensitive(len(self.history.past)>1)
+        if hasattr(self,'redo'):self.redo.set_sensitive(bool(self.history.future))
+
+    def undo_edits(self,redo=False):
+        if self.history_timer:GLib.source_remove(self.history_timer);self.history_timer=0
+        state=(self.history.redo if redo else self.history.undo)(self.snapshot())
+        if state is None:return
+        self.restoring=True;self.markup.entry.set_visible(False);self.markup.selected=None
+        self.values,self.markup.strokes,self.stage.rotation,self.stage.flipped,self.straighten,bounds,aspect,choice=state
+        self.viewer.crop_dropdown.set_selected(choice);self.stage.crop_frame.bounds=bounds;self.stage.crop_frame.aspect=aspect
+        self.straighten_slider.set_value(self.straighten);self.select(self.selected);self.markup.redraw();self.queue(0)
+        self.restoring=False;self.history_buttons()
 
     def notice(self,message):
         was_visible=self.viewer.tool_message.get_visible()
@@ -44,14 +72,19 @@ class PhotoEditor:
         self.values[self.selected]=slider.get_value();self.queue()
 
     def markup_changed(self):
-        if hasattr(self,'undo'):self.undo.set_sensitive(bool(self.markup.strokes))
+        if self.closed:return
+        if not self.restoring:
+            if self.history_timer:GLib.source_remove(self.history_timer);self.history_timer=0
+            self.history.record(self.snapshot());self.history_buttons()
         if self.viewer.editor_categories.get_active_name()!='Markup':self.queue(0)
 
     def category_changed(self):
+        self.markup.finish_text()
         self.markup.set_can_target(False);self.queue(0)
 
     def queue(self,delay=70):
         if self.closed:return
+        if self.viewer.editing:self.remember()
         self.generation+=1
         if self.debounce:GLib.source_remove(self.debounce);self.debounce=0
         if self.original and not self.running:self.debounce=GLib.timeout_add(delay,self.start)
@@ -94,16 +127,18 @@ class PhotoEditor:
 
     def rotate(self,angle):
         for _ in range((angle//90)%4):
-            for stroke in self.markup.strokes:stroke['points']=[(1-y,x) for x,y in stroke['points']]
+            for stroke in self.markup.strokes:
+                stroke['points']=[(1-y,x) for x,y in stroke['points']]
+                if stroke['tool']=='Text':stroke['rotation']=stroke.get('rotation',0)+90
             a,b,c,d=self.stage.crop_frame.bounds;self.stage.crop_frame.bounds=(1-d,a,1-b,c)
         self.stage.rotation=(self.stage.rotation+angle)%360
         if self.viewer.crop_dropdown.get_selected()==1:self.stage.crop_frame.aspect=self.aspect()
-        self.markup.queue_draw();self.queue(0)
+        self.markup.redraw();self.queue(0)
 
     def flip(self):
         for stroke in self.markup.strokes:stroke['points']=[(1-x,y) for x,y in stroke['points']]
         a,b,c,d=self.stage.crop_frame.bounds;self.stage.crop_frame.bounds=(1-c,b,1-a,d)
-        self.stage.flipped=not self.stage.flipped;self.markup.queue_draw();self.queue(0)
+        self.stage.flipped=not self.stage.flipped;self.markup.redraw();self.queue(0)
 
     def reset(self):
         self.values={name:0 for name in ADJUSTMENTS};self.straighten=0
@@ -114,48 +149,42 @@ class PhotoEditor:
 
     def save_copy(self):
         if self.original is None:self.notice('Wait for the photo to load.');return
-        item=self.viewer.source.media_item;client=self.viewer.window.client
-        picker=Gtk.FileDialog(title='Save edited photo',accept_label='Save copy')
-        picker.set_initial_name(Path(item.filename).stem+'-edited.png')
-        filter=Gtk.FileFilter(name='PNG image');filter.add_pattern('*.png')
-        filters=Gio.ListStore.new(Gtk.FileFilter);filters.append(filter);picker.set_filters(filters);picker.set_default_filter(filter)
-        def chosen(picker,result):
-            try:file=picker.save_finish(result)
-            except GLib.Error:return
-            if not file.get_path():self.notice('Choose a location on this device.');return
-            target=Path(file.get_path())
-            if target.suffix.lower()!='.png':self.notice('Use a .png filename for the edited copy.');return
-            if item.path and target.resolve()==Path(item.path).resolve():self.notice('Choose a different file to preserve the original.');return
-            values=dict(self.values);strokes=copy.deepcopy(self.markup.strokes)
-            rotation=self.stage.rotation;flipped=self.stage.flipped;angle=self.straighten;crop=self.stage.crop_frame.bounds
-            self.save_button.set_sensitive(False);self.notice('Saving edited copy…')
-            def work():
-                if not item.path:client.check_original_access(item)
-                preview=False
-                try:
-                    with open(item.path,'rb') if item.path else client.open_original(item) as source:
-                        with Image.open(source) as image:output=render(image,values,strokes,rotation,flipped,angle,crop)
-                except (OSError,ValueError):
-                    if item.path:raise
-                    with Image.open(BytesIO(client.image_bytes(item,True,self.viewer.window.vault))) as image:output=render(image,values,strokes,rotation,flipped,angle,crop)
-                    preview=True
-                fd,name=tempfile.mkstemp(prefix='.galeria-edit-',dir=target.parent)
-                try:
-                    with os.fdopen(fd,'wb') as stream:output.save(stream,format='PNG');stream.flush();os.fsync(stream.fileno())
-                    if not item.path:client.check_original_access(item)
-                    if item.path and target.resolve()==Path(item.path).resolve():raise LibraryError('Choose a different file to preserve the original.')
-                    os.replace(name,target)
-                finally:Path(name).unlink(missing_ok=True)
-                return preview
-            def done(preview):
-                if not self.closed:self.save_button.set_sensitive(True);self.notice('Edited copy saved at server preview resolution.' if preview else 'Edited copy saved.')
-            def failed(message):
-                if not self.closed:self.save_button.set_sensitive(True);self.notice(message)
-            self.viewer.window.background(work,done,failed,images='preview')
-        picker.save(self.viewer.window,None,chosen)
+        window=self.viewer.window;client=window.client;item=self.viewer.source.media_item
+        if not client:self.notice('Connect Immich to save an edited copy.');return
+        if not self.save_button.get_sensitive():return
+        self.markup.finish_text();values,strokes,rotation,flipped,angle,crop,_,_=self.snapshot()
+        self.save_button.set_sensitive(False);self.notice('Saving a copy to Immich…')
+        cancel=self.upload_cancel
+        def work():
+            from upload_media import upload_bytes
+            if not item.path:client.check_original_access(item)
+            preview=False
+            try:
+                with open(item.path,'rb') if item.path else client.open_original(item) as source:
+                    with Image.open(source) as image:output=render(image,values,strokes,rotation,flipped,angle,crop)
+            except (OSError,ValueError):
+                if item.path:raise
+                with Image.open(BytesIO(client.image_bytes(item,True,window.vault))) as image:output=render(image,values,strokes,rotation,flipped,angle,crop)
+                preview=True
+            stream=BytesIO();output.save(stream,format='PNG')
+            if not item.path:client.check_original_access(item)
+            if window.client!=client or cancel.is_set():raise InterruptedError()
+            _,created=upload_bytes(client,stream.getvalue(),Path(item.filename).stem+'-edited.png',item.created.timestamp(),cancel,
+                visibility='locked' if item.metadata.get('visibility')=='locked' else None)
+            return preview,created
+        def done(value):
+            window.upload_finished(client)
+            if not self.closed:
+                self.save_button.set_sensitive(True);preview,created=value
+                self.notice(('Copy saved to Immich' if created else 'This copy is already saved on Immich')+(' at server preview resolution.' if preview else '.'))
+        def failed(message):
+            if not self.closed:self.save_button.set_sensitive(True);self.notice(message)
+        window.background(work,done,failed,images='preview')
 
     def close(self):
-        self.closed=True;self.generation+=1
+        self.closed=True;self.generation+=1;self.upload_cancel.set()
+        if self.history_timer:GLib.source_remove(self.history_timer);self.history_timer=0
         if self.debounce:GLib.source_remove(self.debounce);self.debounce=0
         if self.markup.get_parent()==self.stage.picture:self.stage.picture.remove_overlay(self.markup)
+        self.markup.entry.set_visible(False);self.markup.strokes.clear();self.markup.cache.clear();self.history.past.clear();self.history.future.clear()
         self.original=None

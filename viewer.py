@@ -38,7 +38,8 @@ class Viewer(Gtk.Overlay):
         self.header.set_title_widget(self.title)
         self.favorite = Gtk.ToggleButton(icon_name='non-starred-symbolic',tooltip_text='Favorite')
         self.favorite.add_css_class('flat')
-        self.favorite.connect('toggled',lambda w:w.set_icon_name('starred-symbolic' if w.get_active() else 'non-starred-symbolic'))
+        self.favorite_syncing=False
+        self.favorite.connect('toggled',self.toggle_favorite)
         self.header.pack_start(self.favorite)
         self.edit_button = Gtk.Button(label='Edit',tooltip_text='Edit image')
         self.edit_button.add_css_class('flat')
@@ -53,10 +54,11 @@ class Viewer(Gtk.Overlay):
         self.fullscreen_button = icon_button('view-fullscreen-symbolic','Fullscreen media',lambda _:self.set_immersive(not self.immersive))
         for widget in (self.download,self.share,self.fullscreen_button):
             self.header.pack_end(widget)
-        self.archive=icon_button('folder-symbolic','Remove from archive' if window.current_page=='archive' else 'Archive',lambda _:window.selected_action('archive',[self.source.media_item]))
-        self.trash=icon_button('user-trash-symbolic','Restore from trash' if window.current_page=='trash' else 'Move to trash',lambda _:window.selected_action('trash',[self.source.media_item]))
-        for widget in (self.archive,self.trash):self.header.pack_end(widget)
-        self.viewing_controls=[self.favorite,self.info,self.download,self.share,self.fullscreen_button,self.archive,self.trash]
+        self.archive=icon_button('folder-symbolic','Remove from archive' if window.current_page=='archive' else 'Archive',lambda widget:window.selected_action('archive',[self.source.media_item],target=widget))
+        self.trash=icon_button('user-trash-symbolic','Restore from trash' if window.current_page=='trash' else 'Move to trash',lambda widget:window.selected_action('trash',[self.source.media_item],target=widget))
+        self.lock=icon_button('changes-prevent-symbolic','Move to locked folder',lambda widget:window.move_selected_to_locked([self.source.media_item],target=widget))
+        for widget in (self.archive,self.trash,self.lock):self.header.pack_end(widget)
+        self.viewing_controls=[self.favorite,self.info,self.download,self.share,self.fullscreen_button,self.archive,self.trash,self.lock]
         self.header_revealer=Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.CROSSFADE,
                                          transition_duration=300,reveal_child=True,valign=Gtk.Align.START)
         self.header_revealer.set_child(self.header)
@@ -101,7 +103,7 @@ class Viewer(Gtk.Overlay):
         self.editor.set_child(self.make_editor())
         self.editor_categories.connect('notify::active-name', self.sync_editor_inset)
         self.photo_overlay.add_overlay(self.editor)
-        self.keys=Gtk.EventControllerKey()
+        self.keys=Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)
         self.keys.connect('key-pressed',self.on_key)
         self.add_controller(self.keys)
         motion=Gtk.EventControllerMotion()
@@ -121,6 +123,8 @@ class Viewer(Gtk.Overlay):
             from copy_ui import media_menu
             media_menu(window,self,self.source.media_item,x,y);gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         context.connect('pressed',context_pressed);self.add_controller(context)
+        from zoom_ui import MediaZoom
+        self.zoom_controls=MediaZoom(self)
 
     def background_released(self,gesture,_count,x,y):
         if self.editing or self.stage.progress<1:return
@@ -143,6 +147,15 @@ class Viewer(Gtk.Overlay):
         self.info.set_sensitive(True)
         if self.stage.video_player:self.stage.video_player.play()
 
+    def dismiss_action(self):
+        self.closing=True
+        if self.chrome_timer:GLib.source_remove(self.chrome_timer);self.chrome_timer=0
+        if self.fullscreen_tick:self.remove_tick_callback(self.fullscreen_tick);self.fullscreen_tick=0
+        self.dispose_editors();self.stage.dispose()
+        if self.get_parent()==self.window.root_overlay:self.window.root_overlay.remove_overlay(self)
+        self.window.mosaic.hide_tile(None);self.window.split.set_can_target(True);self.window.viewer=None
+        if self.immersive and not self.was_fullscreen:self.window.unfullscreen()
+
     def dispose_editors(self):
         for name in ('photo_editor','video_editor'):
             editor=getattr(self,name,None)
@@ -159,8 +172,27 @@ class Viewer(Gtk.Overlay):
                 ' '.join(str(exif[key]) for key in ('make','model') if exif.get(key)) or 'No camera information']
         for widget,value in zip(self.detail_labels,values):widget.set_label(value)
         self.edit_button.set_sensitive(item.kind in ('IMAGE','VIDEO'))
-        self.favorite.set_active(bool(item.metadata.get('isFavorite')))
-        self.favorite.set_sensitive(False)
+        self.favorite_syncing=True;self.favorite.set_active(bool(item.metadata.get('isFavorite')));self.favorite_syncing=False
+        self.favorite.set_sensitive(bool(self.window.client))
+
+    def toggle_favorite(self,button):
+        active=button.get_active();button.set_icon_name('starred-symbolic' if active else 'non-starred-symbolic')
+        button.set_tooltip_text('Remove from favorites' if active else 'Add to favorites')
+        if self.favorite_syncing:return
+        client=self.window.client;item=self.source.media_item
+        if not client:return
+        button.set_sensitive(False)
+        def done(_):
+            item.metadata['isFavorite']=active;self.window.page_cache.clear();client.refresh_serial=getattr(client,'refresh_serial',0)+1
+            if self.window.current_page=='favorites' and not active:self.window.pending_media=([value for value in self.window.media_items if value.id!=item.id],True)
+            for value in self.window.media_items:
+                if value.id==item.id:value.metadata['isFavorite']=active
+            if self.source.media_item.id==item.id:button.set_sensitive(True)
+        def failed(message):
+            if self.source.media_item.id==item.id:
+                self.favorite_syncing=True;button.set_active(not active);self.favorite_syncing=False;button.set_sensitive(True)
+            self.window.notice(message)
+        self.window.background(lambda:client.update_assets([item.id],{'isFavorite':active}),done,failed)
 
     def show(self):
         # Block pointer interaction without changing the grid's disabled styling.
@@ -177,6 +209,7 @@ class Viewer(Gtk.Overlay):
         self.stage.animate(self.source,False,self.fade,self.opened)
 
     def toggle_details(self,widget):
+        if widget.get_active():self.zoom_controls.reset()
         if widget.get_active() and self.stage.progress<1:
             widget.set_active(False);return
         self.viewer_split.set_show_sidebar(widget.get_active())
@@ -192,6 +225,7 @@ class Viewer(Gtk.Overlay):
             return
         if self.media_stack.get_transition_running():
             return
+        self.zoom_controls.reset()
         needs_settle = self.editing or self.immersive or self.viewer_split.get_show_sidebar()
         was_immersive=self.immersive
         self.closing=True
@@ -231,6 +265,7 @@ class Viewer(Gtk.Overlay):
         self.index=visible[(visible.index(self.index)+step)%len(visible)]
         self.source=self.window.mosaic.tiles[self.index]
         self.stage=PhotoStage(self.source,self.index)
+        self.zoom_controls.reset()
         self.editor.set_child(self.make_editor())
         self.editor_categories.connect('notify::active-name',self.sync_editor_inset)
         self.window.mosaic.hide_tile(self.source)
@@ -261,6 +296,7 @@ class Viewer(Gtk.Overlay):
         GLib.timeout_add(230,play)
 
     def set_immersive(self,active):
+        self.zoom_controls.reset()
         if self.editing or self.stage.progress<1:
             return
         before=self.stage.last_rect
@@ -321,11 +357,24 @@ class Viewer(Gtk.Overlay):
         self.chrome_timer=GLib.timeout_add(1400,hide)
 
     def on_key(self,_controller,keyval,_keycode=0,state=0):
+        if not self.editing and not isinstance(self.window.get_focus(),Gtk.Editable):
+            if keyval in (Gdk.KEY_plus,Gdk.KEY_equal,Gdk.KEY_minus,Gdk.KEY_0):
+                if keyval==Gdk.KEY_0:self.zoom_controls.reset()
+                else:self.zoom_controls.set_zoom(self.stage.zoom*(1.2 if keyval!=Gdk.KEY_minus else 1/1.2))
+                return True
+        editor=getattr(self,'photo_editor',None) or getattr(self,'video_editor',None)
+        if self.editing and editor and not isinstance(self.window.get_focus(),Gtk.Editable):
+            if state & Gdk.ModifierType.CONTROL_MASK and keyval in (Gdk.KEY_z,Gdk.KEY_Z,Gdk.KEY_y,Gdk.KEY_Y):
+                editor.undo_edits(keyval in (Gdk.KEY_y,Gdk.KEY_Y) or bool(state & Gdk.ModifierType.SHIFT_MASK));return True
+        if self.editing and getattr(self,'photo_editor',None) and keyval==Gdk.KEY_Escape and self.photo_editor.markup.entry.get_visible():
+            self.photo_editor.markup.finish_text();return True
+        if keyval==Gdk.KEY_space and not self.editing and self.stage.video_player and not isinstance(self.window.get_focus(),Gtk.Editable):
+            self.stage.video_player.toggle();return True
         if keyval in (Gdk.KEY_d,Gdk.KEY_D) and state & Gdk.ModifierType.SHIFT_MASK and not state & (Gdk.ModifierType.CONTROL_MASK|Gdk.ModifierType.ALT_MASK|Gdk.ModifierType.SUPER_MASK) and not self.editing and not isinstance(self.window.get_focus(),Gtk.Editable) and not self.window.get_visible_dialog():
             self.window.download_items([self.source.media_item]);return True
         if keyval==Gdk.KEY_space and self.editing and getattr(self,'video_editor',None) and not isinstance(self.window.get_focus(),Gtk.Editable):
             self.video_editor.toggle_playback();return True
-        if keyval==Gdk.KEY_c and state & Gdk.ModifierType.CONTROL_MASK and not self.editing:
+        if keyval==Gdk.KEY_c and state & Gdk.ModifierType.CONTROL_MASK and not self.editing and self.source.media_item.kind!='VIDEO':
             from copy_ui import copy_media
             copy_media(self.window,self.source.media_item);return True
         if keyval==Gdk.KEY_Escape:
@@ -356,6 +405,7 @@ class Viewer(Gtk.Overlay):
     def set_editing(self, active):
         if active==self.editing:return
         if active:
+            if hasattr(self,'zoom_controls'):self.zoom_controls.reset()
             self.stage.crop_ratio=None
         if active and self.immersive:
             self.set_immersive(False)
@@ -395,6 +445,7 @@ class Viewer(Gtk.Overlay):
     def change_crop(self, dropdown, *_):
         ratio=self.photo_editor.aspect() if getattr(self,'photo_editor',None) else self.stage.ratio
         self.stage.crop_frame.set_aspect([None,ratio,1,4/3,16/9][dropdown.get_selected()])
+        if getattr(self,'photo_editor',None):self.photo_editor.remember()
 
     def reset_edits(self):
         if getattr(self,'video_editor',None):self.video_editor.reset_edits();return
