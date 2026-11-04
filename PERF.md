@@ -300,6 +300,26 @@ unfocused-update tests also pass with fatal GTK warnings. No synthetic productio
 media changes or automated physical-display input.0.10.3 resize measurements and
 remaining ratio-scan limit are unchanged; live GPU performance is not remeasured.
 
+## Galeria0.11.4 reconnect catalog handoff
+
+Live0.11.3 diagnosis showed a changed reconnect catalog replacing the index while
+three requests for its old index remained in timeline_pending. Old callbacks
+correctly ignored the replacement, but those three slots stayed occupied forever.
+The viewport remained entirely placeholders despite cached metadata and pixels.
+
+Reset pending slots with the replacement index. Retain populated ranges while
+their counts change, including ranges temporarily absent from loaded during a
+refresh. Mark these ranges for fresh metadata and clear that marker only when
+applied, so cached old counts cannot masquerade as the updated bucket. Apply
+new metadata through the existing insertion path. A gated native fixture holds
+three old requests across reconnect, verifies cached photos stay visible while
+the new month waits, then requires fresh data, no placeholders and a cleared queue.
+
+The fixed source was also checked against the real library without media writes:
+zero viewport placeholders and179 active textures, with loaded month metadata
+continuing to increase. This exposed a startup overlap not covered by the earlier
+isolated cache/steady-state refresh fixtures.66unit checks remain green.
+
 ## Galeria0.11.3 cache quotas and scroll continuity
 
 Read-only cache inspection found294 video-prefix files using489.4MiB of511.5MiB

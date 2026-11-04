@@ -473,11 +473,15 @@ class LibraryUI:
             if hasattr(client,'time_bucket') and client.modern_search:
                 from timeline_index import TimelineIndex
                 self.timeline_index=TimelineIndex(buckets)
+                self.timeline_pending=set()
                 if previous:
                     for key,(a,b) in list(self.timeline_index.ranges.items()):
-                        if key in previous.loaded and key in previous.ranges:
+                        if key in previous.ranges:
                             old_a,old_b=previous.ranges[key]
-                            if b-a==old_b-old_a:self.timeline_index.apply(key,previous.items[old_a:old_b])
+                            if old_a==old_b or previous.items[old_a].metadata.get('placeholder'):continue
+                            self.timeline_index.apply(key,previous.items[old_a:old_b])
+                            if b-a!=old_b-old_a:
+                                self.timeline_index.loaded.discard(key);self.timeline_index.refresh_keys.add(key)
             if self.current_page=='library':self.search_library(force=bool(self.media_items))
         def dates_failed(message):
             self.dates_ready=True;self.notice('Date index unavailable: '+message)
@@ -702,7 +706,7 @@ class LibraryUI:
             def failed(_message,key=key):
                 if self.timeline_index is index:
                     self.timeline_pending.discard(key);index.failed[key]=time.monotonic()+60;self.request_timeline_metadata()
-            fresh=getattr(self,'timeline_refresh_key',None)==key
+            fresh=key in index.refresh_keys or getattr(self,'timeline_refresh_key',None)==key
             if fresh:self.timeline_refresh_key=None
             expected=index.ranges[key][1]-index.ranges[key][0]
             def load(key=key,fresh=fresh,expected=expected):

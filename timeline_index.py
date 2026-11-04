@@ -6,7 +6,7 @@ from library import MediaItem
 
 class TimelineIndex:
     def __init__(self,buckets):
-        self.items=[];self.ranges={};self.loaded=set();self.failed={}
+        self.items=[];self.ranges={};self.loaded=set();self.failed={};self.refresh_keys=set()
         counts={}
         for bucket in buckets:counts[bucket['timeBucket'][:7]]=counts.get(bucket['timeBucket'][:7],0)+max(0,int(bucket['count']))
         for key in sorted(counts,reverse=True):
@@ -25,11 +25,12 @@ class TimelineIndex:
             for other,(a,b) in list(self.ranges.items()):
                 if other!=key and a>=end:self.ranges[other]=(a+delta,b+delta)
         self.loaded.add(key);self.failed.pop(key,None)
+        self.refresh_keys.discard(key)
         return bool(delta)
 
     def without(self,ids):
         ids=set(ids);result=object.__new__(TimelineIndex)
-        result.items=[];result.ranges={};result.loaded=set(self.loaded);result.failed=dict(self.failed)
+        result.items=[];result.ranges={};result.loaded=set(self.loaded);result.failed=dict(self.failed);result.refresh_keys=set(self.refresh_keys)
         for key,(a,b) in self.ranges.items():
             values=[item for item in self.items[a:b] if item.id not in ids]
             if values:
