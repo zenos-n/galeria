@@ -225,6 +225,6 @@ caches/sidebar/pins, and leaves media in the library, following
 [Immich3.3.3's album deletion endpoint](https://github.com/immich-app/immich/blob/v3.3.3/server/src/services/album.service.ts#L153).
 Empty cached album views remain visible after deleting the last album.
 
-The timeline date follows the newest visible month in All Photos and visible year in the date tiers. One glyph run moves from the exact inline heading position into the header, following scroll position in both directions. Fast scrolling that skips the source uses a short vertical transition clipped inside the header.
+The timeline date follows the newest visible month in All Photos and visible year in the date tiers. The newest month appears only in the header, with no duplicate inline heading or reserved gap. Older month labels move vertically from their exact inline position into the header and reverse with scrolling. Both use the same left edge; fast skips exchange header labels in the actual scroll direction.
 
 Moving assets to Locked retains other assets’ RAM textures and known disk thumbnails/previews/video prefixes. Only moved assets leave RAM cover caches; metadata snapshots and unclassified disk entries are invalidated for privacy, and pending pre-move writes are blocked. The remaining grid reflows with its scroll anchor intact.

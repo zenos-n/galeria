@@ -745,6 +745,7 @@ class LibraryUI:
             selected={old.tiles[i].media_item.id for i in old.selected}
             mosaic.selection_mode=old.selection_mode
             mosaic.selected={i for i,tile in enumerate(mosaic.tiles) if tile.media_item.id in selected}
+        mosaic.header_first=self.current_page=='library'
         mosaic.mode=self.switcher.get_active_name() if self.current_page=='library' else 'all'
         mosaic.target=old.target
         mosaic.show_durations=old.show_durations

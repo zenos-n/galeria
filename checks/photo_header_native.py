@@ -52,7 +52,7 @@ def check():
  try:
   assert time.monotonic()-start<35,(phase,getattr(w.viewer,'tool_message',None).get_label() if w.viewer else '')
   if phase==0 and not w.loading_more and w.mosaic.rendered:
-   assert w.period.get_label()=='August 2016' and not w.date_motion.pinned
+   assert w.period.get_label()=='August 2016' and w.date_motion.pinned
    w.scroller.get_vadjustment().set_value(70);phase=1
   elif phase==1 and w.date_motion.pinned and not w.date_motion.motion:
    assert w.period.get_label()=='August 2016'

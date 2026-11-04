@@ -8,7 +8,7 @@ class DateLabel(Gtk.Widget):
         super().__init__(can_target=False)
         self.window=window;self.owner=None;self.draws=[];self.tick=0
         self.sample=None;self.fast_key=None;self.key=None;self.header_state=None;self.motion=None
-        self.shared=None;self.pinned=False
+        self.shared=None;self.pinned=False;self.direction=1
 
     def release(self):
         if self.owner:
@@ -37,6 +37,8 @@ class DateLabel(Gtk.Widget):
         if not origin or not viewport:return
         top,_=m.visible_range();origin=(origin[0],viewport[1]-top);now=time.monotonic();rows=[]
         for month,heading in zip(m.months,m.headings):
+            if m.header_first and heading==m.headings[0]:
+                rows.append((month[0],heading,origin[0]+2,float('-inf'),viewport[1]+8));continue
             rect=m.rendered.get(heading)
             if rect:
                 dx,dy=heading.get_layout_offsets()
@@ -48,9 +50,12 @@ class DateLabel(Gtk.Widget):
         target=self.origin(w.period)
         if not target:return
         dx,dy=w.period.get_layout_offsets();hx,hy=target[0]+dx,target[1]+dy
+        newest=m.header_first and heading==m.headings[0]
+        if newest:sy=hy
         if sample and (not self.sample or top!=self.sample[0]):
             if self.sample and self.sample[2] is m:
-                delta=abs(top-self.sample[0]);elapsed=max(1/60,now-self.sample[1])
+                movement=top-self.sample[0];self.direction=1 if movement>0 else -1
+                delta=abs(movement);elapsed=max(1/60,now-self.sample[1])
                 if delta>max(24,start-hy) or delta>5 and delta/elapsed>1600:self.fast_key=key
             self.sample=(top,now,m)
         if self.fast_key and self.fast_key!=key:self.fast_key=None
@@ -59,18 +64,18 @@ class DateLabel(Gtk.Widget):
             fast=True;self.fast_key=None
         else:fast=self.fast_key==key or self.motion is not None
         self.release();self.draws=[];self.shared=None
-        pinned=sy<viewport[1] if fast else sy<=hy
+        pinned=newest or (sy<viewport[1] if fast else sy<=hy)
         shared=not fast and sy<=start
         current=(key,heading.get_layout(),hx,hy) if pinned else None
         previous=self.header_state
         if fast and (key!=self.key or bool(current)!=bool(previous)):
-            self.motion=(now,previous,current)
+            self.motion=(now,previous,current,self.direction)
         elif not fast:self.motion=None
         self.key=key;self.header_state=current;self.pinned=pinned
         if shared:
             self.owner=m;m.floating_heading=heading;m.queue_draw()
             progress=max(0,min(1,(start-sy)/max(1,start-hy)))
-            x=sx+(hx-sx)*progress;y=max(hy,sy);opacity=.65+.35*progress
+            x=hx;y=max(hy,sy);opacity=.65+.35*progress
             self.shared=(heading,x,y,progress)
             self.draws.append((heading.get_layout(),x,y,opacity,None))
         elif fast and current:
@@ -79,9 +84,9 @@ class DateLabel(Gtk.Widget):
             clip_origin=self.origin(w.header)
             clip=(*clip_origin,w.header.get_width(),w.header.get_height()) if clip_origin else None
             if self.motion:
-                begun,old,new=self.motion;t=min(1,(now-begun)/.16) if Gtk.Settings.get_default().get_property('gtk-enable-animations') else 1;p=1-(1-t)**3
-                if old:self.draws.append((old[1],hx,hy-12*p,1-p,clip))
-                if new:self.draws.append((new[1],hx,hy+12*(1-p),p,clip))
+                begun,old,new,direction=self.motion;t=min(1,(now-begun)/.16) if Gtk.Settings.get_default().get_property('gtk-enable-animations') else 1;p=1-(1-t)**3
+                if old:self.draws.append((old[1],hx,hy-direction*12*p,1-p,clip))
+                if new:self.draws.append((new[1],hx,hy+direction*12*(1-p),p,clip))
                 if t>=1:self.motion=None
             elif current:self.draws.append((current[1],hx,hy,1,clip))
         if self.motion and not self.tick:self.tick=self.add_tick_callback(self.frame)

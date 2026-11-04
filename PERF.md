@@ -465,3 +465,20 @@ originals; the new fixture also verifies a byte-identical downloaded copy calls
 no upload.70unit checks and native photo/header, startup/sync, reconnect,
 selection/motion and pins/insertion regressions pass. No production media was
 changed for these checks.
+
+## Galeria0.12.2 date direction, newest heading and alignment
+
+Fast header exchanges previously always entered from below. Capture the signed
+scroll delta with each exchange: down-scroll exits up/enters below; up-scroll
+exits down/enters above. The newest library month has only its header label;
+its inline heading and reserved40px area are omitted (8px grid top inset stays).
+Other pages keep their standalone first heading. Explicit left alignment and a
+6px native-header margin give both content/header text the same12px inset; the
+shared overlay keeps X fixed rather than interpolating mismatched offsets.
+
+The native fixture now checks both exchange directions and incoming/outgoing
+coordinates, newest-heading omission, exact source/reverse geometry and equal
+left edges across long/short month titles and the year label in Months. Native
+photo, startup/status, Locked retention, pins/insertion and selection/motion
+regressions pass.70unit checks pass. Screenshots were visually inspected; no
+performance gain is claimed.

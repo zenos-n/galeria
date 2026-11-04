@@ -39,7 +39,7 @@ class Mosaic(Gtk.Widget):
         self.checks=[]
         self.badges=[]
         self.widgets=[]
-        self.headings=[];self.floating_heading=None
+        self.headings=[];self.floating_heading=None;self.header_first=False
         self.month_cards={}
         self.year_cards={}
         self.owners={}
@@ -469,9 +469,11 @@ class Mosaic(Gtk.Widget):
             y=0
             for heading,(month,_,_,a,b) in zip(self.headings,self.months):
                 if a==b:continue
-                result[heading]=(2,y+8,max(1,width-4),28,1)
                 start=y
-                y+=40
+                if self.header_first and heading==self.headings[0]:y+=8
+                else:
+                    result[heading]=(2,y+8,max(1,width-4),28,1)
+                    y+=40
                 y+=self.photo_rows(range(a,b),0,y,width,result)+12
                 extents[month]=(start,y)
         elif self.mode=='months':

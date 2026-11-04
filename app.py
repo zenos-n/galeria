@@ -199,7 +199,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.sidebar_button = button("sidebar-show-symbolic", "Show sidebar", lambda _: self.split.set_show_sidebar(True))
         self.sidebar_button.set_visible(False)
         header.pack_start(self.sidebar_button)
-        self.period = label("", "timeline-date", margin_start=14)
+        self.period = label("", "timeline-date", margin_start=6, xalign=0, halign=Gtk.Align.START)
         self.period.set_opacity(0)
         header.pack_start(self.period)
         self.switcher = Adw.ToggleGroup(valign=Gtk.Align.CENTER)
@@ -499,7 +499,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.12.1", developer_name="Negative Zero",
+                                 version="0.12.2", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 
