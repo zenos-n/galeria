@@ -52,6 +52,7 @@ class LibraryUI:
         self.connect('close-request',self.request_close)
 
     def request_close(self,*_):
+        if self.viewer and self.viewer.confirm_edit_exit(self.close):return True
         app=self.get_application()
         if getattr(app,'background_enabled',False) and not getattr(app,'quitting',False):
             if self.viewer and self.viewer.stage.video_player:self.viewer.stage.video_player.pause()

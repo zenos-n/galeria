@@ -9,6 +9,7 @@ class Viewer(Gtk.Overlay):
         super().__init__(hexpand=True, vexpand=True)
         self.window, self.index, self.source = window, index, source
         self.editing = self.closing = self.immersive = False
+        self.exit_dialog=None;self.exit_saving=False
         self.chrome_timer = 0
         self.chrome_hovered = False
         self.was_fullscreen = window.is_fullscreen()
@@ -32,7 +33,7 @@ class Viewer(Gtk.Overlay):
         self.viewer_split.set_content(self.photo_overlay)
         self.header = Adw.HeaderBar(show_start_title_buttons=False,show_end_title_buttons=False)
         self.header.add_css_class('viewer-header')
-        self.close_button = icon_button('go-previous-symbolic','Back to gallery (Esc)',lambda _:(self.reset_edits(),self.set_editing(False)) if self.editing else self.close())
+        self.close_button = icon_button('go-previous-symbolic','Back to gallery (Esc)',lambda _:self.set_editing(False) if self.editing else self.close())
         self.header.pack_start(self.close_button)
         self.title = Adw.WindowTitle(title='Photo preview',subtitle='January 2026')
         self.header.set_title_widget(self.title)
@@ -157,6 +158,7 @@ class Viewer(Gtk.Overlay):
         if self.immersive and not self.was_fullscreen:self.window.unfullscreen()
 
     def dispose_editors(self):
+        if self.exit_dialog:self.exit_dialog.close();self.exit_dialog=None
         for name in ('photo_editor','video_editor'):
             editor=getattr(self,name,None)
             if editor:editor.close()
@@ -225,6 +227,7 @@ class Viewer(Gtk.Overlay):
             return
         if self.media_stack.get_transition_running():
             return
+        if self.confirm_edit_exit(self.close):return
         self.zoom_controls.reset()
         needs_settle = self.editing or self.immersive or self.viewer_split.get_show_sidebar()
         was_immersive=self.immersive
@@ -257,6 +260,7 @@ class Viewer(Gtk.Overlay):
     def move(self,step):
         if self.stage.progress<1 or self.closing or self.media_stack.get_transition_running():
             return
+        if self.confirm_edit_exit(lambda:self.move(step)):return
         old=self.stage
         self.dispose_editors();self.photo_editor=None;self.video_editor=None
         if old.video_player:old.video_player.pause()
@@ -402,8 +406,34 @@ class Viewer(Gtk.Overlay):
     def make_editor(self):
         return build_editor(self)
 
+    def confirm_edit_exit(self,leave):
+        if self.exit_dialog or self.exit_saving:return True
+        editor=getattr(self,'photo_editor',None) or getattr(self,'video_editor',None)
+        if not self.editing or not editor:return False
+        if getattr(editor,'markup',None):editor.markup.finish_text()
+        if not editor.dirty():return False
+        dialog=Adw.AlertDialog(heading='Save changes?',body='Save an edited copy before leaving? Your original stays unchanged.')
+        for response,label in [('cancel','Cancel'),('discard','Discard'),('save','Save')]:dialog.add_response(response,label)
+        dialog.set_close_response('cancel');dialog.set_default_response('save')
+        dialog.set_response_appearance('discard',Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_response_appearance('save',Adw.ResponseAppearance.SUGGESTED)
+        self.exit_dialog=dialog
+        def respond(_dialog,response):
+            self.exit_dialog=None
+            if response=='discard':
+                editor.discard_changes();GLib.idle_add(lambda:(leave(),False)[1])
+            elif response=='save':
+                self.exit_saving=True;self.set_sensitive(False)
+                def saved(success):
+                    self.exit_saving=False;self.set_sensitive(True)
+                    if success and self.window.viewer==self:leave()
+                GLib.idle_add(lambda:(editor.save_copy(finished=saved),False)[1])
+        dialog.connect('response',respond);dialog.present(self.window)
+        return True
+
     def set_editing(self, active):
         if active==self.editing:return
+        if not active and self.confirm_edit_exit(lambda:self.set_editing(False)):return
         if active:
             if hasattr(self,'zoom_controls'):self.zoom_controls.reset()
             self.stage.crop_ratio=None

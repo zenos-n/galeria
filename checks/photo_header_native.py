@@ -127,7 +127,7 @@ def check():
    _,tw,th,_=photo.markup.geometry(stroke);cx,cy=stroke['points'][0];mw,mh=photo.markup.get_width(),photo.markup.get_height()
    offset=th/2+24;drag(photo.markup,(cx,cy-offset/mh),(cx+offset/mw,cy));mark=time.monotonic();phase=162
   elif phase==162 and time.monotonic()-mark>.1:
-   assert 60<photo.markup.strokes[-1]['rotation']<120
+   assert photo.markup.strokes[-1]['rotation']==90
    w.client=Remote()
    def transfer(client,data,name,modified,cancel,**kwargs):uploaded.append((name,data,kwargs));return 'saved',True
    import upload_media;upload_media.upload_bytes=transfer
@@ -158,7 +158,7 @@ def check():
    assert not any(photo.values.values()) and not photo.markup.strokes
    assert w.viewer.stage.image.get_paintable().get_intrinsic_width()==320
    print('DATE AUGUST/JULY HANDOFF HIDES DUPLICATE LABEL; PER-TOOL VALUES/PREVIEW; NEUTRAL SNAP/FINE KEYBOARD; REAL PEN/REDACT/INLINE TEXT MOVE/SCALE/ROTATE; DIRECT IN-MEMORY IMMICH PNG UPLOAD/PRIVATE VISIBILITY; UNDO/REDO/RESET PASSED',flush=True)
-   w.close();app.quit();return False
+   photo.discard_changes();w.close();app.quit();return False
  except Exception as error:
   import traceback;traceback.print_exc();errors.append(error);w.close();app.quit();return False
  return True

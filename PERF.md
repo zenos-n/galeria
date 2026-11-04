@@ -514,3 +514,32 @@ action checks target the actual toolbar icon, while editor/controller regression
 cover inline text transforms/history, direct in-memory private PNG uploads,
 video Space/replay/loop and favorite persistence. Existing startup/cache/scroll,
 group/date motion and reconnect checks pass. No production media was changed.
+
+
+## Galeria0.14.0 vector text and asynchronous editor exit
+
+Text annotations now retain cached Pango/Cairo glyph paths (up to16 captions),
+independent of text color and scale. Cairo fills these outlines at the current
+canvas transform in all photo-editing categories; the preview worker leaves
+live markup out of its bitmap. PNG export fills the same outlines at the final
+image resolution. This avoids enlarging a96px glyph bitmap; the final PNG is
+still raster media. Cardinal text rotation has a6degree detent. Large-text and
+modal-prompt private-display screenshots were inspected. No frame-time gain
+is claimed. Exact text runtime: Pango1.57.1/Cairo1.18.4 with existing
+Python3.13.15/PyGObject3.56.3/GTK4.22.4/Pillow12.3.0.
+
+Saved edit snapshots are separate from the50-step Undo history. Done, Back,
+Escape, media navigation, window close and app Quit share a Save/Cancel/Discard
+guard. Save resumes the requested action only after the asynchronous photo
+upload/video export succeeds. Cancel or a failed/cancelled save leaves edits
+intact; Discard restores the saved snapshot. Dirty checks compare actual state
+so pending debounced controls and inline text are included. Private cleanup
+clears the saved snapshot and glyph cache along with editor state.
+
+80unit checks pass, including vector curve outlines/large output/90degree
+detents and saved-state independence from history eviction/undo. Native real
+pointer text transform tests, photo/video Save-Cancel-Discard/failure/chooser
+cancellation/window-close/quit tests, video edit/export and clipboard checks
+pass. Selection removal reflow/action-target regressions still pass. Tests use
+generated media and fixture upload transport, with real local video export;
+no production media mutations or physical-display synthetic input.

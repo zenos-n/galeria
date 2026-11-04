@@ -54,5 +54,18 @@ class PhotoEditTests(unittest.TestCase):
         self.assertGreater(scaled[2]-scaled[0],(normal[2]-normal[0])*1.5)
         self.assertAlmostEqual(moved[0]-normal[0],80,delta=2)
 
+    def test_vector_glyphs_and_cardinal_rotation_detents(self):
+        import cairo
+        from text_vector import outline,snap_rotation
+        path,width,height=outline('Galeria ąćę')
+        self.assertGreater(width,height)
+        self.assertTrue(any(kind==cairo.PATH_CURVE_TO for kind,points in path))
+        for angle,expected in [(3,0),(87,90),(94,90),(-92,-90),(181,180),(355,360),(270,270),(76,76),(98,98)]:
+            self.assertEqual(snap_rotation(angle),expected)
+        image=Image.new('RGBA',(1200,900),'white')
+        large=annotate(image,[{'tool':'Text','color':'#ed333b','text':'Galeria','width':.008,'scale':8,'points':[(.5,.5)]}])
+        box=ImageChops.difference(large,image).convert('RGB').getbbox()
+        self.assertGreater(box[3]-box[1],150)
+
 
 if __name__=='__main__':unittest.main()

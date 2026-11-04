@@ -18,7 +18,7 @@ class PhotoEditor:
         self.generation=0;self.debounce=0;self.running=False;self.closed=False
         self.markup=Markup(self.markup_changed,self.notice);self.markup.set_can_target(False)
         self.stage.picture.add_overlay(self.markup)
-        self.history=History(self.snapshot());self.history_timer=0;self.restoring=False;self.upload_cancel=threading.Event()
+        self.history=History(self.snapshot());self.history_timer=0;self.restoring=False;self.upload_cancel=threading.Event();self.saving=False;self.save_finished=None
         self.stage.crop_frame.changed=self.remember
 
     def snapshot(self):
@@ -40,11 +40,19 @@ class PhotoEditor:
         if self.history_timer:GLib.source_remove(self.history_timer);self.history_timer=0
         state=(self.history.redo if redo else self.history.undo)(self.snapshot())
         if state is None:return
+        self.restore(state)
+
+    def restore(self,state):
         self.restoring=True;self.markup.entry.set_visible(False);self.markup.selected=None
-        self.values,self.markup.strokes,self.stage.rotation,self.stage.flipped,self.straighten,bounds,aspect,choice=state
+        self.values,self.markup.strokes,self.stage.rotation,self.stage.flipped,self.straighten,bounds,aspect,choice=copy.deepcopy(state)
         self.viewer.crop_dropdown.set_selected(choice);self.stage.crop_frame.bounds=bounds;self.stage.crop_frame.aspect=aspect
         self.straighten_slider.set_value(self.straighten);self.select(self.selected);self.markup.redraw();self.queue(0)
         self.restoring=False;self.history_buttons()
+
+    def dirty(self):return self.history.dirty(self.snapshot())
+
+    def discard_changes(self):
+        self.restore(self.history.saved);self.history=History(self.snapshot());self.history_buttons()
 
     def notice(self,message):
         was_visible=self.viewer.tool_message.get_visible()
@@ -94,7 +102,7 @@ class PhotoEditor:
         if self.closed or not self.original or self.running:return False
         generation=self.generation;self.running=True
         pixels=self.original;values={} if self.comparing else dict(self.values)
-        drawing=self.viewer.editing and self.viewer.editor_categories.get_active_name()=='Markup' and not self.comparing
+        drawing=self.viewer.editing and not self.comparing
         strokes=[] if drawing or self.comparing else copy.deepcopy(self.markup.strokes)
         rotation=self.stage.rotation;flipped=self.stage.flipped;angle=self.straighten
         crop=None if self.viewer.editing else self.stage.crop_frame.bounds
@@ -108,7 +116,7 @@ class PhotoEditor:
             previous=self.stage.last_rect;ratio=value[0]/value[1];changed=ratio!=self.stage.render_ratio
             self.stage.render_ratio=ratio;self.stage.set_texture(self.viewer.window.texture_from_pixels(value))
             self.stage.surface.set_opacity(0)
-            self.markup.set_visible(drawing);self.markup.set_can_target(drawing)
+            self.markup.set_visible(drawing);self.markup.set_can_target(drawing and self.viewer.editor_categories.get_active_name()=='Markup')
             self.stage.queue_allocate()
             if changed:self.stage.animate_geometry(previous)
         def failed(message):
@@ -147,13 +155,16 @@ class PhotoEditor:
         self.stage.crop_frame.reset();self.viewer.crop_dropdown.set_selected(1)
         self.straighten_slider.set_value(0);self.markup.clear();self.select(self.selected);self.queue(0)
 
-    def save_copy(self):
-        if self.original is None:self.notice('Wait for the photo to load.');return
+    def save_copy(self,finished=None):
+        if self.saving:
+            if finished:self.save_finished=finished
+            return
+        if finished:self.save_finished=finished
+        if self.original is None:self.notice('Wait for the photo to load.');self.finish_save(False);return
         window=self.viewer.window;client=window.client;item=self.viewer.source.media_item
-        if not client:self.notice('Connect Immich to save an edited copy.');return
-        if not self.save_button.get_sensitive():return
-        self.markup.finish_text();values,strokes,rotation,flipped,angle,crop,_,_=self.snapshot()
-        self.save_button.set_sensitive(False);self.notice('Saving a copy to Immich…')
+        if not client:self.notice('Connect Immich to save an edited copy.');self.finish_save(False);return
+        self.markup.finish_text();state=self.snapshot();values,strokes,rotation,flipped,angle,crop,_,_=state
+        self.saving=True;self.save_button.set_sensitive(False);self.notice('Saving a copy to Immich…')
         cancel=self.upload_cancel
         def work():
             from upload_media import upload_bytes
@@ -177,14 +188,21 @@ class PhotoEditor:
             if not self.closed:
                 self.save_button.set_sensitive(True);preview,created=value
                 self.notice(('Copy saved to Immich' if created else 'This copy is already saved on Immich')+(' at server preview resolution.' if preview else '.'))
+                self.history.mark_saved(state)
+            self.finish_save(True)
         def failed(message):
             if not self.closed:self.save_button.set_sensitive(True);self.notice(message)
+            self.finish_save(False)
         window.background(work,done,failed,images='preview')
+
+    def finish_save(self,success):
+        self.saving=False;callback=self.save_finished;self.save_finished=None
+        if callback:callback(success)
 
     def close(self):
         self.closed=True;self.generation+=1;self.upload_cancel.set()
         if self.history_timer:GLib.source_remove(self.history_timer);self.history_timer=0
         if self.debounce:GLib.source_remove(self.debounce);self.debounce=0
         if self.markup.get_parent()==self.stage.picture:self.stage.picture.remove_overlay(self.markup)
-        self.markup.entry.set_visible(False);self.markup.strokes.clear();self.markup.cache.clear();self.history.past.clear();self.history.future.clear()
+        self.markup.entry.set_visible(False);self.markup.strokes.clear();self.markup.cache.clear();self.history.past.clear();self.history.future.clear();self.history.saved=None
         self.original=None

@@ -19,7 +19,7 @@ def time_label(seconds):
 class VideoEditor(Gtk.Box):
     def __init__(self,viewer):
         super().__init__(orientation=Gtk.Orientation.VERTICAL,spacing=10,css_classes=['editor-bar'])
-        self.history=None;self.history_timer=0;self.restoring=False
+        self.history=None;self.history_timer=0;self.restoring=False;self.saving=False;self.save_finished=None
         self.viewer=viewer;self.uri=None;self.original=None;self.duration=0;self.rotation=0;self.filter='Original'
         self.generation=0;self.debounce=0;self.cancel=None;self.running=False;self.syncing=False;self.playing=False;self.play_timer=0;self.playback_original=False
         self.temporary=tempfile.TemporaryDirectory(prefix='galeria-video-');self.original_ratio=viewer.stage.ratio
@@ -89,12 +89,20 @@ class VideoEditor(Gtk.Box):
         if self.history_timer:GLib.source_remove(self.history_timer);self.history_timer=0
         state=(self.history.redo if redo else self.history.undo)(self.snapshot())
         if state is None:return
+        self.restore(state)
+
+    def restore(self,state):
         edits,aspect,choice=state;self.restoring=self.syncing=True
         self.rotation=edits.rotation;self.filter=edits.filter;self.start.set_value(edits.start);self.end.set_value(edits.end)
         self.position.set_range(edits.start,max(edits.start+.01,edits.end));self.position.set_value(edits.start)
         self.viewer.crop_dropdown.set_selected(choice);self.viewer.stage.crop_frame.bounds=edits.crop;self.viewer.stage.crop_frame.aspect=aspect
         self.filter_buttons[list(FILTERS).index(self.filter)].set_active(True);self.syncing=False;self.queue_preview();self.restoring=False
         self.undo.set_sensitive(len(self.history.past)>1);self.redo.set_sensitive(bool(self.history.future))
+
+    def dirty(self):return bool(self.history and self.history.dirty(self.snapshot()))
+
+    def discard_changes(self):
+        self.restore(self.history.saved);self.history=History(self.snapshot());self.set_ready(bool(self.duration))
 
     def set_ready(self,ready):
         for widget in [self.controls,self.reset,self.preview,self.save]:widget.set_sensitive(ready and not self.running)
@@ -206,24 +214,31 @@ class VideoEditor(Gtk.Box):
         self.filter_buttons[0].set_active(True);self.viewer.crop_dropdown.set_selected(0);self.viewer.stage.crop_frame.reset()
         self.syncing=False;self.queue_preview()
 
-    def save_copy(self,*_):
+    def save_copy(self,*_,finished=None):
+        if self.saving:
+            if finished:self.save_finished=finished
+            return
+        if finished:self.save_finished=finished
+        if self.running or not self.duration:
+            self.message.set_label('Wait for the video to finish preparing.');self.finish_save(False);return
         try:self.edits().validate()
-        except LibraryError as error:self.message.set_label(str(error));return
+        except LibraryError as error:self.message.set_label(str(error));self.finish_save(False);return
         dialog=Gtk.FileDialog(title='Save edited video',initial_name=Path(self.viewer.source.filename).stem+'-edited.mp4')
         filter=Gtk.FileFilter(name='MP4 video');filter.add_pattern('*.mp4')
         filters=Gio.ListStore.new(Gtk.FileFilter);filters.append(filter);dialog.set_filters(filters);dialog.set_default_filter(filter)
         def chosen(dialog,result):
             try:file=dialog.save_finish(result)
-            except GLib.Error:return
-            if not file.get_path():self.message.set_label('Choose a folder on this device.');return
+            except GLib.Error:self.finish_save(False);return
+            if not file.get_path():self.message.set_label('Choose a folder on this device.');self.finish_save(False);return
             self.render(file.get_path(),False)
         dialog.save(self.viewer.window,None,chosen)
 
     def render(self,destination,preview=False):
-        if self.running or not self.duration:return
+        if self.running or not self.duration:self.finish_save(False);return
         if self.playing:self.toggle_playback()
         try:edits=self.edits();edits.validate()
-        except LibraryError as error:self.message.set_label(str(error));return
+        except LibraryError as error:self.message.set_label(str(error));self.finish_save(False);return
+        state=self.snapshot();self.saving=not preview
         self.generation+=1
         if self.debounce:GLib.source_remove(self.debounce);self.debounce=0
         self.cancel=threading.Event();cancel=self.cancel;self.running=True;self.set_ready(False)
@@ -237,6 +252,8 @@ class VideoEditor(Gtk.Box):
             GLib.idle_add(update)
         def finish(message):
             self.running=False;self.progress.set_visible(False);self.cancel_button.set_visible(False);self.set_ready(bool(self.duration));self.message.set_label(message)
+        def failed(message):
+            finish(message);self.finish_save(False)
         def ready(path):
             finish('Preview · first five seconds of the selection' if preview else 'Video saved. The original is unchanged.')
             if preview and self.viewer.editing and not cancel.is_set():
@@ -245,7 +262,12 @@ class VideoEditor(Gtk.Box):
                 stage.ratio=ratio*(bounds[2]-bounds[0])/(bounds[3]-bounds[1]);stage.crop_frame.set_visible(False)
                 stage.set_video(Gio.File.new_for_path(str(path)).get_uri());stage.video_player.play();stage.queue_allocate()
                 self.playback_original=False
-        self.viewer.window.background(lambda:export(self.uri,destination,edits,cancel,progress,preview,self.viewer.source.media_item.path or None),ready,finish,images='video')
+            if not preview:self.history.mark_saved(state);self.finish_save(True)
+        self.viewer.window.background(lambda:export(self.uri,destination,edits,cancel,progress,preview,self.viewer.source.media_item.path or None),ready,failed,images='video')
+
+    def finish_save(self,success):
+        self.saving=False;callback=self.save_finished;self.save_finished=None
+        if callback:callback(success)
 
     def leave(self):
         self.playing=False;self.playback_original=False;self.play_button.set_icon_name('media-playback-start-symbolic')
@@ -261,6 +283,7 @@ class VideoEditor(Gtk.Box):
         if not self.viewer.closing:stage.video_player.play()
 
     def close(self):
+        if self.history:self.history.past.clear();self.history.future.clear();self.history.saved=None
         if self.history_timer:GLib.source_remove(self.history_timer);self.history_timer=0
         if self.play_timer:GLib.source_remove(self.play_timer);self.play_timer=0
         if self.cancel:self.cancel.set()

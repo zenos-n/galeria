@@ -12,6 +12,14 @@ class HistoryTests(unittest.TestCase):
         state['strokes'][0]['text']='mutated'
         self.assertEqual(history.past[-1]['value'],30)
 
+    def test_saved_state_survives_history_eviction_and_detects_undo(self):
+        history=History({'value':0});state={'value':10};history.mark_saved(state);state['value']=20
+        self.assertFalse(history.dirty({'value':10}));self.assertTrue(history.dirty(state))
+        for i in range(100):history.record({'value':i})
+        self.assertEqual(history.saved,{'value':10})
+        history.mark_saved({'value':99});previous=history.undo({'value':99})
+        self.assertTrue(history.dirty(previous));self.assertFalse(history.dirty(history.redo(previous)))
+
     def test_history_is_bounded(self):
         history=History(0)
         for i in range(100):history.record(i)

@@ -1,6 +1,7 @@
 """Photo adjustments and annotation rendering, independent of GTK."""
 import math
-from PIL import Image,ImageChops,ImageDraw,ImageEnhance,ImageFilter,ImageFont,ImageOps
+import cairo
+from PIL import Image,ImageChops,ImageDraw,ImageEnhance,ImageFilter,ImageColor,ImageOps
 
 ADJUSTMENTS=['Brightness','Contrast','White point','Highlights','Shadows','Black point',
              'Saturation','Warmth','Tint','Skin tone','Blue tone','Pop','Sharpen','Denoise','Vignette','HDR effect']
@@ -49,14 +50,6 @@ def adjust(image,values):
     return image
 
 
-def text_tile(stroke):
-    font=ImageFont.load_default(size=96)
-    box=font.getbbox(stroke.get('text') or 'Text')
-    tile=Image.new('RGBA',(max(1,box[2]-box[0]+8),max(1,box[3]-box[1]+8)))
-    ImageDraw.Draw(tile).text((4-box[0],4-box[1]),stroke.get('text') or 'Text',fill=stroke['color'],font=font)
-    return tile
-
-
 def annotate(image,strokes):
     image=image.convert('RGBA');width,height=image.size
     for stroke in strokes:
@@ -68,10 +61,11 @@ def annotate(image,strokes):
             a,b=points[0],points[-1];draw.rectangle((min(a[0],b[0]),min(a[1],b[1]),max(a[0],b[0]),max(a[1],b[1])),fill='black')
         elif tool=='Text':
             if not stroke.get('text'):continue
-            tile=text_tile(stroke);scale=min(width,height)*.045*stroke.get('scale',1)/96
-            angle=math.radians(stroke.get('rotation',0));c=math.cos(angle)/scale;s=math.sin(angle)/scale;x,y=points[0]
-            matrix=(c,s,tile.width/2-c*x-s*y,-s,c,tile.height/2+s*x-c*y)
-            layer=tile.transform(image.size,Image.Transform.AFFINE,matrix,Image.Resampling.BICUBIC)
+            from text_vector import outline,paint
+            data=bytearray(width*height*4);surface=cairo.ImageSurface.create_for_data(data,cairo.FORMAT_ARGB32,width,height,width*4)
+            ctx=cairo.Context(surface);ctx.set_source_rgba(*(value/255 for value in ImageColor.getcolor(color,'RGBA')))
+            paint(ctx,outline(stroke['text']),*points[0],min(width,height)*.045*stroke.get('scale',1)/96,stroke.get('rotation',0))
+            surface.flush();layer=Image.frombytes('RGBa',image.size,bytes(data),'raw','BGRa').convert('RGBA')
         else:
             if tool=='Highlight':color=(*Image.new('RGB',(1,1),color).getpixel((0,0)),90)
             if len(points)>1:draw.line(points,fill=color,width=size,joint='curve')

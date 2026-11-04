@@ -3,7 +3,9 @@ from copy import deepcopy
 
 
 class History:
-    def __init__(self,state):self.past=[deepcopy(state)];self.future=[]
+    def __init__(self,state):self.past=[deepcopy(state)];self.future=[];self.saved=deepcopy(state)
+    def mark_saved(self,state):self.saved=deepcopy(state)
+    def dirty(self,state):return state!=self.saved
     def record(self,state):
         if state!=self.past[-1]:self.past.append(deepcopy(state));self.past=self.past[-50:];self.future.clear()
     def undo(self,state):

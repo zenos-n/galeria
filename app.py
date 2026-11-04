@@ -503,7 +503,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.13.1", developer_name="Negative Zero",
+                                 version="0.14.0", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 
@@ -679,6 +679,7 @@ class Gallery(Adw.Application):
         if self.control:self.control.emit()
 
     def force_quit(self):
+        if self.window and self.window.viewer and self.window.viewer.confirm_edit_exit(self.force_quit):return False
         self.quitting=True
         if self.window:self.window.close()
         self.quit();return False

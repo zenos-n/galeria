@@ -261,3 +261,22 @@ toolbar stays visible until the snapshots arrive, then exits selection mode.
 Native checks verify intermediate tile positions during all three flights,
 empty-grid/reduced-motion completion, actual icon targets and API failure
 retention. The Locked cache/privacy/scroll regression also passes.
+
+
+Galeria0.14.0 asks **Save / Cancel / Discard** when leaving an editor with
+unsaved changes, including Done, Back/Escape, changing media, closing the window
+and quitting. Save uses the existing photo-to-Immich or video-save-copy flow
+and leaves only after success; failure or a cancelled file chooser retains edits.
+Cancel stays in the editor; Discard restores its last successfully saved state.
+An unchanged or already saved editor leaves directly. Saved state stays separate
+from the bounded Undo/Redo history and is cleared with private editor data.
+
+Text markup now caches Pango/Cairo glyph outlines, shared by the live preview
+and output renderer, rather than enlarging a small text bitmap. PNG copies draw
+those outlines at final image resolution; the saved photo itself remains a PNG.
+Text rotation snaps within6degrees of multiples of90degrees and remains free
+between detents.80unit tests and native photo/vector/rotation, editor-exit,
+video-edit/export and clipboard regressions pass. Exit checks cover Save/Cancel/
+Discard, upload/export failures, chooser cancellation, clean/saved state and
+window/quit guards using generated media. Large-text and prompt screenshots
+were inspected; no production media was edited for tests.

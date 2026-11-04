@@ -101,7 +101,10 @@ def check():
    keys('shift+d');mark=time.monotonic();phase=70
   elif phase==70 and time.monotonic()-mark>.15:
    assert downloads==[['remote']],downloads
-   w.viewer.set_editing(False);w.viewer.close();phase=8
+   w.viewer.set_editing(False)
+   if w.viewer.exit_dialog:
+    dialog=w.viewer.exit_dialog;dialog.emit('response','discard');dialog.close()
+   w.viewer.close();phase=8
   elif phase==8 and w.viewer is None:
    w.mosaic.set_selection(True);w.mosaic.selected={0,1};w.mosaic.update_selection()
    w.get_clipboard().set_content(None);click(w.mosaic.tiles[0].get_child(),3);phase=80
