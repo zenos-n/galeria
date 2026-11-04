@@ -373,19 +373,27 @@ class LibraryUI:
         if viewer:
             viewer.closing=True;viewer.show_chrome(True)
             if viewer.stage.video_player:viewer.stage.video_player.pause()
-        self.media_action_pending=True
-        def finish():
-            self.media_action_pending=False
-            if self.mosaic!=mosaic:return
-            if viewer and self.viewer==viewer:viewer.dismiss_action()
+        self.media_action_pending=True;animated_mosaic=mosaic
+        def update_grid():
             self.pending_media=None
             values=self.timeline_index.items if self.timeline_index and mosaic.indexed else [item for item in self.media_items if item.id not in ids]
-            mosaic.set_selection(False);self.set_library_items(values,append=True,reflow=True)
+            self.set_library_items(values,append=True,reflow=True)
+            return self.mosaic
+        def finish():
+            self.media_action_pending=False
+            if self.mosaic!=animated_mosaic:return
+            if viewer:
+                if self.viewer==viewer:viewer.dismiss_action()
+                update_grid()
+            self.mosaic.set_selection(False)
         def begin():
+            nonlocal animated_mosaic
             if self.data_stopped or self.mosaic!=mosaic:self.media_action_pending=False;return False
             from trash_motion import ActionMotion
             sources=[viewer.stage.picture] if viewer else [tile.get_child() for tile in mosaic.active_widgets & mosaic.tile_set if tile.media_item.id in ids]
-            ActionMotion(self,sources,target,finish,viewer);return False
+            ActionMotion(self,sources,target,finish,viewer)
+            if not viewer:animated_mosaic=update_grid()
+            return False
         GLib.timeout_add(180 if not viewer and not self.selection_bar.get_child_revealed() else 20,begin)
 
     def remove_from_timeline(self,ids):

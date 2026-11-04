@@ -253,3 +253,11 @@ background.78unit checks and native action-target, real cross-window drop/upload
 clipboard receiver, viewer controls, editor, Locked retention and scrolling/date
 regressions pass. Pinch/pan callbacks were simulated; physical touchpad/touch
 hardware and production-server mutations were not tested.
+
+
+Galeria0.13.1 starts the remaining selection grid's reflow as soon as removal
+snapshots begin flying to the Trash, Archive or Locked icon. The selection
+toolbar stays visible until the snapshots arrive, then exits selection mode.
+Native checks verify intermediate tile positions during all three flights,
+empty-grid/reduced-motion completion, actual icon targets and API failure
+retention. The Locked cache/privacy/scroll regression also passes.

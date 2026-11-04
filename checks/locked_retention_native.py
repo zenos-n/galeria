@@ -46,7 +46,7 @@ def check():
   elif phase==2:
    active=m.active_widgets & m.tile_set
    missing.append(sum(tile.media_texture is None for tile in active))
-   if len(w.media_items)!=478 or w.loading_more or m.tick:return True
+   if len(w.media_items)!=478 or w.loading_more or m.tick or w.media_action_pending:return True
    assert len(client.calls)==1 and client.calls[0][1]=={'visibility':'locked'}
    assert not any(missing) and not client.loads,(missing,client.loads)
    assert all(item.id not in {tile.media_item.id for tile in m.tiles} for item in moved)

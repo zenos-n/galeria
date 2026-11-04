@@ -41,13 +41,19 @@ def check():
    motion=getattr(w,'action_motion',None)
    if motion is None or not .1<motion.progress<.9:return True
    assert motion.frames and motion.destination is target
+   if mode=='selection':
+    assert len(w.media_items)==before-count,('Grid still waits for flight',action,len(w.media_items),before)
+    assert w.mosaic.tick and 0<w.mosaic.p<1,('No concurrent reflow',action,w.mosaic.p)
+    final=w.mosaic.target_layout(w.mosaic.last_width)[0]
+    assert any(tile in final and tile in w.mosaic.rendered and start[:4]!=final[tile][:4] and w.mosaic.rendered[tile][:4]!=start[:4] and w.mosaic.rendered[tile][:4]!=final[tile][:4] for tile,start in w.mosaic.from_map.items() if tile in w.mosaic.tile_set),('Remaining tiles did not move during flight',action)
+    assert w.selection_bar.get_child_revealed() and target.get_mapped()
    ok,bounds=target.get_child().compute_bounds(w.root_overlay);assert ok
    expected=(bounds.get_x()+bounds.get_width()/2,bounds.get_y()+bounds.get_height()/2)
    assert all(abs(a-b)<1 for a,b in zip(expected,motion.target)),(mode,action,expected,motion.target)
    assert motion.target[0]>w.get_width()/2
    assert motion.target[1]<65 if mode=='viewer' else motion.target[1]>w.get_height()-65
    phase=3
-  elif phase==3 and len(w.media_items)==before-count and not w.loading_more and not w.mosaic.tick:
+  elif phase==3 and len(w.media_items)==before-count and not w.loading_more and not w.mosaic.tick and not w.media_action_pending:
    assert w.viewer is None and not w.mosaic.selection_mode
    assert all(tile.media_texture is not None for tile in w.mosaic.active_widgets & w.mosaic.tile_set)
    case+=1
@@ -56,7 +62,12 @@ def check():
   elif phase==4 and any('Fixture server failure' in text for text in notices):
    assert len(w.media_items)==before and getattr(w,'action_motion',None) is None and path.read_bytes()==original
    assert len(client.calls)==6
-   print('ALL SIX SELECTION/VIEWER TRASH/ARCHIVE/LOCKED MOTIONS TARGET ACTUAL BUTTON ICONS; PIXELS RETAINED; FAILED MUTATION LEAVES GRID/ORIGINAL INTACT PASSED',flush=True)
+   client.fail=False;Gtk.Settings.get_default().set_property('gtk-enable-animations',False)
+   w.mosaic.selected=set(range(len(w.mosaic.tiles)));w.mosaic.set_selection(True);w.selected_action('archive');phase=5
+  elif phase==5 and not w.media_items and not w.media_action_pending:
+   assert not w.mosaic.selection_mode and not w.selection_bar.get_reveal_child()
+   assert path.read_bytes()==original and len(client.calls)==7
+   print('CONCURRENT SELECTION REFLOW/FLIGHT; EMPTY GRID/REDUCED MOTION; ALL SIX SELECTION/VIEWER TRASH/ARCHIVE/LOCKED MOTIONS TARGET ACTUAL BUTTON ICONS; PIXELS RETAINED; FAILED MUTATION LEAVES GRID/ORIGINAL INTACT PASSED',flush=True)
    w.close();app.quit();return False
  except Exception as error:
   import traceback;traceback.print_exc();errors.append(error);w.close();app.quit();return False
