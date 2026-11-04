@@ -3,7 +3,7 @@
 } }:
 pkgs.stdenv.mkDerivation {
   pname = "galeria";
-  version = "0.12.0";
+  version = "0.12.1";
   src = pkgs.lib.cleanSource ./.;
   nativeBuildInputs = with pkgs; [ wrapGAppsHook4 gobject-introspection makeWrapper ];
   buildInputs = with pkgs; [ gtk4 libadwaita libsecret libshumate clapper-unwrapped.lib gst_all_1.gstreamer gst_all_1.gst-plugins-base gst_all_1.gst-libav gst_all_1.gst-plugins-good gst_all_1.gst-plugins-bad ];

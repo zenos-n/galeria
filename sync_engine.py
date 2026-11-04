@@ -128,7 +128,9 @@ class SyncEngine:
                 asset=result.get('assetId')
                 if not asset:
                     if result.get('action')!='accept':raise LibraryError('Immich rejected this file.')
-                    asset=upload_file(self.client,path,checksum,stat,self.cancel);counts['uploaded']+=1
+                    counts['uploading']=path.name;self.progress(dict(counts))
+                    try:asset=upload_file(self.client,path,checksum,stat,self.cancel);counts['uploaded']+=1
+                    finally:counts.pop('uploading',None);self.progress(dict(counts))
                 else:counts['existing']+=1
                 if destination:self.client.request('/albums/'+quote(destination,safe='')+'/assets',{'ids':[asset]},method='PUT')
                 self.journal.record(self.client.identity,rule['id'],path,stat,checksum,asset,destination)

@@ -52,6 +52,19 @@ class SyncTests(unittest.TestCase):
         SyncEngine(self.client,self.journal,valid_rule=lambda _:False).run_folder(self.rule)
         self.assertEqual(self.client.requests,[])
 
+    def test_upload_activity_excludes_scans_and_duplicates(self):
+        events=[];engine=SyncEngine(self.client,self.journal,progress=lambda value:events.append(value))
+        def upload(*args):
+            self.assertEqual(events[-1].get('uploading'),self.path.name)
+            return 'asset'
+        with patch('sync_engine.upload_file',side_effect=upload):engine.run_folder(self.rule)
+        self.assertTrue(any(value.get('uploading') for value in events));self.assertNotIn('uploading',events[-1])
+        events.clear();engine.run_folder(self.rule);self.assertFalse(any(value.get('uploading') for value in events))
+        other=self.path.with_name('downloaded.png');other.write_bytes(self.path.read_bytes());os.utime(other,(0,0))
+        self.client.duplicate=True;events.clear()
+        with patch('sync_engine.upload_file') as upload:engine.run_folder(self.rule);upload.assert_not_called()
+        self.assertFalse(any(value.get('uploading') for value in events))
+
     def test_new_files_after_first_scan_are_uploaded_without_restarting(self):
         engine=SyncEngine(self.client,self.journal)
         with patch('sync_engine.upload_file',return_value='asset') as upload:

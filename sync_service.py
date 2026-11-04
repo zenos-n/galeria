@@ -103,8 +103,9 @@ def run_cycle(config,journal,cancel,client_factory=ImmichClient,token_lookup=sec
             client.detect_version()
             last_progress=[0]
             def progress(counts):
+                changed=bool(current.get('progress',{}).get('uploading'))!=bool(counts.get('uploading'))
                 current['progress']=counts
-                if time.monotonic()-last_progress[0]>.2:last_progress[0]=time.monotonic();publish()
+                if changed or time.monotonic()-last_progress[0]>.2:last_progress[0]=time.monotonic();publish()
             engine=SyncEngine(client,journal,cancel,progress=progress,valid_rule=(lambda rule:valid_rule(identity,rule)) if valid_rule else None)
             for rule in account.get('folders',[]):
                 if cancel.is_set():break

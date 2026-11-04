@@ -57,6 +57,8 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.toast.set_child(self.root_overlay)
         self.make_sidebar()
         self.make_content()
+        from date_label import DateLabel
+        self.date_motion=DateLabel(self);self.root_overlay.add_overlay(self.date_motion)
         breakpoint = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 720sp"))
         breakpoint.add_setter(self.split, "collapsed", True)
         self.add_breakpoint(breakpoint)
@@ -198,9 +200,8 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.sidebar_button.set_visible(False)
         header.pack_start(self.sidebar_button)
         self.period = label("", "timeline-date", margin_start=14)
-        self.period_revealer=Gtk.Revealer(child=self.period,transition_type=Gtk.RevealerTransitionType.SLIDE_UP,transition_duration=180,valign=Gtk.Align.CENTER)
-        self.period_revealer.connect('notify::child-revealed',lambda *_:self.update_period())
-        header.pack_start(self.period_revealer)
+        self.period.set_opacity(0)
+        header.pack_start(self.period)
         self.switcher = Adw.ToggleGroup(valign=Gtk.Align.CENTER)
         self.switcher.add_css_class("round")
         for name, title in [("years", "Years"), ("months", "Months"), ("all", "All Photos")]:
@@ -338,7 +339,8 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
     def update_header(self):
         active=self.mosaic.selection_mode
         is_library=self.current_page=='library'
-        self.period_revealer.set_visible(not self.searching and not active and is_library)
+        self.period.set_visible(not self.searching and not active and is_library)
+        self.update_period()
         self.switcher.set_visible(not self.searching and not active and is_library)
         self.account_wrapper.set_visible(not self.searching)
         self.upload_button.set_visible(not self.searching)
@@ -497,7 +499,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.12.0", developer_name="Negative Zero",
+                                 version="0.12.1", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 

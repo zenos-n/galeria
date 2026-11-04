@@ -159,7 +159,7 @@ caches still show loading feedback. Locked media is excluded from this bootstrap
 The user menu loads the Immich profile photo and offers **Change profile photo…**
 with a native image chooser. Photos are cached by account and profile revision.
 The sidebar shows actual folder-sync activity, uploaded/already-saved counts and
-errors, including immediately after Sync now. It no longer repeats the username.
+errors. Directory scanning and duplicate checks stay quiet, including after Sync now; the indicator appears only during actual file uploads or for errors. It no longer repeats the username.
 
 The viewer's Download action uses native Save As for the original. Multi-selection
 has Download selected, which chooses a destination directory and preserves name
@@ -225,4 +225,6 @@ caches/sidebar/pins, and leaves media in the library, following
 [Immich3.3.3's album deletion endpoint](https://github.com/immich-app/immich/blob/v3.3.3/server/src/services/album.service.ts#L153).
 Empty cached album views remain visible after deleting the last album.
 
-The timeline date follows the newest visible month in All Photos and visible year in the date tiers. The small inline month heading hands off to an animated header label only after it scrolls out of view, avoiding duplicate dates.
+The timeline date follows the newest visible month in All Photos and visible year in the date tiers. One glyph run moves from the exact inline heading position into the header, following scroll position in both directions. Fast scrolling that skips the source uses a short vertical transition clipped inside the header.
+
+Moving assets to Locked retains other assets’ RAM textures and known disk thumbnails/previews/video prefixes. Only moved assets leave RAM cover caches; metadata snapshots and unclassified disk entries are invalidated for privacy, and pending pre-move writes are blocked. The remaining grid reflows with its scroll anchor intact.

@@ -46,7 +46,11 @@ class TimelineIndexTests(unittest.TestCase):
             cache=MediaCache('fixture',root=root);started=Event();gate=Event();pool=ImageQueue(1)
             def load():started.set();gate.wait(3);return b'private'
             future=pool.submit(lambda:cache.fetch('asset:thumbnail',load));self.assertTrue(started.wait(1))
-            cache.forbid(['asset:']);gate.set();future.result(3);pool.shutdown()
+            cache.put('keep:thumbnail',b'public');cache.put('stale-metadata',b'private name')
+            cache.forbid(['asset:'],preserve=['keep:thumbnail','asset:preview']);gate.set();future.result(3);pool.shutdown()
+            self.assertEqual(cache.get('keep:thumbnail'),b'public')
+            self.assertIsNone(cache.get('stale-metadata'))
+            self.assertEqual(MediaCache('fixture',root=root).get('keep:thumbnail'),b'public')
             self.assertIsNone(cache.get('asset:thumbnail'))
             cache.put('asset:preview',b'private');self.assertIsNone(cache.get('asset:preview'))
 

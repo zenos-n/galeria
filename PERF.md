@@ -430,3 +430,38 @@ steps, pen/redact/text gestures, Undo/Reset, full-size PNG output, original-file
 protection and explicit preview-resolution fallback. Existing native clipboard,
 video playback/edit/export, motion/media actions, startup/account/download and
 reconnect-index regressions pass. No production media edits were used.
+
+## Galeria0.12.1 shared date glyphs, Locked retention and quiet scans
+
+The prior revealer animated a second label after the inline heading disappeared.
+A single overlay now snapshots the heading's Pango layout at its exact source
+coordinates, suppressing that heading's ordinary snapshot. Its vertical position
+follows scroll1:1 until the header endpoint; the horizontal offset and dimming
+interpolate over that same distance, and reverse continuously. Large scroll
+deltas or speed above1600px/s use a160ms vertical header-clipped exchange.
+Only that timed exchange needs frame callbacks; normal motion uses existing
+viewport updates and does not resize the grid. GTK's reduced-animation setting
+disables the timed exchange. Native coordinate checks cover source equality,
+intermediate/reverse positions, endpoint and skipped-source clipping; screenshots
+were visually inspected. This is a motion correctness fix, not a frame-time claim.
+
+Moving two files to Locked previously cleared every RAM texture and called a
+whole-cache privacy purge. Retain unaffected RAM pixels and known nonprivate disk
+image/video keys. Forbid moved keys, increment the disk epoch to stop pre-move
+writes, and discard metadata/unknown entries that might contain private assets.
+Texture keys now use(asset ID,revision) tuples so all moved revisions can be
+removed without prefix collisions. Date/collection covers are invalidated only
+when they contain a moved asset. A native indexed480-item fixture moves two files
+and observes zero blank active cells, zero image downloads, held scroll position,
+retained disk data across cache instances and removal of private revisions,
+metadata and covers. Original bytes remain unchanged.
+
+The sync engine publishes explicit uploading activity only around the actual
+transfer, clearing it even on failure. The service flushes those state changes
+immediately. Sidebar activity ignores scan/busy/request states; scans, hashing,
+unchanged journal hits and server-side duplicates remain invisible. Attention
+errors remain available. A checksum check already prevents re-uploading downloaded
+originals; the new fixture also verifies a byte-identical downloaded copy calls
+no upload.70unit checks and native photo/header, startup/sync, reconnect,
+selection/motion and pins/insertion regressions pass. No production media was
+changed for these checks.

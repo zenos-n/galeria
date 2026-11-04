@@ -124,8 +124,15 @@ class MediaCache:
                 if path.is_file():path.unlink(missing_ok=True)
             self.inventory={};self.eviction=[];self.total_bytes=0;self.scanned_at=time.monotonic()
 
-    def forbid(self,prefixes):
-        with self.lock:self.forbidden.update(prefixes);self.clear()
+    def forbid(self,prefixes,preserve=()):
+        with self.lock:
+            self.forbidden.update(prefixes);self.epoch+=1
+            keep={self.path(key).name for key in preserve if not any(key.startswith(prefix) for prefix in self.forbidden)}
+            shutil.rmtree(self.root/'clipboard',ignore_errors=True)
+            for path in self.root.iterdir():
+                if path.is_file() and path.name not in keep:path.unlink(missing_ok=True)
+            self.inventory=None;self.scanned_at=0
+
 
     def sync_encrypted(self,key,response,cancel):
         """Stream an original to authenticated ciphertext; never create plaintext files."""

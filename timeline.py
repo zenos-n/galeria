@@ -39,7 +39,7 @@ class Mosaic(Gtk.Widget):
         self.checks=[]
         self.badges=[]
         self.widgets=[]
-        self.headings=[]
+        self.headings=[];self.floating_heading=None
         self.month_cards={}
         self.year_cards={}
         self.owners={}
@@ -654,6 +654,6 @@ class Mosaic(Gtk.Widget):
                     x,y,w,h,_=self.rendered[panel]
                     clip=Graphene.Rect();clip.init(x,y,w,max(0,h))
                     snapshot.push_clip(clip);count+=1
-        self.snapshot_child(widget if isinstance(widget,Gtk.Widget) else widget.widget,snapshot)
+        if widget!=self.floating_heading:self.snapshot_child(widget if isinstance(widget,Gtk.Widget) else widget.widget,snapshot)
         for _ in range(count):
             snapshot.pop()

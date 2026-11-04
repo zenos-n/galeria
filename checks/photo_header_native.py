@@ -52,15 +52,15 @@ def check():
  try:
   assert time.monotonic()-start<35,(phase,getattr(w.viewer,'tool_message',None).get_label() if w.viewer else '')
   if phase==0 and not w.loading_more and w.mosaic.rendered:
-   assert w.period.get_label()=='August 2016' and not w.period_revealer.get_reveal_child()
+   assert w.period.get_label()=='August 2016' and not w.date_motion.pinned
    w.scroller.get_vadjustment().set_value(70);phase=1
-  elif phase==1 and w.period_revealer.get_child_revealed():
+  elif phase==1 and w.date_motion.pinned and not w.date_motion.motion:
    assert w.period.get_label()=='August 2016'
    top=w.mosaic.month_extents['2016-07'][0];w.scroller.get_vadjustment().set_value(top);phase=2
-  elif phase==2 and not w.period_revealer.get_reveal_child() and not w.period.get_child_visible():
+  elif phase==2 and not w.date_motion.pinned and not w.date_motion.motion:
    assert w.period.get_label()=='July 2016'
    w.scroller.get_vadjustment().set_value(w.mosaic.month_extents['2016-07'][0]+70);phase=3
-  elif phase==3 and w.period_revealer.get_child_revealed():
+  elif phase==3 and w.date_motion.pinned and not w.date_motion.motion:
    assert w.period.get_label()=='July 2016'
    w.scroller.get_vadjustment().set_value(0);mark=time.monotonic();phase=4
   elif phase==4 and time.monotonic()-mark>.2:

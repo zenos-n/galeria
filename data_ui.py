@@ -65,6 +65,7 @@ class LibraryUI:
         from copy_ui import clear_locked_clipboard
         clear_locked_clipboard(self)
         self.data_stopped=True
+        if hasattr(self,'date_motion'):self.date_motion.clear()
         if self.viewer:self.viewer.dispose_editors()
         if self.refresh_timer:GLib.source_remove(self.refresh_timer);self.refresh_timer=0
         self.data_generation+=1
@@ -317,19 +318,31 @@ class LibraryUI:
         client=self.client;mosaic=self.mosaic
         ids=[mosaic.tiles[i].media_item.id for i in mosaic.selected if not mosaic.tiles[i].media_item.metadata.get('placeholder')]
         if not ids:return
+        moved=set(ids)
+        retained=[item for item in self.media_items if item.id not in moved and item.metadata.get('visibility')!='locked' and not item.metadata.get('placeholder')]
+        image_keys=[client.image_key(item,preview) for item in retained for preview in (False,True)]
+        video_keys=['video-prefix:'+item.id+str(item.metadata.get('updatedAt') or item.metadata.get('checksum','')) for item in retained if item.kind=='VIDEO']
         def move():
             if self.client!=client:return
             def done(_):
                 self.data_generation+=1
                 self.remove_from_timeline(ids)
-                self.page_cache.clear();self.collection_cache.clear();self.date_cover_cache.clear();self.collection_textures.clear();self.texture_cache.clear();self.pending_images.clear()
+                self.timeline_pending=set()
+                self.page_cache.clear();self.collection_cache.clear();self.pending_images.clear()
+                for key in list(self.texture_cache):
+                    if key[0] in moved:self.texture_cache.pop(key,None)
+                for key,values in list(self.date_cover_cache.items()):
+                    if any(asset in moved for asset,_ in values):self.date_cover_cache.pop(key,None)
+                for key in list(self.collection_textures):
+                    if key[0]=='asset' and key[1] in moved:self.collection_textures.pop(key,None)
+                client.refresh_serial=getattr(client,'refresh_serial',0)+1
                 if self.mosaic==mosaic:
                     self.mosaic.set_selection(False);self.set_library_items(self.timeline_index.items if self.timeline_index and mosaic.indexed else [item for item in self.media_items if item.id not in ids],append=True,reflow=True)
                 self.notice('Items moved to the locked folder.')
             def work():
                 result=client.update_assets(ids,{'visibility':'locked'})
-                client.media_cache().forbid(id+':' for id in ids)
-                client.video_cache().forbid('video-prefix:'+id for id in ids)
+                client.media_cache().forbid((id+':' for id in ids),preserve=image_keys)
+                client.video_cache().forbid(('video-prefix:'+id for id in ids),preserve=video_keys)
                 return result
             self.background(work,done)
         if client.locked_until<=time.monotonic():
@@ -443,7 +456,7 @@ class LibraryUI:
         self.page_cache.clear();self.collection_cache.clear();self.date_cover_cache.clear();self.collection_textures.clear();self.texture_cache.clear()
         self.pending_images.clear()
         if bootstrap:
-            for id,pixel in pixels.items():self.texture_cache[id]=self.texture_from_pixels(pixel)
+            for id,pixel in pixels.items():self.texture_cache[(id,'')]=self.texture_from_pixels(pixel)
             client.bootstrap=None
         self.preferences.update(mode='immich',server=client.base,user_id=client.user['id'],email=client.user.get('email',''))
         self.remember_user()
@@ -784,27 +797,10 @@ class LibraryUI:
             return False
         GLib.timeout_add(32,settle)
 
-    def texture_key(self,item):return item.id+str(item.metadata.get('updatedAt',''))
+    def texture_key(self,item):return item.id,str(item.metadata.get('updatedAt',''))
 
     def update_period(self):
-        if self.data_stopped:return
-        mosaic=self.mosaic
-        if self.current_page!='library' or mosaic.tick:return
-        top,height=mosaic.visible_range();title='';reveal=False
-        if mosaic.mode=='all':
-            key=next((key for key,(a,b) in mosaic.month_extents.items() if b>top and a<top+height),None)
-            if key:
-                month=next((month for month in mosaic.months if month[0]==key),None)
-                title=month[1] if month else ''
-                heading=next((heading for month,heading in zip(mosaic.months,mosaic.headings) if month[0]==key),None)
-                rect=mosaic.rendered.get(heading)
-                reveal=bool(rect and rect[1]+rect[3]<=top)
-        else:
-            cards=mosaic.year_cards if mosaic.mode=='years' else mosaic.month_cards
-            key=next((key for key,card in cards.items() if (rect:=mosaic.rendered.get(card)) and rect[1]+rect[3]>top and rect[1]<top+height),None)
-            if key:title=key[:4];reveal=True
-        if title!=self.period.get_label() and (reveal or not self.period.get_child_visible()):self.period.set_label(title)
-        self.period_revealer.set_reveal_child(reveal)
+        if hasattr(self,'date_motion'):self.date_motion.update()
 
     def load_visible_thumbnails(self,*_):
         if not hasattr(self,'mosaic') or not hasattr(self,'load_more'):return

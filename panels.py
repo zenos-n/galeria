@@ -63,9 +63,7 @@ class Uploads(Gtk.MenuButton):
 
     def requested(self):
         self.request_error=None
-        self.sync_requested_at=time.time();self.set_visible(True)
-        self.summary.set_label('Syncing folders…');self.title.set_label('Sync requested')
-        self.progress.pulse();self.note.set_label('Waiting for the background service…')
+        self.sync_requested_at=time.time()
 
     def failed(self,message):
         client=self.window.client
@@ -90,11 +88,11 @@ class Uploads(Gtk.MenuButton):
         folders=value.get('folders',[])+([value.get('progress',{})] if value.get('busy') else [])
         uploaded=sum(row.get('uploaded',0) for row in folders)
         errors=[str(error) for row in folders for error in row.get('errors',[])];error=request_error or value.get('error') or (errors[0] if errors else '')
-        busy=pending or status.get('active',False) and value.get('busy',False)
+        busy=status.get('active',False) and value.get('busy',False) and bool(value.get('progress',{}).get('uploading'))
         if not busy and not error and not self.manual:
             self.popdown();self.set_visible(False);return True
         self.set_visible(True)
-        title='Sync needs attention' if error else 'Syncing folders…' if busy else 'Folders up to date'
+        title='Sync needs attention' if error else 'Uploading files…' if busy else 'Folders up to date'
         self.summary.set_label(title);self.title.set_label(title)
         self.count.set_label(f'{uploaded} uploaded · '+str(sum(row.get('existing',0)+row.get('unchanged',0) for row in folders))+' already saved')
         self.note.set_label(error or value.get('current_folder','') if busy else error or 'New and changed files upload automatically. Originals are unchanged.')
