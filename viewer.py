@@ -143,6 +143,11 @@ class Viewer(Gtk.Overlay):
         self.info.set_sensitive(True)
         if self.stage.video_player:self.stage.video_player.play()
 
+    def dispose_editors(self):
+        for name in ('photo_editor','video_editor'):
+            editor=getattr(self,name,None)
+            if editor:editor.close()
+
     def update_metadata(self):
         item=getattr(self.source,'media_item',None)
         if not item:return
@@ -201,7 +206,7 @@ class Viewer(Gtk.Overlay):
                 self.window.mosaic.hide_tile(None)
                 self.window.root_overlay.remove_overlay(self)
                 self.stage.dispose()
-                if getattr(self,'video_editor',None):self.video_editor.close()
+                self.dispose_editors()
                 self.window.split.set_can_target(True)
                 self.window.viewer=None
                 self.window.flush_pending_media()
@@ -219,13 +224,13 @@ class Viewer(Gtk.Overlay):
         if self.stage.progress<1 or self.closing or self.media_stack.get_transition_running():
             return
         old=self.stage
+        self.dispose_editors();self.photo_editor=None;self.video_editor=None
         if old.video_player:old.video_player.pause()
         self.window.mosaic.hide_tile(None)
         visible=[i for i,tile in enumerate(self.window.mosaic.tiles) if tile in self.window.mosaic.rendered and not tile.media_item.metadata.get('placeholder')]
         self.index=visible[(visible.index(self.index)+step)%len(visible)]
         self.source=self.window.mosaic.tiles[self.index]
         self.stage=PhotoStage(self.source,self.index)
-        if getattr(self,'video_editor',None):self.video_editor.close();self.video_editor=None
         self.editor.set_child(self.make_editor())
         self.editor_categories.connect('notify::active-name',self.sync_editor_inset)
         self.window.mosaic.hide_tile(self.source)
@@ -352,12 +357,10 @@ class Viewer(Gtk.Overlay):
         if active==self.editing:return
         if active:
             self.stage.crop_ratio=None
-        elif self.editing and not getattr(self,'video_editor',None):
-            x0,y0,x1,y1=self.stage.crop_frame.bounds
-            self.stage.crop_ratio=self.stage.ratio*(x1-x0)/max(.001,y1-y0)
         if active and self.immersive:
             self.set_immersive(False)
         self.editing = active
+        if getattr(self,'photo_editor',None):self.photo_editor.queue(0)
         if getattr(self,'video_editor',None):
             self.video_editor.enter() if active else self.video_editor.leave()
         if active:
@@ -379,19 +382,23 @@ class Viewer(Gtk.Overlay):
         self.stage.animate_geometry(before)
 
     def rotate(self, angle):
+        if getattr(self,'photo_editor',None):self.photo_editor.rotate(angle);return
         self.stage.rotation = (self.stage.rotation + angle) % 360
         self.stage.symbol.set_from_icon_name("object-rotate-right-symbolic" if self.stage.rotation else "image-x-generic-symbolic")
         self.stage.queue_allocate()
 
     def flip(self):
+        if getattr(self,'photo_editor',None):self.photo_editor.flip();return
         self.stage.flipped = not self.stage.flipped
         self.stage.symbol.set_from_icon_name("object-flip-horizontal-symbolic" if self.stage.flipped else "image-x-generic-symbolic")
 
     def change_crop(self, dropdown, *_):
-        self.stage.crop_frame.set_aspect([None,self.stage.ratio,1,4/3,16/9][dropdown.get_selected()])
+        ratio=self.photo_editor.aspect() if getattr(self,'photo_editor',None) else self.stage.ratio
+        self.stage.crop_frame.set_aspect([None,ratio,1,4/3,16/9][dropdown.get_selected()])
 
     def reset_edits(self):
         if getattr(self,'video_editor',None):self.video_editor.reset_edits();return
+        if getattr(self,'photo_editor',None):self.photo_editor.reset();return
         self.stage.rotation, self.stage.flipped, self.stage.crop_ratio = 0, False, None
         self.stage.symbol.set_from_icon_name("image-x-generic-symbolic")
         self.stage.crop_frame.reset()
@@ -399,12 +406,5 @@ class Viewer(Gtk.Overlay):
         for scale in self.scales:
             scale.set_value(0)
         self.stage.queue_allocate()
-
-    def adjust(self):
-        exposure = self.scales[0].get_value() if self.scales else 0
-        self.stage.surface.set_opacity(abs(exposure) / 150)
-        self.stage.surface.remove_css_class("exposure-light")
-        self.stage.surface.remove_css_class("exposure-dark")
-        self.stage.surface.add_css_class("exposure-light" if exposure >= 0 else "exposure-dark")
 
 

@@ -36,7 +36,7 @@ Immersive fullscreen uses a black background and fits the media to the full view
 
 The native drop target accepts Gdk.FileList, including both files and folders. Drops and the upload picker open an import review sheet. Only item names and file types are inspected; directory contents are not scanned, and nothing is imported or uploaded.
 
-The photo editor exposes Crop, Adjust and Markup, with centered wrapping choices, Light/Color/Detail adjustment groups and circular color swatches. Adjustment choices have one selected background and retain their keyboard focus outline. Save and Save a copy remain design controls: image processing, brush engines, editing history and persistence are unimplemented. No image is modified or saved. The separate video editor retains its functional trim, crop, rotation and filter export controls.
+The photo editor exposes Crop, Adjust and Markup. Light/Color/Detail controls apply distinct tonal, color and detail operations, retain independent values and snap to neutral during dragging; keyboard steps remain precise. Pen, highlighter, opaque redaction and placed text draw on the photo, with color selection and Undo. Compare shows the source and Reset clears edits. Save a copy exports a PNG to a chosen location, applying adjustments, markup, crop, rotation, mirror and straighten while preserving the original. Unsupported remote originals use the server preview and report the lower-resolution export. Previews run off the GTK thread, coalesce pending changes and use at most1200pixels per side. The separate video editor retains its functional trim, crop, rotation and filter export controls.
 
 Multi-selection supports the header selection toggle, checkboxes, Ctrl-click, Shift-click ranges, Ctrl+A, Escape, and a batch-action bar. Local files remain read-only. Trash uses a confirmation and restores from the Trash page rather than deleting permanently.
 
@@ -57,7 +57,7 @@ The welcome question has an illustration slot above the text for a user-supplied
 
 Date folders reveal their photo rows directly downward at the media's normal size. Expanded years contain all that year's photos, without nested month folders or subgroups. Tier geometry is cached and intermediate frames reuse stable child sizes; measured CPU results and limits are in PERF.md. Fullscreen animates media bounds, the black backdrop and control visibility.
 
-The image crop tool has draggable corners, a movable crop area, locked/free aspect ratios and guides reaching the media edges. It previews crop bounds; image processing and saving remain unconnected. Hover checkboxes are independent circular controls, so clicking one selects rather than opening the viewer.
+The image crop tool has draggable corners, a movable crop area, locked/free aspect ratios and guides reaching the media edges. Its bounds apply to the edited preview and PNG copy. Hover checkboxes are independent circular controls, so clicking one selects rather than opening the viewer.
 
 Run the tests in the packaged Python environment (Pillow and cryptography required) with `python3 -m unittest -v`. They cover layout/crop geometry, discovery, HTTP requests, WebP/AVIF/JPEG decoding, cache persistence/isolation/coalescing and encrypted copy integrity. Native tests use generated media and a loopback fixture, including actual pointer album navigation, infinite scroll, account create/edit, utility results, PIN elevation and encrypted originals. No production account was mutated during verification.
 
@@ -67,7 +67,7 @@ Search toggles from the sidebar and replaces the main header controls; Escape or
 
 **Hamburger → Folder sync** configures upload-only rules per account: library or album destination, include/exclude subfolders, and an explicit unlimited-depth switch or maximum subfolder depth. Enabling uploads explicitly stores the session in the system keyring and installs/enables the app-owned `gallery-folder-sync.service` user service. It continues while the app is closed. A private SQLite journal skips unchanged files, checksum checks avoid duplicate uploads, changed files upload as new assets, and a stable-file check defers files still being written. The service never edits originals or mirrors deletions. Pausing/removing a rule stops it at file boundaries; an in-flight upload can finish. Disabling all accounts stops the service. No service was enabled against a production account during development.
 
-Folder sync, sharing and remote playback were verified against loopback fixtures, not the user's production server. Google Photos processing/AI parity, offline locked-vault browsing remain unfinished.
+Folder sync, sharing and remote playback were verified against loopback fixtures, not the user's production server. Advanced AI editing and offline locked-vault browsing remain unfinished.
 
 The app is now **Galeria**, application ID `com.neg-zero.Galeria`, executable `galeria`. Desktop Open With accepts supported image/video files and directories; a single file opens in the viewer. Existing `gallery` configuration/cache/state directories and the folder-sync service name are retained for compatibility. Keyring reads fall back to the old schema and migrate entries to the Galeria schema; sign-out clears both. No stored library, sync rule, or encrypted vault key is discarded.
 
@@ -89,7 +89,7 @@ rotation, Original/Vivid/Warm/Cool/Mono/Noir filters, and a five-second encoded
 preview. Save a copy exports H.264/AAC MP4 using FFmpeg, with cancellation and
 atomic replacement. It refuses to overwrite the original. Remote edits read the
 original through the authenticated loopback bridge; tokens never reach FFmpeg.
-The existing image editor remains a preview; this video export path is connected.
+Photos export PNG copies through the separate image editor described above.
 
 Visited grid results, date covers and collection thumbnails stay in bounded RAM
 caches. Returning to a cached grid does not replace it with the loading page.
@@ -224,3 +224,5 @@ Album cards use one native hover background. Owned album menus include
 caches/sidebar/pins, and leaves media in the library, following
 [Immich3.3.3's album deletion endpoint](https://github.com/immich-app/immich/blob/v3.3.3/server/src/services/album.service.ts#L153).
 Empty cached album views remain visible after deleting the last album.
+
+The timeline date follows the newest visible month in All Photos and visible year in the date tiers. The small inline month heading hands off to an animated header label only after it scrolls out of view, avoiding duplicate dates.

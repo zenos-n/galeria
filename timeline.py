@@ -376,6 +376,7 @@ class Mosaic(Gtk.Widget):
             self.queue_resize()
             if t>=1:
                 self.tick=0
+                self.on_window()
                 return GLib.SOURCE_REMOVE
             return GLib.SOURCE_CONTINUE
         self.tick=self.add_tick_callback(frame)

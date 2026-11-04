@@ -19,6 +19,7 @@ class PhotoStage(Gtk.Widget):
         self.rotation = 0
         self.flipped = False
         self.crop_ratio = None
+        self.render_ratio = None
         self.top_inset = 52
         self.bottom_inset = 0
         self.immersive = False
@@ -69,8 +70,8 @@ class PhotoStage(Gtk.Widget):
     def destination(self, width, height):
         if self.frozen_destination:
             return self.frozen_destination
-        ratio = self.crop_ratio or self.ratio
-        if self.rotation % 180:
+        ratio = self.render_ratio or self.crop_ratio or self.ratio
+        if self.render_ratio is None and self.rotation % 180:
             ratio = 1 / ratio
         margin = 0 if self.immersive else 20
         bottom = self.bottom_inset() if callable(self.bottom_inset) else self.bottom_inset

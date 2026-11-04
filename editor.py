@@ -1,10 +1,17 @@
-"""Editor layout preview. No file reads or image processing."""
+"""Native controls for photo editing and the separate video editor."""
 from gi.repository import Adw, Gtk
 from panels import text, icon_button
 
+from photo_edit import ADJUSTMENTS
+from photo_markup import PALETTE
 CATEGORIES = ['Crop','Adjust','Markup']
-ADJUSTMENTS = ['Brightness','Contrast','White point','Highlights','Shadows','Black point',
-               'Saturation','Warmth','Tint','Skin tone','Blue tone','Pop','Sharpen','Denoise','Vignette','HDR effect']
+
+
+def snap_neutral(scale,scroll,value):
+    adjustment=scale.get_adjustment()
+    if scroll==Gtk.ScrollType.JUMP and abs(value)<=(adjustment.get_upper()-adjustment.get_lower())*.015:
+        scale.set_value(0);return True
+    return False
 
 
 def build_editor(viewer):
@@ -12,6 +19,8 @@ def build_editor(viewer):
         from video_editor import VideoEditor
         viewer.video_editor=VideoEditor(viewer)
         return viewer.video_editor
+    from photo_ui import PhotoEditor
+    viewer.photo_editor=photo=PhotoEditor(viewer)
     box=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=12)
     box.add_css_class('editor-bar')
     categories=Adw.ToggleGroup(halign=Gtk.Align.CENTER)
@@ -41,6 +50,7 @@ def build_editor(viewer):
         flow=Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,homogeneous=True,
                          min_children_per_line=2,max_children_per_line=min(8,len(names)),
                          row_spacing=6,column_spacing=6,halign=Gtk.Align.CENTER)
+        flow.add_css_class('editor-tools')
         first=None
         controls=[]
         for name in names:
@@ -52,12 +62,16 @@ def build_editor(viewer):
             choice=Gtk.ToggleButton(child=column)
             choice.add_css_class('flat')
             choice.add_css_class('editor-choice')
+            choice.set_tooltip_text(name)
             if first:
                 choice.set_group(first)
             else:
                 first=choice
                 choice.set_active(True)
             controls.append(choice)
+            def choose_tool(widget,name=name):
+                if widget.get_active():photo.markup.tool=name;photo.markup.set_cursor_from_name('text' if name=='Text' else 'crosshair')
+            choice.connect('toggled',choose_tool)
             flow.insert(choice,-1)
         viewer.editor_choices[key]=controls
         container=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,hexpand=True)
@@ -75,30 +89,35 @@ def build_editor(viewer):
     viewer.crop_dropdown=dropdown
     dropdown.connect('notify::selected',viewer.change_crop)
     tools.append(dropdown)
-    tools.append(Gtk.Button(label='Perspective'))
     crop.append(tools)
     straighten=Gtk.Box(spacing=14,halign=Gtk.Align.CENTER)
     straighten.append(text('Straighten'))
-    scale=Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL,-45,45,1)
+    scale=Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL,-45,45,.1)
     scale.set_size_request(270,-1)
     scale.set_value(0)
+    scale.add_mark(0,Gtk.PositionType.BOTTOM,None)
+    scale.connect('change-value',snap_neutral)
+    photo.straighten_slider=scale
+    def straighten_changed(widget):photo.straighten=widget.get_value();photo.queue()
+    scale.connect('value-changed',straighten_changed)
     straighten.append(scale)
     crop.append(straighten)
     add_page('Crop',crop)
     adjust=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=10)
-    tool_row=Gtk.Box(spacing=4,halign=Gtk.Align.CENTER)
     groups=Adw.ToggleGroup(halign=Gtk.Align.CENTER)
     groups.add_css_class('flat')
     for title in ['Light','Color','Detail']:
         groups.add(Adw.Toggle(name=title,label=title))
     adjust.append(groups)
     adjustment_pages=Gtk.Stack(hhomogeneous=True,vhomogeneous=True,hexpand=True)
+    selections={}
     for name,names in [('Light',ADJUSTMENTS[:6]),('Color',ADJUSTMENTS[6:11]),('Detail',ADJUSTMENTS[11:])]:
         row=Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,homogeneous=False,
                         min_children_per_line=2,max_children_per_line=6,
                         row_spacing=4,column_spacing=4,halign=Gtk.Align.CENTER)
         row.add_css_class('editor-tools')
         first=None
+        selections[name]=names[0]
         for title in names:
             choice=Gtk.ToggleButton(label=title)
             choice.add_css_class('flat')
@@ -109,8 +128,13 @@ def build_editor(viewer):
                 first=choice
                 choice.set_active(True)
             row.insert(choice,-1)
+            def selected(widget,title=title,group=name):
+                if widget.get_active():selections[group]=title;photo.select(title)
+            choice.connect('toggled',selected)
         adjustment_pages.add_named(row,name)
-    groups.connect('notify::active-name',lambda w,_:adjustment_pages.set_visible_child_name(w.get_active_name()))
+    def change_group(widget,_):
+        adjustment_pages.set_visible_child_name(widget.get_active_name());photo.select(selections[widget.get_active_name()])
+    groups.connect('notify::active-name',change_group)
     groups.set_active_name('Light')
     adjust.append(adjustment_pages)
     slider=Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL,-100,100,1)
@@ -118,7 +142,10 @@ def build_editor(viewer):
     slider.set_halign(Gtk.Align.CENTER)
     slider.set_value(0)
     slider.set_draw_value(True)
-    slider.connect('value-changed',lambda _:viewer.adjust())
+    slider.set_round_digits(0)
+    photo.slider=slider;photo.select('Brightness')
+    slider.connect('change-value',snap_neutral)
+    slider.connect('value-changed',photo.changed)
     viewer.scales.append(slider)
     adjust.append(slider)
     add_page('Adjust',adjust)
@@ -130,10 +157,16 @@ def build_editor(viewer):
         swatch=Gtk.ToggleButton(tooltip_text=color.title(),width_request=28,height_request=28,valign=Gtk.Align.CENTER)
         swatch.add_css_class('color-swatch')
         swatch.add_css_class('swatch-'+color)
+        if viewer.color_swatches:swatch.set_group(viewer.color_swatches[0])
+        else:swatch.set_active(True)
+        swatch.connect('toggled',lambda widget,color=color:setattr(photo.markup,'color',PALETTE[color]) if widget.get_active() else None)
         viewer.color_swatches.append(swatch)
         frame=Gtk.AspectFrame(child=swatch,ratio=1,obey_child=False,halign=Gtk.Align.CENTER,valign=Gtk.Align.CENTER)
         tools.append(frame)
-    tools.append(Gtk.Entry(placeholder_text='Add text',width_chars=14))
+    entry=Gtk.Entry(placeholder_text='Add text',width_chars=14,max_length=256)
+    entry.connect('changed',lambda widget:setattr(photo.markup,'text',widget.get_text()));tools.append(entry)
+    photo.undo=Gtk.Button(label='Undo',sensitive=False)
+    photo.undo.connect('clicked',lambda _:photo.markup.undo());tools.append(photo.undo)
     markup.append(tools)
     add_page('Markup',markup)
     clamp=Adw.Clamp(maximum_size=850,tightening_threshold=650,child=stack,hexpand=True)
@@ -143,20 +176,18 @@ def build_editor(viewer):
     reset=Gtk.Button(label='Reset')
     reset.connect('clicked',lambda _:viewer.reset_edits())
     compare=Gtk.ToggleButton(label='Compare',tooltip_text='Compare with original')
-    compare.connect('toggled',lambda w:viewer.stage.surface.set_visible(not w.get_active()))
+    photo.compare_button=compare
+    compare.connect('toggled',lambda w:photo.compare(w.get_active()))
     for widget in [reset,compare]:
         footer.append(widget)
-    for title in ['Save a copy','Save']:
-        save=Gtk.Button(label=title)
-        if title=='Save':
-            save.add_css_class('suggested-action')
-        save.connect('clicked',lambda _:notify('Design preview · image files are not changed.'))
-        footer.append(save)
+    photo.save_button=Gtk.Button(label='Save a copy…',sensitive=False,css_classes=['suggested-action'])
+    photo.save_button.connect('clicked',lambda _:photo.save_copy());footer.append(photo.save_button)
     box.append(footer)
 
     def switch_category(group,_):
         stack.set_visible_child_name(group.get_active_name())
         viewer.stage.crop_frame.set_visible(viewer.editing and group.get_active_name()=='Crop')
+        photo.category_changed()
         notify('')
     categories.connect('notify::active-name',switch_category)
     categories.set_active_name('Crop')

@@ -6,7 +6,7 @@
 .sidebar-section { font-size: 11px; font-weight: 600; opacity: .48; margin: 15px 18px 5px; }
 .source-label { font-size: 11px; opacity: .5; margin: 8px 18px 12px; }
 .timeline { background: @window_bg_color; color: @window_fg_color; }
-.timeline-date { font-weight: 500; }
+.timeline-date { font-size: 12px; font-weight: 600; }
 .day-heading { font-size: 12px; font-weight: 600; opacity: .65; }
 .photo-tile { padding: 0; border: 0; border-radius: 0; min-width: 0; min-height: 0; background: alpha(@window_fg_color, .05); }
 .photo-tile:hover { outline: 2px solid alpha(@accent_color, .85); outline-offset: -2px; }

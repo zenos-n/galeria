@@ -197,8 +197,10 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.sidebar_button = button("sidebar-show-symbolic", "Show sidebar", lambda _: self.split.set_show_sidebar(True))
         self.sidebar_button.set_visible(False)
         header.pack_start(self.sidebar_button)
-        self.period = label("January 2026", "timeline-date", margin_start=14)
-        header.pack_start(self.period)
+        self.period = label("", "timeline-date", margin_start=14)
+        self.period_revealer=Gtk.Revealer(child=self.period,transition_type=Gtk.RevealerTransitionType.SLIDE_UP,transition_duration=180,valign=Gtk.Align.CENTER)
+        self.period_revealer.connect('notify::child-revealed',lambda *_:self.update_period())
+        header.pack_start(self.period_revealer)
         self.switcher = Adw.ToggleGroup(valign=Gtk.Align.CENTER)
         self.switcher.add_css_class("round")
         for name, title in [("years", "Years"), ("months", "Months"), ("all", "All Photos")]:
@@ -336,7 +338,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
     def update_header(self):
         active=self.mosaic.selection_mode
         is_library=self.current_page=='library'
-        self.period.set_visible(not self.searching and not active and is_library)
+        self.period_revealer.set_visible(not self.searching and not active and is_library)
         self.switcher.set_visible(not self.searching and not active and is_library)
         self.account_wrapper.set_visible(not self.searching)
         self.upload_button.set_visible(not self.searching)
@@ -476,9 +478,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         if self.client and self.bucket_scope:
             self.bucket_scope={};self.search_library(preserve_folder=True)
         self.scroller.get_vadjustment().set_value(getattr(self.mosaic,'transition_scroll',0))
-        newest=self.media_items[0].created if self.media_items else None
-        self.period.set_label({'all':newest.strftime('%B %Y') if newest else 'Library',
-                               'months':newest.strftime('%Y') if newest else 'Library','years':'Library'}[self.mosaic.mode])
+        self.update_period()
 
     def density(self):
         self.set_density({154: 210, 210: 112, 112: 154}[self.mosaic.target])
@@ -497,7 +497,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.11.4", developer_name="Negative Zero",
+                                 version="0.12.0", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 

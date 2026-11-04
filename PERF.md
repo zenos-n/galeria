@@ -401,3 +401,32 @@ also has an authenticated loopback API/cache test. Existing10kLOD/priority/group
 and fold/cache/media-action/clipboard regressions pass under fatal GTK warnings.
 No production album was deleted. No new frame-time/GPU guarantee is claimed;
 0.10.3 resize measurements remain the recorded benchmark.
+
+## Galeria0.12.0 photo editing and date handoff
+
+Photo controls previously shared a brightness-colored overlay; each adjustment
+now keeps an independent value and applies its own Pillow operation to source
+pixels. Preview processing uses the existing preview executor, one job in flight
+and a70ms debounce. Pending values replace stale renders, with1200px maximum
+preview dimensions. Pointer input snaps around zero; keyboard input retains
+fine steps. Live normalized markup uses a Cairo overlay; completed strokes are
+rendered into previews outside Markup and into chosen-path PNG copies. Original
+files are never replaced. If a remote original lacks a decoder, save-copy uses
+the server preview and explicitly reports its resolution fallback.
+
+On a generated1600x1200 image, three1200px preview runs measured39–47ms for
+Contrast,49–51ms for Contrast/Saturation/Vignette and231–243ms for all16 controls.
+These are worker render times, not display frame-time or GPU measurements.
+Full-resolution export remains more expensive and runs off the GTK thread.
+
+The date label comes from viewport geometry rather than the first media item.
+The inline month heading yields to a180ms header revealer once it leaves the
+viewport; the old label conceals before changing to the next visible heading.
+No additional layout or image requests are required for this handoff.
+
+69unit checks pass. A real private-X11 pointer fixture verifies August/July2016
+header handoff, independent tool values, neutral drag snapping and fine keyboard
+steps, pen/redact/text gestures, Undo/Reset, full-size PNG output, original-file
+protection and explicit preview-resolution fallback. Existing native clipboard,
+video playback/edit/export, motion/media actions, startup/account/download and
+reconnect-index regressions pass. No production media edits were used.

@@ -65,6 +65,7 @@ class LibraryUI:
         from copy_ui import clear_locked_clipboard
         clear_locked_clipboard(self)
         self.data_stopped=True
+        if self.viewer:self.viewer.dispose_editors()
         if self.refresh_timer:GLib.source_remove(self.refresh_timer);self.refresh_timer=0
         self.data_generation+=1
         self.io.shutdown(wait=False,cancel_futures=True)
@@ -117,6 +118,7 @@ class LibraryUI:
         from sync_service import disable_account
         token=client.token;client.token=None;client.locked_until=0
         if self.viewer:
+            self.viewer.dispose_editors()
             self.root_overlay.remove_overlay(self.viewer);self.viewer.stage.dispose()
             self.viewer=None;self.split.set_can_target(True)
         self.sync_cancel.set();self.vault=None
@@ -250,6 +252,7 @@ class LibraryUI:
         if refresh:
             if self.viewer:
                 viewer=self.viewer
+                viewer.dispose_editors()
                 self.root_overlay.remove_overlay(viewer);viewer.stage.dispose()
                 self.viewer=None;self.split.set_can_target(True)
                 self.pending_media=None
@@ -760,8 +763,7 @@ class LibraryUI:
         old.dispose()
         mosaic.update_selection()
         self.selection_changed()
-        newest=self.media_items[0].created if self.media_items else None
-        self.period.set_label('Library' if mosaic.mode=='years' else newest.strftime('%Y' if mosaic.mode=='months' else '%B %Y') if newest else 'Library')
+        self.update_period()
         self.load_more.set_visible(False)
         self.load_more.set_sensitive(True)
         self.stack.set_visible_child_name('library' if self.media_items or buckets and mosaic.mode!='all' else 'status')
@@ -784,12 +786,33 @@ class LibraryUI:
 
     def texture_key(self,item):return item.id+str(item.metadata.get('updatedAt',''))
 
+    def update_period(self):
+        if self.data_stopped:return
+        mosaic=self.mosaic
+        if self.current_page!='library' or mosaic.tick:return
+        top,height=mosaic.visible_range();title='';reveal=False
+        if mosaic.mode=='all':
+            key=next((key for key,(a,b) in mosaic.month_extents.items() if b>top and a<top+height),None)
+            if key:
+                month=next((month for month in mosaic.months if month[0]==key),None)
+                title=month[1] if month else ''
+                heading=next((heading for month,heading in zip(mosaic.months,mosaic.headings) if month[0]==key),None)
+                rect=mosaic.rendered.get(heading)
+                reveal=bool(rect and rect[1]+rect[3]<=top)
+        else:
+            cards=mosaic.year_cards if mosaic.mode=='years' else mosaic.month_cards
+            key=next((key for key,card in cards.items() if (rect:=mosaic.rendered.get(card)) and rect[1]+rect[3]>top and rect[1]<top+height),None)
+            if key:title=key[:4];reveal=True
+        if title!=self.period.get_label() and (reveal or not self.period.get_child_visible()):self.period.set_label(title)
+        self.period_revealer.set_reveal_child(reveal)
+
     def load_visible_thumbnails(self,*_):
         if not hasattr(self,'mosaic') or not hasattr(self,'load_more'):return
         self.year_scrollbar.queue_refresh()
         adjustment=self.scroller.get_vadjustment()
         top=adjustment.get_value();height=adjustment.get_page_size()
         mosaic=self.mosaic
+        self.update_period()
         if mosaic.indexed:self.request_timeline_metadata()
         wanted={}
         tiles=[]
@@ -952,5 +975,7 @@ class LibraryUI:
             return decode_image(item.path if item.path else client.image_bytes(item,True,vault),2400)
         def ready(value):
             if not self.viewer or self.viewer.stage!=stage:return
-            stage.set_texture(self.texture_from_pixels(value))
+            photo=getattr(self.viewer,'photo_editor',None)
+            if photo:photo.set_source(value)
+            else:stage.set_texture(self.texture_from_pixels(value))
         self.background(load,ready,lambda message:self.notice('Preview could not load: '+message),images='preview')
