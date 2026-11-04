@@ -34,6 +34,7 @@ class LibraryUI:
         self.refresh_timer=GLib.timeout_add_seconds(15,self.refresh_remote)
         self.pending_images=set()
         self.loading_more=False
+        self.scroll_input_serial=0
         self.pending_media=None
         self.vault=None
         self.sync_cancel=threading.Event()
@@ -44,6 +45,7 @@ class LibraryUI:
         self.bucket_scope={}
         self.io=ThreadPoolExecutor(max_workers=3,thread_name_prefix='gallery-io')
         self.images=ImageQueue(4);self.image_wanted={}
+        self.cached_images=ImageQueue(2)
         self.previews=ThreadPoolExecutor(max_workers=2,thread_name_prefix='gallery-preview')
         self.video_io=ThreadPoolExecutor(max_workers=2,thread_name_prefix='gallery-video')
         self.video_proxy=None;self.video_prefetch=set()
@@ -67,6 +69,7 @@ class LibraryUI:
         self.data_generation+=1
         self.io.shutdown(wait=False,cancel_futures=True)
         self.images.shutdown(wait=False,cancel_futures=True)
+        self.cached_images.shutdown(wait=False,cancel_futures=True)
         self.previews.shutdown(wait=False,cancel_futures=True)
         self.video_io.shutdown(wait=False,cancel_futures=True)
         if self.viewer and self.viewer.stage.video_player:self.viewer.stage.video_player.stop()
@@ -77,6 +80,10 @@ class LibraryUI:
         return False
 
     def save_preferences(self):preferences_write(self.preferences)
+
+    def user_scrolled(self,*_):
+        self.scroll_input_serial+=1
+        return False
 
     def get_video_proxy(self):
         if self.video_proxy is None:
@@ -319,6 +326,7 @@ class LibraryUI:
             def work():
                 result=client.update_assets(ids,{'visibility':'locked'})
                 client.media_cache().forbid(id+':' for id in ids)
+                client.video_cache().forbid('video-prefix:'+id for id in ids)
                 return result
             self.background(work,done)
         if client.locked_until<=time.monotonic():
@@ -337,7 +345,7 @@ class LibraryUI:
             if generation!=self.data_generation:
                 return None
             return work()
-        future=self.images.submit(execute,priority) if images is True else (self.video_io if images=='video' else self.previews if images=='preview' else self.io).submit(execute)
+        future=(self.cached_images if images=='cached' else self.images).submit(execute,priority) if images is True or images=='cached' else (self.video_io if images=='video' else self.previews if images=='preview' else self.io).submit(execute)
         def completed(result):
             if result.cancelled():
                 return
@@ -686,7 +694,7 @@ class LibraryUI:
                 a,b=index.ranges[key];previous=index.items[a:b];changed=index.apply(key,items)
                 if self.mosaic.indexed and self.current_page=='library':
                     if self.viewer:self.pending_media=(index.items,True)
-                    elif changed or [item.id for item in previous]!=[item.id for item in index.items[index.ranges[key][0]:index.ranges[key][1]]]:self.set_library_items(index.items,append=True,reflow=True)
+                    elif changed or previous and not previous[0].metadata.get('placeholder') and [item.id for item in previous]!=[item.id for item in index.items[index.ranges[key][0]:index.ranges[key][1]]]:self.set_library_items(index.items,append=True,reflow=True)
                     elif previous!=index.items[index.ranges[key][0]:index.ranges[key][1]]:
                         a,b=index.ranges[key];self.media_items[a:b]=index.items[a:b]
                         self.mosaic.update_bucket(key,index.items[a:b])
@@ -703,6 +711,7 @@ class LibraryUI:
             self.background(load,loaded,failed)
 
     def set_library_items(self,items,append=False,reflow=False):
+        scroll_input=self.scroll_input_serial
         position=self.scroller.get_vadjustment().get_value() if append or self.bucket_scope else 0
         self.loading_more=True
         self.media_items=sorted({item.id:item for item in items}.values(),key=lambda item:item.created,reverse=True)
@@ -764,7 +773,7 @@ class LibraryUI:
         def settle():
             if self.mosaic!=mosaic:return False
             self.loading_more=False
-            self.scroller.get_vadjustment().set_value(position)
+            if self.scroll_input_serial==scroll_input and not self.year_scrollbar.held:self.scroller.get_vadjustment().set_value(position)
             self.load_visible_thumbnails()
             return False
         GLib.timeout_add(32,settle)
@@ -873,10 +882,16 @@ class LibraryUI:
         item=tile.media_item
         client=self.client
         vault=self.vault
+        cache=(vault if item.metadata.get('visibility')=='locked' else client.media_cache()) if client and not item.path else None
+        if cache and not item.metadata.get('visibility') and (client.locked_until or client.server_lock_pending):cache=None
+        cached=cache and cache.has(client.image_key(item))
         proxy=self.get_video_proxy() if client and item.kind=='VIDEO' else None
         def load():
             if self.mosaic!=mosaic or pending_key not in self.image_wanted:return None
-            if item.path:
+            if cached:
+                data=cache.get(client.image_key(item))
+                if data is None:return None
+            elif item.path:
                 stat=Path(item.path).stat()
                 data=self.disk_cache.fetch(f'{item.path}:{stat.st_mtime_ns}:{stat.st_size}',lambda:thumbnail_bytes(item.path))
             else:
@@ -889,8 +904,8 @@ class LibraryUI:
                     finally:proxy.unregister(uri)
             try:return decode_image(data)
             except (OSError,ValueError):
-                cache=vault if item.metadata.get('visibility')=='locked' else client.media_cache() if client else self.disk_cache
-                cache.remove(client.image_key(item) if client else f'{item.path}:{stat.st_mtime_ns}:{stat.st_size}') if cache else None
+                storage=vault if item.metadata.get('visibility')=='locked' else client.media_cache() if client else self.disk_cache
+                storage.remove(client.image_key(item) if client else f'{item.path}:{stat.st_mtime_ns}:{stat.st_size}') if storage else None
                 raise LibraryError('The image could not be decoded. Refresh to retry.') from None
         def ready(value):
             self.pending_images.discard(pending_key)
@@ -909,7 +924,7 @@ class LibraryUI:
             tile.retry_after=time.monotonic()+60
             tile.set_tooltip_text(item.filename+' · '+message)
             tile.media_icon.set_from_icon_name('dialog-error-symbolic')
-        self.background(load,ready,failed,images=True,priority=lambda:self.image_wanted.get(pending_key))
+        self.background(load,ready,failed,images='cached' if cached else True,priority=lambda:self.image_wanted.get(pending_key))
 
     def texture_from_pixels(self,value):
         width,height,data=value

@@ -274,7 +274,12 @@ class Mosaic(Gtk.Widget):
             rect=self.target_layout(self.last_width)[0].get(anchor)
             parent=self.get_parent()
             while parent and not isinstance(parent,Gtk.ScrolledWindow):parent=parent.get_parent()
-            if rect and parent:GLib.idle_add(lambda:(parent.get_vadjustment().set_value(rect[1]+offset),False)[1])
+            if rect and parent:
+                root=self.get_root();scroll_input=getattr(root,'scroll_input_serial',0)
+                def restore():
+                    if self.get_parent() and getattr(root,'scroll_input_serial',0)==scroll_input and not getattr(getattr(root,'year_scrollbar',None),'held',False):parent.get_vadjustment().set_value(rect[1]+offset)
+                    return False
+                GLib.idle_add(restore)
         self.queue_resize()
 
     def set_mode(self,mode):

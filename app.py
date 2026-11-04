@@ -121,7 +121,6 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         menu.append('Folder sync','win.sync')
         menu.append("Preferences", "win.preferences")
         menu.append("About Galeria", "win.about")
-        menu.append('Quit Galeria','app.quit')
         menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
         menu_button.add_css_class("flat")
         header.pack_end(menu_button)
@@ -239,6 +238,11 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         adjustment.connect('value-changed',self.scroll_changed)
         adjustment.connect('changed',self.load_visible_thumbnails)
         self.scroller.add_css_class("timeline")
+        scroll_input=Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.BOTH_AXES,propagation_phase=Gtk.PropagationPhase.CAPTURE)
+        scroll_input.connect('scroll',self.user_scrolled);self.scroller.add_controller(scroll_input)
+        scroll_keys=Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+        scroll_keys.connect('key-pressed',lambda _,key,*args:self.user_scrolled() if key in (Gdk.KEY_Up,Gdk.KEY_Down,Gdk.KEY_Page_Up,Gdk.KEY_Page_Down,Gdk.KEY_Home,Gdk.KEY_End) else False)
+        self.scroller.add_controller(scroll_keys)
         self.mosaic = Mosaic(self.open_viewer,[])
         self.scroller.set_child(self.mosaic)
         from year_scroll_ui import YearScrollbar
@@ -297,6 +301,8 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
     def key_pressed(self, _controller, keyval, _keycode, state):
         if self.viewer:
             return self.viewer.on_key(_controller, keyval, _keycode, state)
+        if keyval in (Gdk.KEY_d,Gdk.KEY_D) and state & Gdk.ModifierType.SHIFT_MASK and not state & (Gdk.ModifierType.CONTROL_MASK|Gdk.ModifierType.ALT_MASK|Gdk.ModifierType.SUPER_MASK) and not isinstance(self.get_focus(),Gtk.Editable) and not self.get_visible_dialog() and self.mosaic.selection_mode and self.mosaic.selected:
+            self.download_items([self.mosaic.tiles[i].media_item for i in sorted(self.mosaic.selected)]);return True
         if keyval==Gdk.KEY_Escape and self.searching:
             self.set_searching(False);return True
         if keyval == Gdk.KEY_f and state & Gdk.ModifierType.CONTROL_MASK:
@@ -357,7 +363,6 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.hamburger_menu.remove_all()
         for title,action in [('Choose library…','source'),('Refresh library','refresh'),('Folder sync','sync')]+([('Administration','admin')] if admin else [])+[('Preferences','preferences'),('About Galeria','about')]:
             self.hamburger_menu.append(title,'win.'+action)
-        self.hamburger_menu.append('Quit Galeria','app.quit')
         self.avatar.set_text(self.client.user.get('name','') if self.client else 'Galeria')
         self.avatar.set_show_initials(bool(self.client))
         self.avatar.set_custom_image(None)
@@ -492,7 +497,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.11.2", developer_name="Negative Zero",
+                                 version="0.11.3", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 

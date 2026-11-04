@@ -41,7 +41,7 @@ class VideoProxy:
 
     def preload(self,client,item,vault=None):
         if not self.authorized(client,item):return
-        cache=vault if item.metadata.get('visibility')=='locked' else client.media_cache()
+        cache=vault if item.metadata.get('visibility')=='locked' else client.video_cache()
         if cache is None:return
         key=self.prefix_key(item)
         def load():
@@ -64,7 +64,7 @@ class VideoProxy:
         if not source:handler.send_error(404);return
         client,item,vault,original=source
         if not self.authorized(client,item):handler.send_error(403);return
-        cache=vault if item.metadata.get('visibility')=='locked' else client.media_cache()
+        cache=vault if item.metadata.get('visibility')=='locked' else client.video_cache()
         packet=cache.get(self.prefix_key(item)) if cache and not original else None
         prefix=b'';metadata=None
         if packet:

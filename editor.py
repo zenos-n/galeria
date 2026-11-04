@@ -2,10 +2,9 @@
 from gi.repository import Adw, Gtk
 from panels import text, icon_button
 
-CATEGORIES = ['Suggestions','Crop','Adjust','Filters','Markup','Actions']
+CATEGORIES = ['Crop','Adjust','Markup']
 ADJUSTMENTS = ['Brightness','Contrast','White point','Highlights','Shadows','Black point',
                'Saturation','Warmth','Tint','Skin tone','Blue tone','Pop','Sharpen','Denoise','Vignette','HDR effect']
-ACTIONS = ['Magic Eraser','Unblur','Portrait blur','Portrait light','Color focus','Sky','Best Take','Auto frame']
 
 
 def build_editor(viewer):
@@ -38,26 +37,17 @@ def build_editor(viewer):
         widget.set_halign(Gtk.Align.FILL)
         stack.add_named(widget,name)
 
-    def choices(names,key,previews=False,icon='gallery-magic-wand-symbolic'):
+    def choices(names,key):
         flow=Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,homogeneous=True,
                          min_children_per_line=2,max_children_per_line=min(8,len(names)),
                          row_spacing=6,column_spacing=6,halign=Gtk.Align.CENTER)
         first=None
         controls=[]
-        for i,name in enumerate(names):
+        for name in names:
             column=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=7)
-            if previews:
-                image=Gtk.Image(icon_name='gallery-image-symbolic',pixel_size=24,
-                                width_request=70,height_request=48)
-                image.add_css_class('filter-preview')
-                image.add_css_class(f'shade-{i%5}')
-                column.append(image)
-            elif key=='Markup':
-                icons={'Pen':'gallery-pencil-symbolic','Highlight':'gallery-marker-symbolic',
-                       'Redact':'gallery-redact-symbolic','Text':'gallery-text-symbolic'}
-                column.append(Gtk.Image(icon_name=icons[name],pixel_size=22,margin_top=4))
-            elif key=='Actions':
-                column.append(Gtk.Image(icon_name=icon,pixel_size=22,margin_top=4))
+            icons={'Pen':'gallery-pencil-symbolic','Highlight':'gallery-marker-symbolic',
+                   'Redact':'gallery-redact-symbolic','Text':'gallery-text-symbolic'}
+            column.append(Gtk.Image(icon_name=icons[name],pixel_size=22,margin_top=4))
             column.append(text(name,wrap=True,justify=Gtk.Justification.CENTER))
             choice=Gtk.ToggleButton(child=column)
             choice.add_css_class('flat')
@@ -74,7 +64,6 @@ def build_editor(viewer):
         container.append(flow)
         return container
 
-    add_page('Suggestions',choices(['Original','Enhance','Dynamic','AI Enhance'],'Suggestions',True))
     crop=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=18)
     tools=Gtk.Box(spacing=10,halign=Gtk.Align.CENTER)
     tools.append(icon_button('gallery-rotate-acw-symbolic','Rotate left',lambda _:viewer.rotate(-90)))
@@ -108,6 +97,7 @@ def build_editor(viewer):
         row=Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,homogeneous=False,
                         min_children_per_line=2,max_children_per_line=6,
                         row_spacing=4,column_spacing=4,halign=Gtk.Align.CENTER)
+        row.add_css_class('editor-tools')
         first=None
         for title in names:
             choice=Gtk.ToggleButton(label=title)
@@ -132,7 +122,6 @@ def build_editor(viewer):
     viewer.scales.append(slider)
     adjust.append(slider)
     add_page('Adjust',adjust)
-    add_page('Filters',choices(['Original','Vivid','Warm','Cool','Mono','Noir'],'Filters',True))
     markup=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=18)
     markup.append(choices(['Pen','Highlight','Redact','Text'],'Markup'))
     tools=Gtk.Box(spacing=10,halign=Gtk.Align.CENTER)
@@ -147,7 +136,6 @@ def build_editor(viewer):
     tools.append(Gtk.Entry(placeholder_text='Add text',width_chars=14))
     markup.append(tools)
     add_page('Markup',markup)
-    add_page('Actions',choices(ACTIONS,'Actions'))
     clamp=Adw.Clamp(maximum_size=850,tightening_threshold=650,child=stack,hexpand=True)
     box.append(clamp)
     box.append(viewer.tool_message)
@@ -171,5 +159,5 @@ def build_editor(viewer):
         viewer.stage.crop_frame.set_visible(viewer.editing and group.get_active_name()=='Crop')
         notify('')
     categories.connect('notify::active-name',switch_category)
-    categories.set_active_name('Suggestions')
+    categories.set_active_name('Crop')
     return box

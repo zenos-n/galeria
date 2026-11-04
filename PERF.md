@@ -300,6 +300,37 @@ unfocused-update tests also pass with fatal GTK warnings. No synthetic productio
 media changes or automated physical-display input.0.10.3 resize measurements and
 remaining ratio-scan limit are unchanged; live GPU performance is not remeasured.
 
+## Galeria0.11.3 cache quotas and scroll continuity
+
+Read-only cache inspection found294 video-prefix files using489.4MiB of511.5MiB
+(95.7%) in the shared ordinary cache. Give video prefixes their own128MiB cache,
+retaining512MiB for image/metadata entries. Migrate existing packet files by
+their preserved hashed names and prune only the video namespace. Encrypted vault
+data stays separate; Clear cache and moving assets to Locked cover both ordinary
+namespaces. Migration/eviction tests retain thumbnail and metadata bytes.
+
+Previously all disk hits waited in the same four-worker image pool as HTTP misses.
+Two viewport-prioritized cache workers now decode known disk hits independently;
+stale jobs are discarded and disk misses return to the regular queue. A native
+fixture holds all four HTTP workers behind a gate: cached visible pixels become
+ready while that gate remains closed. No new GPU/frame-time claim is made.
+
+Initial placeholder-to-metadata hydration had incorrectly entered the upload
+reflow path because every placeholder has a new asset ID. Hydrate equal-sized
+ranges in place; animate membership changes only for previously populated data.
+The native fixture fills three months without replacing Mosaic or moving scroll.
+Delayed grid/ratio anchor corrections yield to newer wheel/key/year-slider input
+and a held year scrollbar, instead of overriding the user's next scroll.
+
+Clipboard checks use actual private-display right clicks and an independent
+process reading both image pixels and the original file on X11 and nested
+Wayland. The0.11.2 implementation fails the unsupported-original case with
+"No compatible transfer format found" after reporting success: it offered only a
+file URI. Prefer bitmap content and fall back to the server preview if the
+original cannot be decoded. Locked clipboard cleanup and original byte retention
+remain covered. Native checks also exercise Shift+D current/selection download,
+the three photo-editor sections, selected Contrast and the menu without Quit.
+
 ## Galeria0.11.2 upload arrivals and album pins
 
 Count changes previously published a replacement date index with placeholders for

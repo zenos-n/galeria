@@ -29,16 +29,18 @@ def copy_media(window,item):
             for old in root.iterdir():
                 if old!=folder and old.is_dir():shutil.rmtree(old)
         try:pixels=decode_image(path,4096) if item.kind=='IMAGE' else None
-        except (OSError,ValueError):pixels=None
+        except (OSError,ValueError):
+            pixels=decode_image(client.image_bytes(item,True,window.vault),4096) if client and item.kind=='IMAGE' else None
         return path,pixels,temporary
     def ready(value):
         path,pixels,temporary=value;providers=[]
-        if path:providers.append(Gdk.ContentProvider.new_for_value(Gdk.FileList.new_from_list([Gio.File.new_for_path(str(path))])))
         if pixels:providers.append(Gdk.ContentProvider.new_for_value(GObject.Value(Gdk.Texture.__gtype__,window.texture_from_pixels(pixels))))
+        if path:providers.append(Gdk.ContentProvider.new_for_value(Gdk.FileList.new_from_list([Gio.File.new_for_path(str(path))])))
         provider=Gdk.ContentProvider.new_union(providers)
         if locked:
             clear_locked_clipboard(window);window.locked_clipboard=(provider,temporary)
-        window.get_clipboard().set_content(provider);window.notice('Media copied.')
+        copied=window.get_clipboard().set_content(provider)
+        window.notice('Media copied.' if copied else 'Could not copy this media. Try again.')
     window.background(work,ready)
 
 

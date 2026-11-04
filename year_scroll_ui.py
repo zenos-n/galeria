@@ -67,6 +67,7 @@ class YearScrollbar(Gtk.Overlay):
     def seek(self,*_):
         fraction=self.bar.get_adjustment().get_value()/.96
         if not self.updating:
+            self.window.user_scrolled()
             scroll=self.window.scroller.get_vadjustment()
             self.model=YearScale(self.window.mosaic.month_extents,max(0,scroll.get_upper()-scroll.get_page_size()))
             scroll.set_value(self.model.scroll(fraction))

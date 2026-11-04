@@ -6,6 +6,7 @@ import json
 import os
 import time
 import re
+import threading
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit, urljoin
@@ -100,6 +101,7 @@ class ImmichClient:
         self.user = None
         self.http = build_opener(NoRedirects())
         self.cache=None
+        self.video_prefix_cache=None;self.video_cache_lock=threading.Lock()
         self.locked_until=0
         self.server_lock_pending=False
         self.modern_search=True
@@ -112,6 +114,15 @@ class ImmichClient:
             from cache import MediaCache
             self.cache=MediaCache(self.identity)
         return self.cache
+
+    def video_cache(self):
+        with self.video_cache_lock:
+            if self.video_prefix_cache is None:
+                from cache import MediaCache
+                ordinary=self.media_cache()
+                self.video_prefix_cache=MediaCache(self.identity+'|video-prefixes',root=ordinary.root.parent.parent,budget=128*1024*1024)
+                ordinary.move_video_prefixes(self.video_prefix_cache)
+            return self.video_prefix_cache
 
     def request(self, path, data=None, method=None, binary=False):
         headers = {'Accept': 'application/octet-stream' if binary else 'application/json'}

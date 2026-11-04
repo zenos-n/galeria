@@ -95,6 +95,7 @@ def activate(app):
  global window,rail
  Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
  window=Adw.ApplicationWindow(application=app,default_width=800,default_height=700)
+ window.user_scrolled=lambda *args:False
  window.scroller=Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,hexpand=True,vexpand=True)
  canvas=Gtk.DrawingArea(height_request=60000)
  def draw(widget,context,width,height):

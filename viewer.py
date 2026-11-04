@@ -316,6 +316,8 @@ class Viewer(Gtk.Overlay):
         self.chrome_timer=GLib.timeout_add(1400,hide)
 
     def on_key(self,_controller,keyval,_keycode=0,state=0):
+        if keyval in (Gdk.KEY_d,Gdk.KEY_D) and state & Gdk.ModifierType.SHIFT_MASK and not state & (Gdk.ModifierType.CONTROL_MASK|Gdk.ModifierType.ALT_MASK|Gdk.ModifierType.SUPER_MASK) and not self.editing and not isinstance(self.window.get_focus(),Gtk.Editable) and not self.window.get_visible_dialog():
+            self.window.download_items([self.source.media_item]);return True
         if keyval==Gdk.KEY_space and self.editing and getattr(self,'video_editor',None) and not isinstance(self.window.get_focus(),Gtk.Editable):
             self.video_editor.toggle_playback();return True
         if keyval==Gdk.KEY_c and state & Gdk.ModifierType.CONTROL_MASK and not self.editing:

@@ -13,6 +13,24 @@ from imaging import decode_image,duration_label
 
 
 class MediaTests(unittest.TestCase):
+    def test_video_prefix_migration_and_eviction_preserve_thumbnail_cache(self):
+        with TemporaryDirectory() as root:
+            images=MediaCache('account',root,budget=200)
+            video=MediaCache('account|video-prefixes',root,budget=80)
+            header=b'{"total":1000,"type":"video/mp4"}'
+            packet=len(header).to_bytes(4,'big')+header+b'video bytes'
+            images.put('photo::thumbnail',b'photo pixels')
+            images.put('video-prefix:old',packet)
+            images.put('metadata',b'{"count":20}')
+            images.move_video_prefixes(video)
+            self.assertEqual(video.get('video-prefix:old'),packet)
+            self.assertIsNone(images.get('video-prefix:old'))
+            self.assertEqual(images.get('photo::thumbnail'),b'photo pixels')
+            self.assertEqual(images.get('metadata'),b'{"count":20}')
+            for i in range(10):video.put('video-prefix:'+str(i),packet)
+            self.assertLessEqual(video.total_bytes,80)
+            self.assertEqual(images.get('photo::thumbnail'),b'photo pixels')
+
     def test_webp_avif_jpeg_decode(self):
         for format in ('WEBP','AVIF','JPEG'):
             with self.subTest(format=format):

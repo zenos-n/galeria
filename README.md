@@ -13,7 +13,7 @@ The welcome dialog routes **Yes, use Immich** to server/email/password sign-in a
 
 Local mode recursively discovers images and videos without modifying files or following symlinks. Images render thumbnails/previews, including WebP and AVIF, decoded off the GTK thread. Dates currently use filesystem modification times; filename search is local and case-insensitive. Scrolling near the end automatically loads the next batch, preserving scroll position. Images within two viewports above/below are requested; viewer previews have a separate worker queue. Clapper/GStreamer plays local and authenticated remote videos with buffering feedback and native controls. Nearby videos preload a bounded 2 MiB prefix. The loopback range bridge keeps credentials out of player URLs and uses encrypted caching for locked videos.
 
-Ordinary thumbnails/previews are cached on disk with a 512 MB limit, account/server/revision-separated keys and 768 in-memory textures. Metadata snapshots expire after 30 seconds; Refresh bypasses them. Concurrent identical requests are coalesced. Preferences has Clear cache. This does not remove encrypted device copies. Measurements and limits are in PERF.md.
+Ordinary thumbnails/previews are cached on disk with a 512 MB limit, account/server/revision-separated keys and 768 in-memory textures. Video preloads have a separate 128 MB cache; existing video packets migrate without removing thumbnails. Cached thumbnails use a separate decoding queue so HTTP downloads cannot hold them up. Metadata snapshots expire after 30 seconds; Refresh bypasses them. Concurrent identical requests are coalesced. Preferences has Clear cache for both ordinary caches. This does not remove encrypted device copies. Measurements and limits are in PERF.md.
 
 While Galeria is visible, remote changes are checked every 15 seconds. A changed
 loaded month stays on screen until its replacement metadata is ready. Incoming
@@ -36,9 +36,18 @@ Immersive fullscreen uses a black background and fits the media to the full view
 
 The native drop target accepts Gdk.FileList, including both files and folders. Drops and the upload picker open an import review sheet. Only item names and file types are inspected; directory contents are not scanned, and nothing is imported or uploaded.
 
-The editor hides unrelated viewing controls. Its tool inventory follows the categories in [Google Photos' Android editor](https://support.google.com/photos/answer/6128850?hl=en&co=GENIE.Platform%3DAndroid): Suggestions, Crop, Adjust, Filters, Markup and Actions. Ask is intentionally removed. The layout uses centered wrapping choices, Light/Color/Detail adjustment groups and circular color swatches. It includes crop ratios, rotate/mirror, straighten/perspective controls, tonal/color adjustments, filter previews, markup choices, and planned advanced tools such as Magic Eraser, Unblur, Portrait Light and Auto Frame. Save and Save a copy are design controls. **This is not functional Google Photos parity**: image processing, AI models/services, brush engines, editing history and persistence remain unimplemented. No image is modified or saved.
+The photo editor exposes Crop, Adjust and Markup, with centered wrapping choices, Light/Color/Detail adjustment groups and circular color swatches. Adjustment choices have one selected background and retain their keyboard focus outline. Save and Save a copy remain design controls: image processing, brush engines, editing history and persistence are unimplemented. No image is modified or saved. The separate video editor retains its functional trim, crop, rotation and filter export controls.
 
 Multi-selection supports the header selection toggle, checkboxes, Ctrl-click, Shift-click ranges, Ctrl+A, Escape, and a batch-action bar. Local files remain read-only. Trash uses a confirmation and restores from the Trash page rather than deleting permanently.
+
+Shift+D downloads the expanded media or the current selection through the
+save-location picker. It is inactive while editing, typing, or using a dialog.
+Copy media puts image pixels first on the clipboard, alongside the original
+file. If an Immich original cannot be decoded locally, its rendered preview
+supplies the image pixels. Locked images never create ordinary clipboard files.
+Loading month metadata fills existing cells in place; it does not animate a new
+upload. Pending scroll restoration yields to newer scroll input or a held year
+scrollbar. The hamburger menu has no Quit item; Ctrl+Q remains available.
 
 Search sends [Immich semantic/metadata queries](https://docs.immich.app/features/searching/) with filename, path, description, OCR, location, date, camera, exact rating and display filters. People, albums and tags currently accept IDs rather than name pickers. Active filters become removable chips. Server results are paginated; local mode hides server filters and matches real filenames. Photos, videos, favorites, archive and trash views use their corresponding server filters. Screenshots currently match the filename `Screenshot`; full screenshot detection is pending.
 

@@ -134,7 +134,9 @@ def check():
     if tile.media_item.id!='incoming':assert m.rendered[tile][4]==1 and tile.media_texture
    shot('upload-insertion-half');freeze(1);phase=11
   elif phase==11 and not w.loading_more:
-   w.mosaic.set_selection(False);adjustment=w.scroller.get_vadjustment()
+   w.mosaic.set_selection(False);mark=time.monotonic();phase=110
+  elif phase==110 and not w.selection_bar.get_child_revealed() and time.monotonic()-mark>.35:
+   adjustment=w.scroller.get_vadjustment()
    adjustment.set_value(adjustment.get_upper()-adjustment.get_page_size()-20);mark=time.monotonic();phase=12
   elif phase==12 and time.monotonic()-mark>.15:
    old=w.mosaic;top=w.scroller.get_vadjustment().get_value()

@@ -292,12 +292,15 @@ def preferences(window):
     source.add(library)
     general.add(source)
     cache_group=Adw.PreferencesGroup(title='Storage')
-    cache_row=Adw.ActionRow(title='Media cache',subtitle='Up to 512 MB · encrypted locked-folder copies are kept separately')
+    cache_row=Adw.ActionRow(title='Media cache',subtitle='512 MB for images · 128 MB for video preloads · encrypted copies kept separately')
     clear=Gtk.Button(label='Clear cache',valign=Gtk.Align.CENTER)
     def clear_cache(_):
         from cache import MediaCache
-        cache=window.client.media_cache() if window.client else MediaCache('local')
-        window.background(cache.clear,lambda _:(window.texture_cache.clear(),window.notice('Media cache cleared.')))
+        client=window.client;cache=client.media_cache() if client else MediaCache('local')
+        def clear():
+            if client:client.video_cache().clear()
+            cache.clear()
+        window.background(clear,lambda _:(window.texture_cache.clear(),window.notice('Media cache cleared.')))
     clear.connect('clicked',clear_cache);cache_row.add_suffix(clear);cache_group.add(cache_row)
     general.add(cache_group)
     dialog.add(general)

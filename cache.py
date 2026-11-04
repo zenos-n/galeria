@@ -148,3 +148,20 @@ class MediaCache:
             if os.path.exists(name):os.unlink(name)
 
     def has(self,key):return self.path(key).is_file()
+
+    def move_video_prefixes(self,destination):
+        """Separate old video packets without deleting cached thumbnail pixels."""
+        if self.key or destination.key:raise ValueError('Only ordinary caches can be migrated')
+        with self.lock,destination.lock:
+            for path in self.root.iterdir():
+                if len(path.name)!=64 or not path.is_file():continue
+                try:
+                    with path.open('rb') as stream:
+                        length=int.from_bytes(stream.read(4),'big')
+                        if not 0<length<256:continue
+                        value=json.loads(stream.read(length))
+                    if not isinstance(value,dict) or set(value)!={'total','type'} or not isinstance(value['total'],int) or not isinstance(value['type'],str):continue
+                    os.replace(path,destination.root/path.name)
+                except (OSError,ValueError):continue
+            self.inventory=destination.inventory=None
+            destination.prune()
