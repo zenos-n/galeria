@@ -54,7 +54,7 @@ class LibraryUI:
     def request_close(self,*_):
         if self.viewer and self.viewer.confirm_edit_exit(self.close):return True
         app=self.get_application()
-        if getattr(app,'background_enabled',False) and not getattr(app,'quitting',False):
+        if getattr(app,'background_enabled',False) and not getattr(app,'quitting',False) and not self.external_preview:
             if self.viewer and self.viewer.stage.video_player:self.viewer.stage.video_player.pause()
             if self.client and self.client.locked_until:self.lock_folder(refresh=self.current_page=='locked')
             self.set_visible(False);app.emit_state();return True
@@ -457,8 +457,9 @@ class LibraryUI:
         self.local_items=[]
         self.library_mode='local'
         self.local_roots=paths
-        self.preferences.update(mode='local',folders=paths)
-        self.save_preferences()
+        if not self.external_preview:
+            self.preferences.update(mode='local',folders=paths)
+            self.save_preferences()
         self.page_cache.clear();self.collection_cache.clear();self.date_cover_cache.clear();self.collection_textures.clear();self.texture_cache.clear()
         self.pending_images.clear()
         self.disk_cache=MediaCache('local')

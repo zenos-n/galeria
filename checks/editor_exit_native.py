@@ -92,7 +92,7 @@ try:
  v.set_editing(True);p.values['Brightness']=40;p.queue(0);v.move(1);respond('Cancel');assert v.index==0 and v.editing
  v.move(1);respond('Discard');pump(lambda:v.index==1 and v.photo_editor.original is not None)
  p=v.photo_editor;p.values['Brightness']=50;p.queue(0);w.close();respond('Cancel');assert w.get_visible() and v.editing and p.dirty()
- quit_calls=[];fake=SimpleNamespace(window=w,quitting=False,quit=lambda:quit_calls.append(True));fake.force_quit=lambda:Gallery.force_quit(fake)
+ quit_calls=[];fake=SimpleNamespace(window=w,get_windows=lambda:[w],quitting=False,quit=lambda:quit_calls.append(True));fake.force_quit=lambda:Gallery.force_quit(fake)
  fake.force_quit();respond('Cancel');assert not fake.quitting and not quit_calls and w.get_visible()
  v.close();respond('Discard');pump(lambda:w.viewer is None)
  w.open_viewer(2);pump(lambda:w.viewer.stage.progress==1);v=w.viewer;v.set_editing(True);pump(lambda:bool(v.video_editor.duration))

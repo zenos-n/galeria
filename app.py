@@ -39,8 +39,9 @@ def label(text, css=None, **kwargs):
 
 
 class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
-    def __init__(self, app):
+    def __init__(self, app, external_preview=False):
         super().__init__(application=app, title="Galeria", default_width=1280, default_height=820)
+        self.external_preview=external_preview
         Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(str(Path(__file__).parent / "icons"))
         self.current_page = "library"
         self.viewer_index = 0
@@ -503,7 +504,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.14.0", developer_name="Negative Zero",
+                                 version="0.14.1", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 
@@ -679,13 +680,16 @@ class Gallery(Adw.Application):
         if self.control:self.control.emit()
 
     def force_quit(self):
-        if self.window and self.window.viewer and self.window.viewer.confirm_edit_exit(self.force_quit):return False
+        windows=[window for window in self.get_windows() if isinstance(window,GalleryWindow)]
+        for window in windows:
+            if window.viewer and window.viewer.confirm_edit_exit(self.force_quit):return False
         self.quitting=True
-        if self.window:self.window.close()
+        for window in windows:window.close()
         self.quit();return False
 
     def do_shutdown(self):
-        if self.window:self.window.stop_data()
+        for window in self.get_windows():
+            if isinstance(window,GalleryWindow):window.stop_data()
         if self.control:self.control.close()
         Adw.Application.do_shutdown(self)
 
@@ -746,10 +750,12 @@ class Gallery(Adw.Application):
         return 0
 
     def do_open(self,files,_count,_hint):
-        self.ensure_window()
         paths=[file.get_path() for file in files if file.get_path()]
-        if paths:self.window.connect_local(paths,focus_first=len(paths)==1)
-        else:self.window.notice('Open device files or connect an Immich library.')
+        if paths:
+            window=GalleryWindow(self,external_preview=True)
+            window.present();window.connect_local(paths,focus_first=len(paths)==1)
+        else:
+            self.activate();self.window.notice('Open device files or connect an Immich library.')
 
 
 if __name__ == "__main__":

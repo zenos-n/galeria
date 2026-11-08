@@ -280,3 +280,15 @@ video-edit/export and clipboard regressions pass. Exit checks cover Save/Cancel/
 Discard, upload/export failures, chooser cancellation, clean/saved state and
 window/quit guards using generated media. Large-text and prompt screenshots
 were inspected; no production media was edited for tests.
+
+
+Galeria0.14.1 opens desktop Open With requests in separate device-file preview
+windows. Opening or refreshing these previews never changes the saved library
+or replaces the main Immich client, grid, cached textures or scroll position.
+Starting normally still restores the saved account, including after a cold
+Open With launch. Explicit Choose folders retains its persistent behavior.
+Preview windows close fully even when background mode is enabled; Quit checks
+unsaved edits and cleans up every Galeria window. A private-session native
+regression launches a real desktop entry through GApplication for cold/warm
+images, videos, multiple files and folders. It reproduces the0.14.0 account-mode
+overwrite and verifies byte-identical saved preferences with the fix.
