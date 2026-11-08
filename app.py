@@ -504,7 +504,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.14.1", developer_name="Negative Zero",
+                                 version="0.14.2", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 
@@ -625,15 +625,6 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
             return
         source = source or self.mosaic.tiles[index % len(self.mosaic.tiles)]
         if source.media_item and source.media_item.metadata.get('placeholder'):return
-        if self.client and source.media_item and source.media_item.metadata.get('timeline_stub'):
-            mosaic=self.mosaic;client=self.client
-            def ready(item):
-                if self.mosaic!=mosaic or self.viewer or not source.get_child_visible():return
-                if item.metadata.get('visibility') in ('locked','hidden') and client.locked_until<=time.monotonic():
-                    self.notice('This item is no longer in the public timeline.');return
-                item.metadata['timeline_slot']=True;source.media_item=item;source.filename=item.filename;self.media_items[index]=item
-                self.open_viewer(index,source)
-            self.background(lambda:client.asset(source.media_item.id),ready);return
         self.viewer = Viewer(self, index, source)
         self.viewer.show()
 

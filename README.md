@@ -292,3 +292,18 @@ unsaved edits and cleans up every Galeria window. A private-session native
 regression launches a real desktop entry through GApplication for cold/warm
 images, videos, multiple files and folders. It reproduces the0.14.0 account-mode
 overwrite and verifies byte-identical saved preferences with the fix.
+
+
+Galeria0.14.2 opens indexed media immediately from its cached thumbnail while
+fresh asset details load in the background. Full previews, video playback,
+editing and data actions wait for that validation; newly private items are
+rejected. Back, navigation and cached-image zoom stay responsive. Failed detail
+requests retain the cached view; late responses from a closed/previous item
+are ignored. Videos autoplay when delayed metadata permits playback.
+
+The private-display click-to-paint fixture uses the same cached pixels and a
+fixed1200ms details delay: median1265ms before,55ms after across three indexed
+items. An already hydrated item remains about56–61ms. These are controlled
+measurements, not a production-server latency claim. Native privacy/failure/
+stale-response/navigation/video checks pass, along with existing viewer controls,
+clipboard/editor exits, Open With account retention and selection animations.

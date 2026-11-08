@@ -1,3 +1,4 @@
+import time
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 from media import PhotoStage
 from panels import text, icon_button, share_sheet
@@ -9,7 +10,7 @@ class Viewer(Gtk.Overlay):
         super().__init__(hexpand=True, vexpand=True)
         self.window, self.index, self.source = window, index, source
         self.editing = self.closing = self.immersive = False
-        self.exit_dialog=None;self.exit_saving=False
+        self.exit_dialog=None;self.exit_saving=False;self.metadata_pending=False
         self.chrome_timer = 0
         self.chrome_hovered = False
         self.was_fullscreen = window.is_fullscreen()
@@ -120,7 +121,7 @@ class Viewer(Gtk.Overlay):
         self.add_controller(background)
         context=Gtk.GestureClick(button=3);context.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         def context_pressed(gesture,_count,x,y):
-            if self.editing:return
+            if self.editing or self.metadata_pending:return
             from copy_ui import media_menu
             media_menu(window,self,self.source.media_item,x,y);gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         context.connect('pressed',context_pressed);self.add_controller(context)
@@ -139,13 +140,27 @@ class Viewer(Gtk.Overlay):
 
     def prepare_media(self):
         item=self.source.media_item
+        client=self.window.client;source=self.source;stage=self.stage;mosaic=self.window.mosaic
+        if client and item and item.metadata.get('timeline_stub'):
+            def current():return not self.closing and self.window.viewer is self and self.stage is stage and self.window.client is client and self.window.mosaic is mosaic
+            def ready(details):
+                if not current() or details is None:return
+                if details.metadata.get('visibility') in ('locked','hidden') and client.locked_until<=time.monotonic():
+                    self.window.notice('This item is no longer in the public timeline.');self.close();return
+                details.metadata['timeline_slot']=True;source.media_item=details;source.filename=details.filename;self.window.media_items[self.index]=details
+                self.update_metadata();self.prepare_media()
+                if stage.video_player and stage.progress>=1 and not self.media_stack.get_transition_running():stage.video_player.play()
+            def failed(message):
+                if current():self.title.set_subtitle('Details unavailable');self.window.notice(message)
+            self.window.background(lambda:client.asset(item.id) if current() else None,ready,failed)
+            return
         if item and item.kind=='VIDEO':
             uri=Gio.File.new_for_path(item.path).get_uri() if item.path else self.window.get_video_proxy().register(self.window.client,item,self.window.vault)
             self.stage.set_video(uri)
         self.window.load_preview(self.stage,self.source)
 
     def opened(self):
-        self.info.set_sensitive(True)
+        self.info.set_sensitive(not self.metadata_pending)
         if self.stage.video_player:self.stage.video_player.play()
 
     def dismiss_action(self):
@@ -166,21 +181,25 @@ class Viewer(Gtk.Overlay):
     def update_metadata(self):
         item=getattr(self.source,'media_item',None)
         if not item:return
+        self.metadata_pending=bool(self.window.client and item.metadata.get('timeline_stub'))
+        for widget in self.viewing_controls:widget.set_sensitive(not self.metadata_pending)
+        self.fullscreen_button.set_sensitive(True)
+        self.info.set_sensitive(not self.metadata_pending and self.stage.progress>=1)
         exif=item.metadata.get('exifInfo') or {}
         self.title.set_title(item.filename)
-        self.title.set_subtitle(item.created.strftime('%d %B %Y'))
+        self.title.set_subtitle('Loading details…' if self.metadata_pending else item.created.strftime('%d %B %Y'))
         values=[item.created.strftime('%d %B %Y, %H:%M'),item.filename,
                 ', '.join(str(exif[key]) for key in ('city','state','country') if exif.get(key)) or 'No location',
                 ' '.join(str(exif[key]) for key in ('make','model') if exif.get(key)) or 'No camera information']
         for widget,value in zip(self.detail_labels,values):widget.set_label(value)
-        self.edit_button.set_sensitive(item.kind in ('IMAGE','VIDEO'))
+        self.edit_button.set_sensitive(not self.metadata_pending and item.kind in ('IMAGE','VIDEO'))
         self.favorite_syncing=True;self.favorite.set_active(bool(item.metadata.get('isFavorite')));self.favorite_syncing=False
-        self.favorite.set_sensitive(bool(self.window.client))
+        self.favorite.set_sensitive(bool(self.window.client) and not self.metadata_pending)
 
     def toggle_favorite(self,button):
         active=button.get_active();button.set_icon_name('starred-symbolic' if active else 'non-starred-symbolic')
         button.set_tooltip_text('Remove from favorites' if active else 'Add to favorites')
-        if self.favorite_syncing:return
+        if self.favorite_syncing or self.metadata_pending:return
         client=self.window.client;item=self.source.media_item
         if not client:return
         button.set_sensitive(False)
@@ -361,6 +380,7 @@ class Viewer(Gtk.Overlay):
         self.chrome_timer=GLib.timeout_add(1400,hide)
 
     def on_key(self,_controller,keyval,_keycode=0,state=0):
+        if self.metadata_pending and (keyval in (Gdk.KEY_d,Gdk.KEY_D) and state & Gdk.ModifierType.SHIFT_MASK or keyval in (Gdk.KEY_c,Gdk.KEY_C) and state & Gdk.ModifierType.CONTROL_MASK or keyval==Gdk.KEY_space and self.source.media_item.kind=='VIDEO'):return True
         if not self.editing and not isinstance(self.window.get_focus(),Gtk.Editable):
             if keyval in (Gdk.KEY_plus,Gdk.KEY_equal,Gdk.KEY_minus,Gdk.KEY_0):
                 if keyval==Gdk.KEY_0:self.zoom_controls.reset()
@@ -432,7 +452,7 @@ class Viewer(Gtk.Overlay):
         return True
 
     def set_editing(self, active):
-        if active==self.editing:return
+        if active==self.editing or active and self.metadata_pending:return
         if not active and self.confirm_edit_exit(lambda:self.set_editing(False)):return
         if active:
             if hasattr(self,'zoom_controls'):self.zoom_controls.reset()

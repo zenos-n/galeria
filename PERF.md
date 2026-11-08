@@ -543,3 +543,42 @@ cancellation/window-close/quit tests, video edit/export and clipboard checks
 pass. Selection removal reflow/action-target regressions still pass. Tests use
 generated media and fixture upload transport, with real local video export;
 no production media mutations or physical-display synthetic input.
+
+
+## Galeria0.14.2 click-to-viewer latency
+
+`open_viewer` waited for `/assets/{id}` before constructing the viewer for compact
+timeline items. Server/network latency therefore delayed even the first cached
+pixels. Profiling four opens found viewer construction about9ms each, including
+about5ms for the editor; deferring editor widgets was not pursued because it
+would not address the measured wait.
+
+Move detail hydration into the viewer's preparation path. The existing thumbnail
+opens/animates immediately; full media and data actions remain gated until fresh
+visibility validation. Private responses are rejected, failures keep the cached
+view available, and closed/navigated-away responses cannot replace newer media.
+Queued stale work is skipped. Delayed permitted video metadata starts playback
+after opening; the same hydration path applies to next/previous navigation.
+
+Before/after used `checks/viewer_latency_native.py --measure-only`, a private
+Xvfb:91 display, software GL, the same cached320x200 textures and fixed1200ms
+metadata responses. `GALERIA_CHECK_SOURCE_ROOT` selected the immutable0.14.1
+package for baseline. Python3.13.15/PyGObject3.56.3/GTK4.22.4/Adw1.9.3,
+GDK_BACKEND=x11,GSK_RENDERER=gl,LIBGL_ALWAYS_SOFTWARE=1,GDK_DEBUG=no-portals.
+Measurement starts at grid activation and ends at the first after-paint with
+nonzero opening progress, rather than at widget construction.
+
+| Case | Before0.14.1 | After0.14.2 |
+| --- | ---: | ---: |
+| Indexed cached clicks, three samples |1278.75,1261.31,1265.23ms|64.67,54.61,54.20ms|
+| Median indexed click-to-paint |1265.23ms|54.61ms|
+| Already hydrated cached item |60.74ms|55.58ms|
+
+The default native regression enforces indexed median below250ms/all opens
+below500ms. It additionally covers pending-action/shortcut gates, metadata
+completion, navigation, private image/video rejection, delayed public video
+autoplay, failure retention, stale replies and duplicate clicks. Existing native
+viewer controls, clipboard, editor-exit, Open With and selection-action checks
+pass. Tests use fixture data; no production media mutation or physical-display
+synthetic input. This removes the initial network wait; it does not reduce
+server request time or promise the same numbers on all hardware.
