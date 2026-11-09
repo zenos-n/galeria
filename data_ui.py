@@ -465,7 +465,7 @@ class LibraryUI:
         self.disk_cache=MediaCache('local')
         self.search.set_mode('local')
         self.album_tree.set_albums([])
-        self.navigate(self.rows['library'].get_parent(),self.rows['library'])
+        self.navigate(self.rows['library'].get_parent(),self.rows['library'],local=True)
         self.busy_library('Reading your folders…')
         def probe(path):
             try:return image_ratio(path)

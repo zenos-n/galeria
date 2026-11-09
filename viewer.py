@@ -54,12 +54,10 @@ class Viewer(Gtk.Overlay):
         self.download = icon_button('folder-download-symbolic','Download',lambda _:window.download_items([self.source.media_item]))
         self.share = icon_button('gallery-share-symbolic','Share',lambda _:share_sheet(window))
         self.fullscreen_button = icon_button('view-fullscreen-symbolic','Fullscreen media',lambda _:self.set_immersive(not self.immersive))
-        for widget in (self.download,self.share,self.fullscreen_button):
-            self.header.pack_end(widget)
         self.archive=icon_button('folder-symbolic','Remove from archive' if window.current_page=='archive' else 'Archive',lambda widget:window.selected_action('archive',[self.source.media_item],target=widget))
         self.trash=icon_button('user-trash-symbolic','Restore from trash' if window.current_page=='trash' else 'Move to trash',lambda widget:window.selected_action('trash',[self.source.media_item],target=widget))
         self.lock=icon_button('changes-prevent-symbolic','Move to locked folder',lambda widget:window.move_selected_to_locked([self.source.media_item],target=widget))
-        for widget in (self.archive,self.trash,self.lock):self.header.pack_end(widget)
+        for widget in (self.lock,self.trash,self.archive,self.fullscreen_button,self.share,self.download):self.header.pack_start(widget)
         self.viewing_controls=[self.favorite,self.info,self.download,self.share,self.fullscreen_button,self.archive,self.trash,self.lock]
         self.header_revealer=Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.CROSSFADE,
                                          transition_duration=300,reveal_child=True,valign=Gtk.Align.START)

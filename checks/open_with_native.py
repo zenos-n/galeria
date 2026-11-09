@@ -18,7 +18,8 @@ from PIL import Image
 class FixtureGallery(Gallery):
  def __init__(self):
   super().__init__();self.set_application_id('com.neg-zero.Galeria.OpenWithCheck');self.restores=0
- def do_startup(self):Adw.Application.do_startup(self)
+ def do_startup(self):
+  Gallery.do_startup(self);Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
 
 
 if '--desktop-client' in sys.argv:
@@ -31,10 +32,11 @@ clip=folder/'clip.mp4'
 subprocess.run(['ffmpeg','-nostdin','-v','error','-f','lavfi','-i','color=purple:size=160x100:rate=10','-t','0.5','-pix_fmt','yuv420p','-threads','1',str(clip)],check=True)
 saved={'mode':'immich','remember':True,'server':'https://fixture.invalid/api','user_id':'fixture','last_user':{'id':'fixture','name':'Fixture'},'folders':['/previous/device/folder']}
 preferences_write(saved);before=PREFERENCES.read_bytes()
+cached=ImmichClient(saved['server']);cached.user=saved['last_user'];cached.media_cache().put('profile:fixture:',photos[0].read_bytes())
 items=[MediaItem(str(i),'remote.png',datetime(2026,11,1),1.6,path=str(photos[0])) for i in range(40)]
 class Client(ImmichClient):
  def __init__(self):super().__init__(saved['server']);self.token='fixture';self.user=saved['last_user'].copy()
- def profile_image(self,**kwargs):return None
+ def profile_image(self,**kwargs):return photos[0].read_bytes()
  def request(self,*args,**kwargs):raise AssertionError('Opening device files must not issue remote account requests')
 def restore(window,done=None):
  assert window.preferences['mode']=='immich' and window.preferences['remember']
@@ -56,6 +58,14 @@ def pump(until,timeout=15):
 desktop=Path(root.name)/'galeria-open-with.desktop'
 desktop.write_text('[Desktop Entry]\nType=Application\nName=Galeria fixture\nExec='+GLib.shell_quote(sys.executable)+' '+GLib.shell_quote(__file__)+' --desktop-client %U\nTerminal=false\nMimeType=image/png;video/mp4;\n')
 launcher=Gio.DesktopAppInfo.new_from_filename(str(desktop));assert launcher
+def walk(widget):
+ yield widget
+ child=widget.get_first_child()
+ while child:yield from walk(child);child=child.get_next_sibling()
+def snapshot(window,name):
+ snap=Gtk.Snapshot();Gtk.WidgetPaintable.new(window).snapshot(snap,window.get_width(),window.get_height());node=snap.to_node()
+ texture=window.get_renderer().render_texture(node,Graphene.Rect().init(0,0,window.get_width(),window.get_height()))
+ path='/tmp/gallery-app-identification/'+name+'.png';texture.save_to_png(path);return Image.open(path).convert('RGB')
 def windows():return [window for window in app.get_windows() if isinstance(window,GalleryWindow)]
 def launch(paths,focused=True):
  previous=set(windows());assert launcher.launch([Gio.File.new_for_path(str(path)) for path in paths],None)
@@ -65,12 +75,27 @@ def launch(paths,focused=True):
  return window
 try:
  first=launch([photos[0]])
+ heading=next(widget for widget in walk(first) if isinstance(widget,Gtk.Label) and widget.get_label()=='Collections')
+ assert heading.get_style_context().get_margin().left==18,'Cold Open With omitted sidebar CSS'
+ pump(lambda:not first.viewer.stage.tick)
+ image=snapshot(first,'open-with-cold-focus-0143')
+ assert max(image.getpixel((first.get_width()-12,150)))<20,'Cold Open With omitted focus darkening'
+ assert first.avatar.get_text()=='Fixture','Preview lost remembered account identity'
+ pump(lambda:first.avatar.get_custom_image() is not None)
+ assert first.client is None,'Device-file actions must not use the cloud client'
+ for widget in (first.viewer.lock,first.viewer.trash,first.viewer.archive,first.viewer.fullscreen_button,first.viewer.share,first.viewer.download):
+  ok,bounds=widget.compute_bounds(first);assert ok and bounds.get_x()+bounds.get_width()<first.get_width()/2,widget.get_tooltip_text()
+ for widget in (first.viewer.info,first.viewer.edit_button):
+  ok,bounds=widget.compute_bounds(first);assert ok and bounds.get_x()>first.get_width()/2
+
  assert PREFERENCES.read_bytes()==before,'Open With replaced saved Immich preferences'
  assert app.window is None and not app.restores and first.external_preview
  assert first.viewer.source.media_item.path==str(photos[0])
  first.viewer.close();pump(lambda:first.viewer is None);first.refresh_library()
  pump(lambda:not first.loading_more and bool(first.media_items));assert PREFERENCES.read_bytes()==before
- app.activate();pump(lambda:app.window is not None and app.window.client is not None and not app.window.loading_more)
+ first.account_menu()
+ open_library=next(widget for widget in walk(first.account_button.get_popover()) if isinstance(widget,Gtk.Button) and widget.get_label()=='Open Immich library')
+ open_library.emit('clicked');pump(lambda:app.window is not None and app.window.client is not None and not app.window.loading_more)
  main=app.window;client=main.client;mosaic=main.mosaic;media=main.media_items;main.current_page='favorites'
  main.texture_cache[('keep','fixture')]=main.texture_from_pixels(decode_image(photos[0]))
  main.scroller.get_vadjustment().set_value(80);position=main.scroller.get_vadjustment().get_value()
@@ -79,6 +104,15 @@ try:
  assert main.mosaic is mosaic and main.media_items is media and main.current_page=='favorites'
  assert ('keep','fixture') in main.texture_cache and main.scroller.get_vadjustment().get_value()==position
  assert PREFERENCES.read_bytes()==before and main.preferences==saved
+ assert second.avatar.get_text()=='Fixture' and second.client is None
+ pump(lambda:second.avatar.get_custom_image() is not None)
+ route=[];open_library=app.open_library;app.open_library=lambda page=None:route.append(page)
+ second.navigate(second.rows['library'].get_parent(),second.rows['library'])
+ app.open_library=open_library;assert route==['library'] and second.client is None
+ main.client=None;main.preferences.update(mode=None,remember=False);main.update_account_ui()
+ assert second.avatar.get_text()=='Galeria' and second.avatar.get_custom_image() is None
+ main.client=client;main.preferences.update(saved);main.update_account_ui()
+ assert second.avatar.get_text()=='Fixture'
  assert second.viewer.source.media_item.path==str(photos[1]) and video.viewer.source.media_item.kind=='VIDEO'
  assert len(batch.media_items)==2 and len(directory.media_items)==3
  app.set_background(True)
@@ -98,7 +132,7 @@ try:
  app.force_quit();pump(lambda:preview.viewer.exit_dialog is not None)
  dialog=preview.viewer.exit_dialog;dialog.emit('response','discard');dialog.close()
  pump(lambda:not windows());assert main.data_stopped and preview.data_stopped
- print('DESKTOP OPEN WITH: COLD/WARM IMAGE/VIDEO/MULTI/FOLDER PREVIEWS/REFRESH KEEP SAVED IMMICH ACCOUNT AND LIVE CLIENT/GRID/CACHE/SCROLL; BACKGROUND CLOSE DISPOSES; EXPLICIT FOLDERS PERSIST; QUIT GUARDS/CLEANS ALL WINDOWS PASSED',flush=True)
+ print('DESKTOP OPEN WITH: COLD CSS/BACKDROP/LEFT ACTIONS; CACHED/LIVE ACCOUNT/AVATAR/PRIMARY LIBRARY ROUTING/SIGNOUT; COLD/WARM IMAGE/VIDEO/MULTI/FOLDER PREVIEWS/REFRESH KEEP SAVED IMMICH ACCOUNT AND LIVE CLIENT/GRID/CACHE/SCROLL; BACKGROUND CLOSE DISPOSES; EXPLICIT FOLDERS PERSIST; QUIT GUARDS/CLEANS ALL WINDOWS PASSED',flush=True)
 finally:
  for window in windows():window.stop_data();window.destroy()
  app.quit()

@@ -50,7 +50,7 @@ def check():
    ok,bounds=target.get_child().compute_bounds(w.root_overlay);assert ok
    expected=(bounds.get_x()+bounds.get_width()/2,bounds.get_y()+bounds.get_height()/2)
    assert all(abs(a-b)<1 for a,b in zip(expected,motion.target)),(mode,action,expected,motion.target)
-   assert motion.target[0]>w.get_width()/2
+   assert motion.target[0]<w.get_width()/2 if mode=='viewer' else motion.target[0]>w.get_width()/2
    assert motion.target[1]<65 if mode=='viewer' else motion.target[1]>w.get_height()-65
    phase=3
   elif phase==3 and len(w.media_items)==before-count and not w.loading_more and not w.mosaic.tick and not w.media_action_pending:

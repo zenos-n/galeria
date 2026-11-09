@@ -366,25 +366,54 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
             self.search.entry.set_text('')
             self.search.clear()
 
+    def account_context(self):
+        if not self.external_preview:return self.client,self.client.user if self.client else {}
+        main=self.get_application().window
+        if main and not main.data_stopped:
+            self.preferences=main.preferences
+            if main.client:return main.client,main.client.user
+        prefs=self.preferences
+        if prefs.get('mode')=='immich' and prefs.get('remember') and prefs.get('server') and prefs.get('user_id'):
+            user=dict(prefs['last_user']) if isinstance(prefs.get('last_user'),dict) else {}
+            user.update(id=prefs['user_id']);user.setdefault('name',prefs.get('email','Immich'))
+            return None,user
+        return None,{}
+
+    def update_preview_accounts(self):
+        if self.external_preview:return
+        for window in self.get_application().get_windows():
+            if isinstance(window,GalleryWindow) and window.external_preview and hasattr(window,'avatar'):
+                window.update_account_ui()
+
     def update_account_ui(self):
+        client,user=self.account_context()
         admin=bool(self.client and self.client.user.get('isAdmin'))
         self.lookup_action('admin').set_enabled(admin)
         self.hamburger_menu.remove_all()
-        for title,action in [('Choose library…','source'),('Refresh library','refresh'),('Folder sync','sync')]+([('Administration','admin')] if admin else [])+[('Preferences','preferences'),('About Galeria','about')]:
+        entries=[('Open library','source'),('Refresh files','refresh')] if self.external_preview else [('Choose library…','source'),('Refresh library','refresh'),('Folder sync','sync')]+([('Administration','admin')] if admin else [])
+        for title,action in entries+[('Preferences','preferences'),('About Galeria','about')]:
             self.hamburger_menu.append(title,'win.'+action)
-        self.avatar.set_text(self.client.user.get('name','') if self.client else 'Galeria')
-        self.avatar.set_show_initials(bool(self.client))
+        self.avatar.set_text(user.get('name','') if user else 'Galeria')
+        self.avatar.set_show_initials(bool(user))
         self.avatar.set_custom_image(None)
-        if self.client:self.load_profile_photo()
+        if user:self.load_profile_photo()
+        self.update_preview_accounts()
 
     def load_profile_photo(self):
-        client=self.client;revision=client.user.get('profileChangedAt')
+        client,user=self.account_context()
+        if not user:return
+        if client is None:
+            client=ImmichClient(self.preferences['server']);client.user=user
+        identity=(client.base,user.get('id'),user.get('profileChangedAt'))
         from imaging import decode_image
         def ready(pixels):
-            if pixels is not None and self.client is client and client.user.get('profileChangedAt')==revision:
+            current,current_user=self.account_context()
+            current_base=current.base if current else self.preferences.get('server')
+            if not self.data_stopped and pixels is not None and identity==(current_base,current_user.get('id'),current_user.get('profileChangedAt')):
                 self.avatar.set_custom_image(self.texture_from_pixels(pixels))
+                self.update_preview_accounts()
         def load():
-            data=client.profile_image(cached=True) if getattr(client,'restoring',False) else client.profile_image()
+            data=client.profile_image(cached=True) if self.external_preview or getattr(client,'restoring',False) else client.profile_image()
             return decode_image(data,96) if data else None
         self.background(load,ready,lambda _:None)
 
@@ -408,10 +437,12 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
     def account_menu(self):
         popover=Gtk.Popover()
         box=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=6,margin_top=12,margin_bottom=12,margin_start=12,margin_end=12,width_request=220)
-        if self.client:
-            box.append(label(self.client.user.get('name','Account'),'heading',xalign=0))
-            box.append(label(self.client.user.get('email',''),'dim-label',xalign=0,ellipsize=3))
-        for title,callback in ([('Change profile photo…',self.change_profile_photo),('Folder sync',self.show_folder_sync),('Preferences',lambda:preferences(self)),('Switch library…',self.welcome),('Sign out',self.sign_out)] if self.client else [('Choose library…',self.welcome),('Preferences',lambda:preferences(self))]):
+        client,user=self.account_context()
+        if user:
+            box.append(label(user.get('name','Account'),'heading',xalign=0))
+            box.append(label(user.get('email',''),'dim-label',xalign=0,ellipsize=3))
+        entries=[('Open Immich library' if user else 'Open library',self.welcome),('Preferences',lambda:preferences(self))] if self.external_preview else ([('Change profile photo…',self.change_profile_photo),('Folder sync',self.show_folder_sync),('Preferences',lambda:preferences(self)),('Switch library…',self.welcome),('Sign out',self.sign_out)] if self.client else [('Choose library…',self.welcome),('Preferences',lambda:preferences(self))])
+        for title,callback in entries:
             item=Gtk.Button(label=title,css_classes=['flat'],halign=Gtk.Align.FILL)
             item.connect('clicked',lambda _,callback=callback:(self.account_button.popdown(),callback()))
             box.append(item)
@@ -430,7 +461,9 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
     def collapsed(self, *_):
         self.update_header()
 
-    def navigate(self, nav, row):
+    def navigate(self, nav, row, local=False):
+        if self.external_preview and not local:
+            self.get_application().open_library(row.key);return
         if self.current_page=='locked' and row.key!='locked':self.lock_folder(refresh=False)
         self.search_generation+=1
         self.load_more.set_visible(False)
@@ -504,11 +537,13 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.14.2", developer_name="Negative Zero",
+                                 version="0.14.3", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 
     def welcome(self):
+        if self.external_preview:
+            self.get_application().open_library();return
         dialog=Adw.Dialog(title='Welcome to Galeria',content_width=360)
         body=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=20,
                      margin_top=24,margin_bottom=24,margin_start=24,margin_end=24)
@@ -644,6 +679,9 @@ class Gallery(Adw.Application):
 
     def do_startup(self):
         Adw.Application.do_startup(self)
+        provider = Gtk.CssProvider()
+        provider.load_from_path(str(Path(__file__).with_name("style.css")))
+        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         from startup import LoginStartup
         from desktop_control import DesktopControl
         from session_store import preferences_read
@@ -688,9 +726,6 @@ class Gallery(Adw.Application):
         if self.window is not None and not self.window.data_stopped:
             self.window.present()
             return False
-        provider = Gtk.CssProvider()
-        provider.load_from_path(str(Path(__file__).with_name("style.css")))
-        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.window = GalleryWindow(self)
         self.window.connect('notify::visible',lambda *_:self.emit_state())
         if self.open_monitor:
@@ -714,6 +749,14 @@ class Gallery(Adw.Application):
                 handler=self.window.connect('map',mapped)
         self.window.present()
         return True
+
+    def open_library(self,page=None):
+        def ready():
+            self.finish_pending_sync()
+            if page and page in self.window.rows:
+                row=self.window.rows[page];self.window.navigate(row.get_parent(),row)
+        if self.ensure_window():GLib.idle_add(self.window.restore_last_library,ready)
+        else:ready()
 
     def do_activate(self):
         if self.ensure_window():GLib.idle_add(self.window.restore_last_library,self.finish_pending_sync)

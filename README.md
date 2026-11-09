@@ -307,3 +307,20 @@ items. An already hydrated item remains about56–61ms. These are controlled
 measurements, not a production-server latency claim. Native privacy/failure/
 stale-response/navigation/video checks pass, along with existing viewer controls,
 clipboard/editor exits, Open With account retention and selection animations.
+
+
+Galeria0.14.3 installs application styles during shared startup, so cold
+Open With previews have the same sidebar heading margins and dark focus
+backdrop as the library. Preview account controls show the live or remembered
+Immich identity and cached avatar; Open library and sidebar navigation return
+to the primary library through normal session restoration. Device-file actions
+remain isolated from the cloud client. Primary account changes update previews.
+Focus actions sit on the left; Info and Edit remain on the right.
+
+The private-session desktop-entry regression now exercises real application
+startup and checks computed heading margins, backdrop pixels, action positions,
+cached/live avatar identity, return-to-library restoration and signout updates,
+as well as the existing saved-session/grid/cache/scroll preservation checks.
+The80unit tests and native viewer-controls, clipboard, editor-exit, opening
+latency and all six selection/focus action-target checks pass on the packaged
+GTK environment. Production Immich authentication was not exercised.
