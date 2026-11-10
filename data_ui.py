@@ -6,7 +6,7 @@ import json
 import threading
 import time
 import errno
-from gi.repository import Adw, Gdk, GdkPixbuf, GLib, Gtk
+from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk
 from library import ImmichClient, LibraryError, scan_folders
 from timeline import Mosaic
 from cache import MediaCache
@@ -18,7 +18,7 @@ from image_queue import ImageQueue
 class LibraryUI:
     def init_data(self):
         self.client=None
-        self.data_stopped=False
+        self.data_stopped=False;self.upload_started=time.time()
         self.preferences=preferences_read()
         self.collection_items=None
         self.media_items=[]
@@ -66,6 +66,8 @@ class LibraryUI:
         from copy_ui import clear_locked_clipboard
         clear_locked_clipboard(self)
         self.data_stopped=True
+        self.upload_previews=None
+        if hasattr(self,'uploads') and getattr(self.uploads,'status_monitor',None):self.uploads.status_monitor.cancel()
         if getattr(self,'action_motion',None):self.action_motion.cancel()
         if getattr(self,'upload_cancel',None):self.upload_cancel.set()
         if hasattr(self,'date_motion'):self.date_motion.clear()
@@ -662,6 +664,9 @@ class LibraryUI:
         self.background(load,loaded,failed)
 
     def refresh_remote(self,*_):
+        from pending_uploads import manager
+        uploads=manager(self,False)
+        if uploads and uploads.active():return True
         if self.data_stopped:return False
         if not self.client or getattr(self.client,'restoring',False) or self.viewer or self.loading_more or getattr(self,'media_action_pending',False) or not self.get_visible():return True
         if self.current_page in ('albums','people','tags','duplicates','sharing','map'):
@@ -741,16 +746,20 @@ class LibraryUI:
         return True
 
     def request_timeline_metadata(self):
+        from pending_uploads import manager
+        uploads=manager(self,False)
+        if uploads and uploads.active():return
         index=self.timeline_index;client=self.client
         if not index or not client or getattr(client,'restoring',False) or self.current_page!='library' or not self.mosaic.indexed:return
         preferred=[]
         if self.mosaic.indexed:
             top,height=self.mosaic.visible_range()
             if self.mosaic.mode=='all':
-                preferred=[key for key,(a,b) in self.mosaic.month_extents.items() if b>=top-height*2 and a<=top+height*3]
+                preferred=[key for key,(a,b) in self.mosaic.month_extents.items() if b>=top and a<=top+height*2]
             elif self.mosaic.expanded_month:preferred=[self.mosaic.expanded_month]
-            elif self.mosaic.expanded_year:preferred=[key for key in index.ranges if key.startswith(self.mosaic.expanded_year)]
-        for key in dict.fromkeys([*preferred,*index.ranges]):
+            elif self.mosaic.expanded_year:preferred=list(dict.fromkeys(tile.media_item.created.strftime('%Y-%m') for tile in self.mosaic.active_widgets & self.mosaic.tile_set))
+        if not preferred and self.mosaic.mode=='all' and not self.mosaic.rendered:preferred=list(index.ranges)[:1]
+        for key in dict.fromkeys(preferred):
             if len(self.timeline_pending)>=3:break
             if key in index.loaded or key in self.timeline_pending or time.monotonic()<index.failed.get(key,0):continue
             self.timeline_pending.add(key)
@@ -758,9 +767,10 @@ class LibraryUI:
                 if self.timeline_index is not index:return
                 self.timeline_pending.discard(key)
                 a,b=index.ranges[key];previous=index.items[a:b];changed=index.apply(key,items)
+                uploads=manager(self,False)
                 if self.mosaic.indexed and self.current_page=='library':
                     if self.viewer:self.pending_media=(index.items,True)
-                    elif changed or previous and not previous[0].metadata.get('placeholder') and [item.id for item in previous]!=[item.id for item in index.items[index.ranges[key][0]:index.ranges[key][1]]]:self.set_library_items(index.items,append=True,reflow=True)
+                    elif (uploads and uploads.entries) or changed or previous and not previous[0].metadata.get('placeholder') and [item.id for item in previous]!=[item.id for item in index.items[index.ranges[key][0]:index.ranges[key][1]]]:self.set_library_items(index.items,append=True,reflow=True)
                     elif previous!=index.items[index.ranges[key][0]:index.ranges[key][1]]:
                         a,b=index.ranges[key];self.media_items[a:b]=index.items[a:b]
                         self.mosaic.update_bucket(key,index.items[a:b])
@@ -777,6 +787,10 @@ class LibraryUI:
             self.background(load,loaded,failed)
 
     def set_library_items(self,items,append=False,reflow=False):
+        from pending_uploads import manager
+        uploads=manager(self,False)
+        reuse_uploads=bool(uploads and uploads.entries and reflow)
+        if uploads:items=uploads.merge(items)
         scroll_input=self.scroll_input_serial
         position=self.scroller.get_vadjustment().get_value() if append or self.bucket_scope else 0
         self.loading_more=True
@@ -785,8 +799,9 @@ class LibraryUI:
         top,height=old.visible_range()
         visible_pixels={self.texture_key(tile.media_item):tile.media_texture for tile in old.active_widgets & old.tile_set if tile.media_texture is not None and (rect:=old.rendered.get(tile)) and rect[1]+rect[3]>=top-old.target*2 and rect[1]<=top+height+old.target*2}
         buckets=self.timeline_buckets if self.current_page=='library' and not self.search.entry.get_text() else None
-        mosaic=Mosaic(self.open_viewer,self.media_items,buckets,self.open_date_bucket if buckets else None)
-        mosaic.cached_texture=lambda item:self.texture_cache.get(self.texture_key(item))
+        mosaic=Mosaic(self.open_viewer,self.media_items,buckets,self.open_date_bucket if buckets else None,reuse=old if reuse_uploads else None)
+        mosaic.cached_texture=lambda item:self.texture_cache.get(self.texture_key(item)) or visible_pixels.get(self.texture_key(item))
+        mosaic.retry_upload=lambda key:uploads.retry(key) if uploads else None
         from copy_ui import media_menu
         mosaic.on_context=lambda item,x,y:media_menu(self,mosaic,item,x,y)
         if append:
@@ -797,9 +812,6 @@ class LibraryUI:
         mosaic.mode=self.switcher.get_active_name() if self.current_page=='library' else 'all'
         mosaic.target=old.target
         mosaic.show_durations=old.show_durations
-        for tile in mosaic.tiles:
-            texture=visible_pixels.get(self.texture_key(tile.media_item)) or self.texture_cache.get(self.texture_key(tile.media_item))
-            if texture:self.apply_texture(tile,texture)
         mosaic.expanded_month=old.expanded_month
         mosaic.expanded_year=old.expanded_year
         self.populate_date_covers(mosaic)
@@ -823,7 +835,11 @@ class LibraryUI:
                 position=rect[1]+anchor[1]
                 mosaic._target_cache.clear()
         if animate:mosaic.continue_from(old,'reflow' if reflow else None,scroll_shift=position-self.scroller.get_vadjustment().get_value())
-        old.dispose()
+        if self.viewer:
+            source=next((tile for tile in mosaic.tiles if tile.media_item.id==self.viewer.source.media_item.id),None)
+            if source:
+                self.viewer.source=source;self.viewer.index=source.index;self.viewer.stage.source=source;self.viewer.stage.index=source.index;mosaic.hide_tile(source)
+        old.dispose(mosaic.tile_set if reuse_uploads else ())
         mosaic.update_selection()
         self.selection_changed()
         self.update_period()
@@ -835,10 +851,6 @@ class LibraryUI:
             self.status.set_icon_name('folder-pictures-symbolic')
             self.status.set_title('No media found')
             self.status.set_description('Choose another folder or change your search.')
-        for tile in mosaic.tiles:
-            cached=self.texture_cache.get(self.texture_key(tile.media_item))
-            if cached:
-                self.apply_texture(tile,cached)
         def settle():
             if self.mosaic!=mosaic:return False
             self.loading_more=False
@@ -864,7 +876,7 @@ class LibraryUI:
         tiles=[]
         for tile in mosaic.active_widgets & mosaic.tile_set:
             rect=mosaic.rendered.get(tile)
-            if not rect or tile.media_item.metadata.get('placeholder'):continue
+            if not rect or rect[1]+rect[3]<top or rect[1]>top+height*2 or tile.media_item.metadata.get('placeholder') and not tile.media_item.metadata.get('optimistic_upload'):continue
             distance=abs(rect[1]+rect[3]/2-top-height/2)/max(1,height)
             key=(id(mosaic),tile.media_item.id);wanted[key]=distance
             tiles.append((distance,tile,key))
@@ -884,7 +896,7 @@ class LibraryUI:
         cards=mosaic.year_cards if mosaic.mode=='years' else mosaic.month_cards
         for key,card in cards.items():
             rect=mosaic.rendered.get(card)
-            if not rect or rect[1]+rect[3]<max(0,top-height*2) or rect[1]>top+height*3:continue
+            if not rect or rect[1]+rect[3]<top or rect[1]>top+height*2:continue
             job_key=(id(mosaic),'cover',mosaic.mode,key)
             wanted[job_key]=abs(rect[1]+rect[3]/2-top-height/2)/max(1,height)
             if getattr(card,'covers_requested',False):continue
@@ -945,6 +957,9 @@ class LibraryUI:
     def upload_finished(self,client):
         if self.client!=client:return
         client.refresh_serial=getattr(client,'refresh_serial',0)+1
+        from pending_uploads import manager
+        uploads=manager(self,False)
+        if uploads and uploads.entries:return
         if self.viewer:self.refresh_after_viewer=True
         else:self.refresh_remote()
 
@@ -975,7 +990,13 @@ class LibraryUI:
                 if data is None:return None
             elif item.path:
                 stat=Path(item.path).stat()
-                data=self.disk_cache.fetch(f'{item.path}:{stat.st_mtime_ns}:{stat.st_size}',lambda:thumbnail_bytes(item.path))
+                def thumbnail():
+                    if item.kind=='VIDEO':
+                        from video_edit import Edits,frame
+                        return frame(Gio.File.new_for_path(item.path).get_uri(),Edits(0,1))
+                    return thumbnail_bytes(item.path)
+                storage=client.media_cache() if client else self.disk_cache
+                data=storage.fetch(f'{item.path}:{stat.st_mtime_ns}:{stat.st_size}',thumbnail)
             else:
                 try:data=client.image_bytes(item,vault=vault)
                 except LibraryError as error:

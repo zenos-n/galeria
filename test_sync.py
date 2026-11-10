@@ -54,7 +54,8 @@ class SyncTests(unittest.TestCase):
 
     def test_upload_activity_excludes_scans_and_duplicates(self):
         events=[];engine=SyncEngine(self.client,self.journal,progress=lambda value:events.append(value))
-        def upload(*args):
+        def upload(*args,**kwargs):
+            self.assertTrue(callable(kwargs['progress']))
             self.assertEqual(events[-1].get('uploading'),self.path.name)
             return 'asset'
         with patch('sync_engine.upload_file',side_effect=upload):engine.run_folder(self.rule)

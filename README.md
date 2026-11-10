@@ -351,3 +351,29 @@ six action animation targets and actual file-drop upload regressions. No
 production files or cloud assets were deleted in tests.
 All85unit tests pass, along with native image-paste, Trash-scope, action-target,
 file-drop upload, viewer clipboard, editor-exit and cold/warm Open With checks.
+
+
+Galeria0.14.5 puts upload previews into the grid before the transfer finishes.
+Paste inserts its clipboard pixels immediately; file/folder imports queue image
+and video tiles before their transfers. Edited photos create a pending copy as
+soon as rendering produces its PNG, while keeping the editor open.
+The folder-sync service publishes per-file transfer records; file monitoring
+and the fallback poll feed the same tiles without showing scan-only activity.
+
+Each uploading tile has a circular byte-progress indicator. It remains until
+Immich confirms an asset or checksum duplicate, then the tile adopts that ID
+and the circle disappears. Server metadata adopts its cached pixels. Pending
+IDs cannot be selected or sent to cloud actions. Failed uploads retain their
+preview and a Retry control; sync retry wakes the existing service. Account
+changes/window shutdown fence transient previews and queued GTK handoffs.
+
+Upload updates retain existing cells and textures. Thumbnail and metadata work
+is restricted to the visible area and one screen below; offscreen content waits
+for scrolling. Completing an upload updates its tile without a full-grid refresh.
+Progress changes redraw only the visible circles. In a private X11/software-GL fixture with the upload response
+held until after paint,1,000cached items paint clipboard pixels/circle in about
+60ms;8,000items take about102ms versus618ms before cell reuse and viewport scoping. These are controlled
+fixture values, not production timing claims. The check enforces500ms and tests
+real multipart byte progress, image/video batches, sync status, failure/retry,
+server metadata adoption and cell/pixel retention.92unit tests pass, including
+local Trash rejection of replaced FIFOs without blocking a worker.

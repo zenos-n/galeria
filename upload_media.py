@@ -6,7 +6,7 @@ from sync_engine import signature,upload_file,post_asset
 from io import BytesIO
 
 
-def upload(client,path,cancel,visibility=None):
+def upload(client,path,cancel,visibility=None,progress=None):
     path=Path(path);expected=path.stat();digest=hashlib.sha1()
     with os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW),'rb') as source:
         if signature(os.fstat(source.fileno()))!=signature(expected):raise LibraryError('File changed; try uploading it again.')
@@ -20,16 +20,18 @@ def upload(client,path,cancel,visibility=None):
     if not asset:
         if result.get('action')!='accept':raise LibraryError('Immich rejected this file.')
         if cancel.is_set():raise InterruptedError()
-        asset=upload_file(client,path,checksum,expected,cancel,visibility=visibility)
+        options={'visibility':visibility}
+        if progress is not None:options['progress']=progress
+        asset=upload_file(client,path,checksum,expected,cancel,**options)
     from local_media import remember_copy
     remember_copy(client,path,asset,checksum,expected)
     return asset,created
 
 
-def upload_bytes(client,data,filename,modified,cancel,visibility=None):
+def upload_bytes(client,data,filename,modified,cancel,visibility=None,progress=None):
     if cancel.is_set():raise InterruptedError()
     checksum=hashlib.sha1(data).hexdigest()
     result=client.request('/assets/bulk-upload-check',{'assets':[{'id':filename,'checksum':checksum}]})['results'][0]
     if result.get('assetId'):return result['assetId'],False
     if result.get('action')!='accept':raise LibraryError('Immich rejected this file.')
-    return post_asset(client,filename,len(data),modified,checksum,lambda:BytesIO(data),cancel,visibility),True
+    return post_asset(client,filename,len(data),modified,checksum,lambda:BytesIO(data),cancel,visibility,progress=progress),True

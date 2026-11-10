@@ -1,5 +1,5 @@
 """Photo edit state, coalesced previews and explicit save-copy export."""
-import copy,threading
+import copy,threading,hashlib
 from io import BytesIO
 from pathlib import Path
 from PIL import Image
@@ -180,8 +180,22 @@ class PhotoEditor:
             stream=BytesIO();output.save(stream,format='PNG')
             if not item.path:client.check_original_access(item)
             if window.client!=client or cancel.is_set():raise InterruptedError()
-            _,created=upload_bytes(client,stream.getvalue(),Path(item.filename).stem+'-edited.png',item.created.timestamp(),cancel,
-                visibility='locked' if item.metadata.get('visibility')=='locked' else None)
+            from pending_uploads import manager,ui_call
+            from library import MediaItem
+            from imaging import decode_image
+            data=stream.getvalue();filename=Path(item.filename).stem+'-edited.png'
+            visibility='locked' if item.metadata.get('visibility')=='locked' else None
+            pixels=decode_image(data)
+            def queue():
+                uploads=manager(window)
+                source=MediaItem('',filename,item.created,output.width/output.height,metadata={'visibility':visibility or 'timeline'})
+                transfer=lambda cancel,progress:upload_bytes(client,data,filename,item.created.timestamp(),cancel,visibility=visibility,progress=progress)
+                entry=uploads.add(source,window.texture_from_pixels(pixels),transfer,key='edit:'+hashlib.sha1(data).hexdigest());uploads.publish();return uploads,entry
+            uploads,entry=ui_call(window,queue,cancel)
+            try:asset,created=entry['transfer'](cancel,lambda current,total:uploads.progress(entry,current,total))
+            except Exception:
+                GLib.idle_add(uploads.fail,entry,'Could not save the edited copy. Retry the upload.');raise
+            ui_call(window,lambda:uploads.complete(entry,asset),cancel)
             return preview,created
         def done(value):
             window.upload_finished(client)

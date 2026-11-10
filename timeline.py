@@ -13,7 +13,7 @@ MONTHS=[('2026-01','January 2026','2026',0,12),('2025-12','December 2025','2025'
 class Mosaic(Gtk.Widget):
     __gtype_name__='GalleryMosaic'
 
-    def __init__(self,open_photo,items=None,buckets=None,on_bucket=None):
+    def __init__(self,open_photo,items=None,buckets=None,on_bucket=None,reuse=None):
         super().__init__(hexpand=True,margin_start=10,margin_end=10)
         self.open_photo=open_photo
         self.on_bucket=on_bucket
@@ -88,8 +88,13 @@ class Mosaic(Gtk.Widget):
         ratios=[item.ratio for item in items] if items is not None else RATIOS[:12]+RATIOS[12:]+RATIOS[4:18]
         from timeline_cells import Cell,Check
         self.active_widgets=set()
+        reusable={tile.media_item.id:tile for tile in reuse.tiles} if reuse else {}
+        uploads={tile.media_item.metadata['upload_key']:tile for tile in reuse.tiles if tile.media_item.metadata.get('upload_key')} if reuse else {}
         for index,ratio in enumerate(ratios):
-            tile=Cell(self,index,items[index] if items is not None else None,ratio)
+            item=items[index] if items is not None else None
+            tile=reusable.get(item.id) or uploads.get(item.metadata.get('upload_key')) if item else None
+            if tile:tile.rebind(self,index,item,ratio)
+            else:tile=Cell(self,index,item,ratio)
             self.tiles.append(tile)
             self.checks.append(Check(self,index))
         for key,title,year,start,stop in self.months:
@@ -100,6 +105,7 @@ class Mosaic(Gtk.Widget):
             self.month_cards[key]=card
             self.members[card]=self.tiles[start:stop]
         self.tile_set=set(self.tiles)
+        if reuse:self.active_widgets=reuse.active_widgets & self.tile_set
         for year in dict.fromkeys(month[2] for month in self.months):
             card=self.card(year,lambda _,year=year:self.expand_year(year))
             self.year_cards[year]=card
@@ -319,7 +325,7 @@ class Mosaic(Gtk.Widget):
 
     def change(self,update,kind='tier'):
         top,page=self.visible_range()
-        visible_layout=lambda layout:{widget:rect for widget,rect in layout.items() if rect[1]+rect[3]>=top-page*2 and rect[1]<=top+page*3}
+        visible_layout=lambda layout:{widget:rect for widget,rect in layout.items() if rect[1]+rect[3]>=top and rect[1]<=top+page*2}
         sources=self.tier_sources if self.tier_sources is not None else [(id,paintable,tuple(a+(b-a)*self.p for a,b in zip(start,end))) for _,images,_,_ in self.tier_groups for id,paintable,start,end in images] if self.tick and self.motion_kind=='tier' and self.tier_groups else self.image_occurrences(visible_layout(self.rendered))
         self.tier_sources=None;self.tier_images=[];self.tier_groups=[]
         if self.tick:
@@ -535,7 +541,7 @@ class Mosaic(Gtk.Widget):
     def do_get_request_mode(self):
         return Gtk.SizeRequestMode.HEIGHT_FOR_WIDTH
 
-    def dispose(self):
+    def dispose(self,retained=()):
         child=self.get_first_child()
         while child:
             following=child.get_next_sibling()
@@ -548,7 +554,7 @@ class Mosaic(Gtk.Widget):
             self.tick=0
         for check in self.checks:check.dispose()
         for tile in self.tiles:
-            tile.release()
+            if tile not in retained:tile.release()
             if tile.get_parent()==self:tile.unparent()
         for widget in self.widgets:
             if widget.get_parent()==self:widget.unparent()
@@ -573,13 +579,14 @@ class Mosaic(Gtk.Widget):
             entries=sorted((rect[1],order[widget],widget) for widget,rect in rects.items() if widget not in self.panels)
             self._visible_index=(rects,[row[0] for row in entries],entries,order,max((rects[widget][3] for _,_,widget in entries),default=1))
         _,ys,entries,order,max_h=self._visible_index
-        lo=bisect_left(ys,max(0,top-page*2)-max_h);hi=bisect_right(ys,top+page*3)
-        active={widget for _,_,widget in entries[lo:hi] if rects[widget][1]+rects[widget][3]>=max(0,top-page*2) and not (tier and widget in self.tile_set)}
-        active.update(panel for panel in (self.panel_month,self.panel_year) if panel in rects and rects[panel][1]+rects[panel][3]>=top-page*2 and rects[panel][1]<=top+page*3)
+        lo=bisect_left(ys,top-max_h);hi=bisect_right(ys,top+page*2)
+        active={widget for _,_,widget in entries[lo:hi] if rects[widget][1]+rects[widget][3]>=top and not (tier and widget in self.tile_set)}
+        active.update(panel for panel in (self.panel_month,self.panel_year) if panel in rects and rects[panel][1]+rects[panel][3]>=top and rects[panel][1]<=top+page*2)
         for widget in self.active_widgets-active:
             widget.set_child_visible(False)
             if widget in self.tile_set:
-                widget.release();self.checks[widget.index].set_child_visible(False);widget.unparent()
+                widget.release();self.checks[widget.index].set_child_visible(False)
+                if widget.get_parent():widget.unparent()
         self.active_widgets=active
         self.snapshot_widgets=sorted(active,key=order.__getitem__)
         for widget in self.snapshot_widgets:

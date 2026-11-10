@@ -60,6 +60,12 @@ class Uploads(Gtk.MenuButton):
         self.set_popover(popover)
         self.sync_requested_at=0;self.manual=False;self.request_error=None
         GLib.timeout_add_seconds(1,self.poll_sync)
+        from sync_service import state_dir
+        try:
+            self.status_monitor=Gio.File.new_for_path(str(state_dir()/'sync-status.json')).monitor_file(Gio.FileMonitorFlags.WATCH_MOVES,None)
+            self.status_monitor.connect('changed',lambda *_:self.poll_sync())
+        except GLib.Error:self.status_monitor=None
+
 
     def requested(self):
         self.request_error=None
@@ -72,7 +78,6 @@ class Uploads(Gtk.MenuButton):
 
     def poll_sync(self):
         if getattr(self.window,'data_stopped',False):return False
-        if self.manual:return True
         client=getattr(self.window,'client',None)
         if not client:
             if not self.manual:self.set_visible(False)
@@ -80,6 +85,9 @@ class Uploads(Gtk.MenuButton):
         from sync_service import read_config,read_status
         account=read_config().get('accounts',{}).get(client.identity,{})
         status=read_status();value=status.get('accounts',{}).get(client.identity,{})
+        from pending_uploads import sync_previews
+        sync_previews(self.window,status)
+        if self.manual:return True
         pending=self.sync_requested_at and status.get('updated',0)<self.sync_requested_at
         enabled=account.get('enabled') and account.get('folders')
         request_error=self.request_error[1] if self.request_error and self.request_error[0]==client.identity else ''

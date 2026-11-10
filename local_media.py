@@ -1,5 +1,5 @@
 """Account-scoped associations between Immich assets and device originals."""
-import hashlib,os,sqlite3
+import hashlib,os,sqlite3,stat
 from pathlib import Path
 from sync_engine import SyncJournal,signature
 from library import LibraryError
@@ -19,8 +19,10 @@ def remember_copy(client,path,asset,checksum,stat):
 def fingerprint(path):
     path=Path(path)
     if path.is_symlink():raise LibraryError('A local file is now a symbolic link; it was kept.')
-    expected=path.stat();digest=hashlib.sha1()
-    with os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW),'rb') as source:
+    expected=path.stat()
+    if not stat.S_ISREG(expected.st_mode):raise LibraryError('The local path is no longer a regular file; it was kept.')
+    digest=hashlib.sha1()
+    with os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK),'rb') as source:
         if signature(os.fstat(source.fileno()))!=signature(expected):raise LibraryError('A local file changed; it was kept.')
         while chunk:=source.read(1024*1024):digest.update(chunk)
     if signature(path.stat())!=signature(expected):raise LibraryError('A local file changed; it was kept.')

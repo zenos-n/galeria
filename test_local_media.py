@@ -64,3 +64,9 @@ class LocalMediaTests(unittest.TestCase):
         target=Path(self.root.name)/'download.png';save_original(client,self.item,target,threading.Event())
         local,cloud=copies_for(client,[self.item]);self.assertIn(str(target),[row[0] for row in local])
         self.assertEqual(target.read_bytes(),b'downloaded bytes')
+
+    def test_replaced_fifo_is_kept_without_blocking_the_worker(self):
+        import os
+        local,cloud=copies_for(self.client,[self.item]);self.path.unlink();os.mkfifo(self.path)
+        calls=[];removed,remote,errors=trash_copies(self.client,local,cloud,'local',calls.append)
+        self.assertEqual(removed,[]);self.assertFalse(remote);self.assertEqual(len(errors),1);self.assertFalse(calls)

@@ -582,3 +582,27 @@ viewer controls, clipboard, editor-exit, Open With and selection-action checks
 pass. Tests use fixture data; no production media mutation or physical-display
 synthetic input. This removes the initial network wait; it does not reduce
 server request time or promise the same numbers on all hardware.
+
+
+## Optimistic uploads (0.14.5)
+
+Private Xvfb:91, GTK4.22.4/libadwaita1.9.3/PyGObject3.56.3/Python3.13.15,
+software GL. `checks/optimistic_upload_native.py` drives actual Ctrl+V, a loopback
+multipart endpoint and frame-clock after-paint. The endpoint withholds its
+response until the pending pixels and circular indicator paint.0.14.4 fails the
+500ms feedback check with no pending tile. The initial optimistic implementation
+rebuilt8,000cells:618.11ms. Reusing existing cells on upload reflows yields149.38ms
+for8,000items and60.20ms for1,000items (previous1,000-item implementation152.87ms).
+This measures clipboard-to-first-paint in the fixture, not server/network speed.
+
+Progress callbacks are throttled to20Hz and only queue visible ring redraws;
+the fixture asserts progress does not replace the mosaic. It also asserts stable
+existing cell identities, pixel adoption on server metadata, no temporary-ID
+cloud actions, real file/folder/video/sync transfers and failure/retry behavior.
+Default feedback budget500ms; `GALERIA_UPLOAD_TEST_ITEMS=8000` exercises the larger
+fixture. `GALERIA_UPLOAD_PAINT_BUDGET` exists only for diagnostic before-measurements.
+
+After restricting native cells, image requests and metadata requests to the
+viewport plus one screen below, the same8,000-item fixture measured101.75ms.
+Upload acknowledgement no longer requests a full-grid refresh. Existing date
+buckets outside the window are left alone until scrolling requests them.

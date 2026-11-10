@@ -1,4 +1,5 @@
 """Light timeline cells: native controls exist only around the viewport."""
+import math
 from gi.repository import Gdk,Graphene,Gtk
 from imaging import duration_label
 
@@ -52,12 +53,22 @@ class Cell(Gtk.Widget):
         super().__init__(css_classes=['photo-tile'])
         self.owner=owner;self.index=index;self.media_item=item;self.photo_ratio=ratio
         self.filename=item.filename if item else f'Photo {index+1}'
-        self.media_texture=None;self.button=None;self.image=None;self.icon=None
+        self.media_texture=None;self.button=None;self.image=None;self.icon=None;self.upload_ring=None;self.upload_state=None
         self.photo_picture=Picture(self);self.media_icon=Icon(self)
         self.set_child_visible(False)
 
+    def rebind(self,owner,index,item,ratio):
+        previous=self.media_item
+        same=previous.id==item.id and previous.metadata.get('updatedAt')==item.metadata.get('updatedAt')
+        rebuild=not same or previous.kind!=item.kind or previous.filename!=item.filename or self.upload_state!=item.metadata.get('upload_state')
+        key=previous.metadata.get('upload_key')
+        texture=self.media_texture if same or key and key==item.metadata.get('upload_key') else None
+        if rebuild:self.release();self.media_texture=texture
+        self.owner=owner;self.index=index;self.media_item=item;self.photo_ratio=ratio;self.filename=item.filename
+
     def ensure(self):
         if self.button:return
+        if self.media_texture is None and self.media_item:self.media_texture=self.owner.cached_texture(self.media_item)
         overlay=Gtk.Overlay()
         self.image=Gtk.Picture(paintable=self.media_texture,can_shrink=True,content_fit=Gtk.ContentFit.COVER,can_target=False,css_classes=[f'shade-{self.index%5}'])
         overlay.set_child(self.image)
@@ -67,6 +78,19 @@ class Cell(Gtk.Widget):
         if self.media_item and self.media_item.kind=='VIDEO' and self.owner.show_durations:
             overlay.add_overlay(Gtk.Label(label='▷ '+duration_label(self.media_item.metadata.get('duration')),
                 halign=Gtk.Align.END,valign=Gtk.Align.START,css_classes=['video-duration']))
+        metadata=self.media_item.metadata if self.media_item else {}
+        self.upload_state=metadata.get('upload_state')
+        if metadata.get('upload_state') in ('uploading','failed'):
+            if metadata['upload_state']=='failed':
+                retry=Gtk.Button(icon_name='view-refresh-symbolic',tooltip_text='Retry upload',css_classes=['circular','upload-tile-status'],halign=Gtk.Align.END,valign=Gtk.Align.END,margin_end=8,margin_bottom=8)
+                retry.connect('clicked',lambda _:self.owner.retry_upload(metadata['upload_key']));overlay.add_overlay(retry)
+            else:
+                ring=Gtk.DrawingArea(content_width=34,content_height=34,halign=Gtk.Align.END,valign=Gtk.Align.END,margin_end=8,margin_bottom=8,can_target=False,tooltip_text='Uploading…')
+                def draw(widget,cr,width,height):
+                    cx,cy=width/2,height/2;cr.set_source_rgba(0,0,0,.65);cr.arc(cx,cy,16,0,math.tau);cr.fill()
+                    cr.set_line_width(3);cr.set_source_rgba(1,1,1,.35);cr.arc(cx,cy,11,0,math.tau);cr.stroke()
+                    cr.set_source_rgba(.73,.39,.84,1);cr.arc(cx,cy,11,-math.pi/2,-math.pi/2+math.tau*max(.035,metadata.get('upload_progress',0)));cr.stroke()
+                ring.set_draw_func(draw);overlay.add_overlay(ring);self.upload_ring=ring
         self.button=Gtk.Button(child=overlay,tooltip_text=self.filename,css_classes=['photo-tile'])
         self.button.connect('clicked',lambda _:self.owner.clicked(self,self.index))
         click=Gtk.GestureClick(button=1);click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
@@ -74,7 +98,7 @@ class Cell(Gtk.Widget):
         self.button.add_controller(click);self.button.set_parent(self)
 
     def release(self):
-        if self.button:self.button.unparent();self.button=None;self.image=None;self.icon=None
+        if self.button:self.button.unparent();self.button=None;self.image=None;self.icon=None;self.upload_ring=None;self.upload_state=None
         self.media_texture=None
 
     def get_child(self):self.ensure();return self.button.get_child()

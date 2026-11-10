@@ -53,7 +53,7 @@ def check():
    w.mosaic.set_selection(True);paste();phase=2
   elif phase==2 and len(completed)==2:
    assert len(posts)==1 and len(checks)==2 and any('1 already saved' in n for n in notices)
-   assert not w.uploads.get_visible();w.mosaic.set_selection(False);w.open_viewer(0);phase=3
+   assert not w.uploads.get_visible();w.mosaic.set_selection(False);w.open_viewer(next(i for i,item in enumerate(w.media_items) if item.id=='fixture'));phase=3
   elif phase==3 and w.viewer.stage.progress==1:
    paste();phase=4
   elif phase==4 and len(completed)==3:
@@ -67,7 +67,7 @@ def check():
   elif phase==7 and any('does not contain an image' in n for n in notices):
    assert len(checks)==3
    w.get_clipboard().set_content(Gdk.ContentProvider.new_for_value(GObject.Value(Gdk.Texture.__gtype__,Gdk.Texture.new_from_filename(str(photo)))));failure=True;paste();phase=8
-  elif phase==8 and any('could not' in n.lower() or 'failed' in n.lower() for n in notices):
+  elif phase==8 and any(n.startswith('Upload failed') for n in notices):
    assert len(completed)==3 and len(posts)==1 and w.upload_cancel.is_set() and not w.uploads.get_visible(),notices
    # Late clipboard replies cannot upload to an account chosen after Ctrl+V.
    before=len(checks);w.paste_image();w.client=Client();mark=time.monotonic();phase=9

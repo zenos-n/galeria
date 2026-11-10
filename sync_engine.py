@@ -11,13 +11,13 @@ import threading
 import time
 from urllib.parse import quote
 from urllib.request import Request
-from library import LibraryError,media_paths
+from library import LibraryError,media_paths,VIDEO_TYPES
 
 
 def signature(stat):return stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime_ns
 
 
-def post_asset(client,filename,size,modified,checksum,source,cancel,visibility=None,check=None):
+def post_asset(client,filename,size,modified,checksum,source,cancel,visibility=None,check=None,progress=None):
     boundary='gallery-'+secrets.token_hex(16)
     stamp=datetime.fromtimestamp(modified,timezone.utc).isoformat(timespec='milliseconds').replace('+00:00','Z')
     fields={'fileCreatedAt':stamp,'fileModifiedAt':stamp,'filename':filename}
@@ -33,12 +33,14 @@ def post_asset(client,filename,size,modified,checksum,source,cancel,visibility=N
     def chunks():
         with source() as stream:
             if check:check(stream)
+            if progress:progress(0,size)
             yield prefix;remaining=size
             while remaining:
                 if cancel.is_set():raise InterruptedError('Upload cancelled')
                 chunk=stream.read(min(1024*1024,remaining))
                 if not chunk:raise LibraryError('File changed during upload; retrying later.')
                 remaining-=len(chunk);yield chunk
+                if progress:progress(size-remaining,size)
             yield ending
     request=Request(client.base+'/assets',data=chunks(),headers={'Authorization':'Bearer '+client.token,
         'Content-Type':'multipart/form-data; boundary='+boundary,'Content-Length':str(len(prefix)+size+len(ending)),
@@ -53,11 +55,11 @@ def post_asset(client,filename,size,modified,checksum,source,cancel,visibility=N
     return result['id']
 
 
-def upload_file(client,path,checksum,expected,cancel,visibility=None):
+def upload_file(client,path,checksum,expected,cancel,visibility=None,progress=None):
     def source():return os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW),'rb')
     def check(stream):
         if signature(os.fstat(stream.fileno()))!=signature(expected):raise LibraryError('File changed before upload; retrying later.')
-    id=post_asset(client,path.name,expected.st_size,expected.st_mtime,checksum,source,cancel,visibility,check)
+    id=post_asset(client,path.name,expected.st_size,expected.st_mtime,checksum,source,cancel,visibility,check,progress)
     if signature(path.stat())!=signature(expected):raise LibraryError('File changed during upload; retrying later.')
     return id
 
@@ -134,8 +136,16 @@ class SyncEngine:
                 asset=result.get('assetId')
                 if not asset:
                     if result.get('action')!='accept':raise LibraryError('Immich rejected this file.')
+                    transfer={'key':hashlib.sha1((str(path)+'|'+checksum).encode()).hexdigest(),'path':str(path),'filename':path.name,'created':stat.st_mtime,'size':stat.st_size,'sent':0,'started':time.time(),'kind':'VIDEO' if path.suffix.lower() in VIDEO_TYPES else 'IMAGE','state':'uploading'}
+                    history=counts.setdefault('transfers',[]);history.append(transfer);del history[:-128]
                     counts['uploading']=path.name;self.progress(dict(counts))
-                    try:asset=upload_file(self.client,path,checksum,stat,self.cancel);counts['uploaded']+=1
+                    def sent(current,total):
+                        transfer['sent']=current;self.progress(dict(counts))
+                    try:
+                        asset=upload_file(self.client,path,checksum,stat,self.cancel,progress=sent);counts['uploaded']+=1
+                        transfer.update(state='complete',asset=asset)
+                    except Exception as error:
+                        transfer.update(state='failed',error=str(error));raise
                     finally:counts.pop('uploading',None);self.progress(dict(counts))
                 else:counts['existing']+=1
                 if destination:self.client.request('/albums/'+quote(destination,safe='')+'/assets',{'ids':[asset]},method='PUT')
