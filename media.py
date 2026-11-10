@@ -42,7 +42,7 @@ class PhotoStage(Gtk.Widget):
         self.crop_frame.set_visible(False)
         self.picture.add_overlay(self.crop_frame)
         # Capture before hiding the grid tile; this is the exact endpoint image.
-        paintable = Gtk.WidgetPaintable.new(source.get_child()).get_current_image()
+        paintable = Gtk.WidgetPaintable.new(source.get_child()).get_current_image() if hasattr(source,'get_child') else None
         self.thumbnail = Gtk.Picture(paintable=paintable, can_shrink=True, content_fit=Gtk.ContentFit.FILL)
         self.thumbnail.set_can_target(False)
         self.picture.add_overlay(self.thumbnail)
@@ -121,7 +121,7 @@ class PhotoStage(Gtk.Widget):
             if self.get_width() < 1:
                 return GLib.SOURCE_CONTINUE
             if self.source_rect is None:
-                ok, bounds = source.compute_bounds(self)
+                ok, bounds = source.compute_bounds(self) if source is not None else (False,None)
                 self.source_rect = ((bounds.get_x(), bounds.get_y(), bounds.get_width(), bounds.get_height())
                                     if ok else self.destination(self.get_width(), self.get_height()))
                 self.set_opacity(1)
@@ -131,6 +131,7 @@ class PhotoStage(Gtk.Widget):
             t = min(1, (now-start_time)/duration)
             ease = t*t*(3-2*t)
             self.progress = initial + ((0 if reverse else 1)-initial)*ease
+            if source is None:self.set_opacity(self.progress)
             self.thumbnail.set_opacity((1-self.progress)**5)
             self.material.set_opacity(1)
             self.symbol.set_opacity(self.progress)

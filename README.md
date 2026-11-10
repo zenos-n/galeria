@@ -377,3 +377,23 @@ fixture values, not production timing claims. The check enforces500ms and tests
 real multipart byte progress, image/video batches, sync status, failure/retry,
 server metadata adoption and cell/pixel retention.92unit tests pass, including
 local Trash rejection of replaced FIFOs without blocking a worker.
+
+
+Galeria0.14.6 opens desktop Open With files in focus over the primary library.
+Cold launches restore the remembered Immich account normally and load its grid
+behind the device file. Warm launches keep the existing account and browse state.
+Sidebar navigation stays in the same window. Multiple files and folders queue
+in that window; device paths never act as cloud asset IDs.
+
+Leaving focus, closing the window or quitting checks the original's SHA1 against
+Immich off the GTK thread. An existing asset skips the prompt. A new file offers
+Save, Don’t Save and Cancel; Save uploads the unchanged original through the
+existing progress flow and waits for acknowledgement. Failed checks offer Retry
+or Don’t Save. A failed save leaves focus open. A disconnected library can still
+preview device files; there is no upload or duplicate check without a client.
+
+The real desktop-entry regression covers cold/warm restoration, image/video/
+batch focus, same-window navigation, duplicate skip, cancel/retry/discard/save,
+failed saves, background close and Save on Quit. Fixture originals and saved
+preferences are byte-identical.92unit tests and native editor/viewer/clipboard/
+upload/Trash/account/cache regressions pass. All upload checks use fixtures.

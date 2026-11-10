@@ -6,9 +6,12 @@ from editor import build_editor
 
 
 class Viewer(Gtk.Overlay):
-    def __init__(self, window, index, source=None):
+    def __init__(self, window, index, source=None, device_file=False):
         super().__init__(hexpand=True, vexpand=True)
         self.window, self.index, self.source = window, index, source
+        self.device_file=device_file
+        from open_file import OpenFileExit
+        self.file_exit=OpenFileExit(self) if device_file else None
         self.editing = self.closing = self.immersive = False
         self.exit_dialog=None;self.exit_saving=False;self.metadata_pending=False
         self.chrome_timer = 0
@@ -55,10 +58,13 @@ class Viewer(Gtk.Overlay):
         self.share = icon_button('gallery-share-symbolic','Share',lambda _:share_sheet(window))
         self.fullscreen_button = icon_button('view-fullscreen-symbolic','Fullscreen media',lambda _:self.set_immersive(not self.immersive))
         self.archive=icon_button('folder-symbolic','Remove from archive' if window.current_page=='archive' else 'Archive',lambda widget:window.selected_action('archive',[self.source.media_item],target=widget))
-        self.trash=icon_button('user-trash-symbolic','Restore from trash' if window.current_page=='trash' else 'Move to trash',lambda widget:window.selected_action('trash',[self.source.media_item],target=widget))
+        self.trash=icon_button('user-trash-symbolic','Restore from trash' if not device_file and window.current_page=='trash' else 'Move to trash',lambda widget:window.selected_action('trash',[self.source.media_item],target=widget))
         self.lock=icon_button('changes-prevent-symbolic','Move to locked folder',lambda widget:window.move_selected_to_locked([self.source.media_item],target=widget))
         for widget in (self.lock,self.trash,self.archive,self.fullscreen_button,self.share,self.download):self.header.pack_start(widget)
         self.viewing_controls=[self.favorite,self.info,self.download,self.share,self.fullscreen_button,self.archive,self.trash,self.lock]
+        if device_file:
+            for control in (self.favorite,self.share,self.archive,self.lock):
+                control.set_visible(False);self.viewing_controls.remove(control)
         self.header_revealer=Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.CROSSFADE,
                                          transition_duration=300,reveal_child=True,valign=Gtk.Align.START)
         self.header_revealer.set_child(self.header)
@@ -72,6 +78,7 @@ class Viewer(Gtk.Overlay):
             reveal=Gtk.Revealer(child=arrow,transition_type=Gtk.RevealerTransitionType.CROSSFADE,
                                 transition_duration=300,reveal_child=True,halign=align,valign=Gtk.Align.CENTER)
             self.photo_overlay.add_overlay(reveal)
+            if device_file:arrow.set_visible(False)
             self.arrows.append(arrow)
             self.arrow_revealers.append(reveal)
         self.details=Adw.ToolbarView()
@@ -121,7 +128,7 @@ class Viewer(Gtk.Overlay):
         def context_pressed(gesture,_count,x,y):
             if self.editing or self.metadata_pending:return
             from copy_ui import media_menu
-            media_menu(window,self,self.source.media_item,x,y);gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+            media_menu(window,self,self.source.media_item,x,y,device_file=self.device_file);gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         context.connect('pressed',context_pressed);self.add_controller(context)
         from zoom_ui import MediaZoom
         self.zoom_controls=MediaZoom(self)
@@ -171,6 +178,7 @@ class Viewer(Gtk.Overlay):
         if self.immersive and not self.was_fullscreen:self.window.unfullscreen()
 
     def dispose_editors(self):
+        if self.file_exit:self.file_exit.close()
         if self.exit_dialog:self.exit_dialog.close();self.exit_dialog=None
         for name in ('photo_editor','video_editor'):
             editor=getattr(self,name,None)
@@ -217,7 +225,7 @@ class Viewer(Gtk.Overlay):
         # Block pointer interaction without changing the grid's disabled styling.
         self.window.split.set_can_target(False)
         self.window.root_overlay.add_overlay(self)
-        self.window.mosaic.hide_tile(self.source)
+        if not self.device_file:self.window.mosaic.hide_tile(self.source)
         self.backdrop.set_opacity(0)
         self.header.set_opacity(0)
         for arrow in self.arrows:
@@ -225,7 +233,7 @@ class Viewer(Gtk.Overlay):
         self.close_button.grab_focus()
         self.info.set_sensitive(False)
         self.prepare_media()
-        self.stage.animate(self.source,False,self.fade,self.opened)
+        self.stage.animate(None if self.device_file else self.source,False,self.fade,self.opened)
 
     def toggle_details(self,widget):
         if widget.get_active():self.zoom_controls.reset()
@@ -244,7 +252,7 @@ class Viewer(Gtk.Overlay):
             return
         if self.media_stack.get_transition_running():
             return
-        if self.confirm_edit_exit(self.close):return
+        if self.confirm_leave(self.close):return
         self.zoom_controls.reset()
         needs_settle = self.editing or self.immersive or self.viewer_split.get_show_sidebar()
         was_immersive=self.immersive
@@ -254,7 +262,7 @@ class Viewer(Gtk.Overlay):
             self.set_immersive(False)
         self.set_editing(False)
         self.info.set_active(False)
-        self.window.reveal_tile(self.source)
+        if not self.device_file:self.window.reveal_tile(self.source)
         def begin():
             def finish():
                 self.window.mosaic.hide_tile(None)
@@ -269,12 +277,15 @@ class Viewer(Gtk.Overlay):
                     self.chrome_timer=0
                 target=next((tile for tile in self.window.mosaic.tiles if tile.media_item.id==self.source.media_item.id),None)
                 if target and target.get_child_visible():target.grab_focus()
-            self.stage.animate(self.source,True,self.fade,finish)
+                self.window.show_next_open_file()
+                if self.device_file and not self.window.viewer and not self.window.client and self.window.library_mode=='immich':self.window.welcome()
+            self.stage.animate(None if self.device_file else self.source,True,self.fade,finish)
             return GLib.SOURCE_REMOVE
         # Allow sidebar/editor/fullscreen geometry to settle before measuring the tile.
         GLib.timeout_add(350 if was_immersive else 220,begin) if needs_settle else GLib.idle_add(begin)
 
     def move(self,step):
+        if self.device_file:return
         if self.stage.progress<1 or self.closing or self.media_stack.get_transition_running():
             return
         if self.confirm_edit_exit(lambda:self.move(step)):return
@@ -424,6 +435,9 @@ class Viewer(Gtk.Overlay):
     def make_editor(self):
         return build_editor(self)
 
+    def confirm_leave(self,leave):
+        return self.confirm_edit_exit(leave) or bool(self.file_exit and self.file_exit.confirm(leave))
+
     def confirm_edit_exit(self,leave):
         if self.exit_dialog or self.exit_saving:return True
         editor=getattr(self,'photo_editor',None) or getattr(self,'video_editor',None)
@@ -463,7 +477,7 @@ class Viewer(Gtk.Overlay):
             self.video_editor.enter() if active else self.video_editor.leave()
         if active:
             self.info.set_active(False)
-        for widget in self.viewing_controls + self.arrows:
+        for widget in self.viewing_controls + ([] if self.device_file else self.arrows):
             widget.set_visible(not active)
         self.editor.set_reveal_child(active)
         self.stage.crop_frame.set_visible(active and self.editor_categories.get_active_name() == 'Crop')

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Native GTK gallery for local folders and Immich."""
 from pathlib import Path
+from collections import deque
+from types import SimpleNamespace
 import os
 import sys
 import threading
@@ -39,9 +41,9 @@ def label(text, css=None, **kwargs):
 
 
 class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
-    def __init__(self, app, external_preview=False):
+    def __init__(self, app):
         super().__init__(application=app, title="Galeria", default_width=1280, default_height=820)
-        self.external_preview=external_preview
+        self.open_paths=[];self.open_items=deque();self.restoring_library=False;self.reading_open_files=False;self.open_notice=None;self.open_serial=0
         Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(str(Path(__file__).parent / "icons"))
         self.current_page = "library"
         self.viewer_index = 0
@@ -307,7 +309,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.add_controller(keys)
 
     def key_pressed(self, _controller, keyval, _keycode, state):
-        if keyval in (Gdk.KEY_v,Gdk.KEY_V) and state & Gdk.ModifierType.CONTROL_MASK and not state & (Gdk.ModifierType.ALT_MASK|Gdk.ModifierType.SUPER_MASK|Gdk.ModifierType.SHIFT_MASK) and not isinstance(self.get_focus(),(Gtk.Editable,Gtk.TextView)) and not self.get_visible_dialog() and not (self.viewer and self.viewer.editing):
+        if keyval in (Gdk.KEY_v,Gdk.KEY_V) and state & Gdk.ModifierType.CONTROL_MASK and not state & (Gdk.ModifierType.ALT_MASK|Gdk.ModifierType.SUPER_MASK|Gdk.ModifierType.SHIFT_MASK) and not isinstance(self.get_focus(),(Gtk.Editable,Gtk.TextView)) and not self.get_visible_dialog() and not (self.viewer and (self.viewer.editing or self.viewer.device_file)):
             self.paste_image();return True
         if self.viewer:
             return self.viewer.on_key(_controller, keyval, _keycode, state)
@@ -368,54 +370,29 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
             self.search.entry.set_text('')
             self.search.clear()
 
-    def account_context(self):
-        if not self.external_preview:return self.client,self.client.user if self.client else {}
-        main=self.get_application().window
-        if main and not main.data_stopped:
-            self.preferences=main.preferences
-            if main.client:return main.client,main.client.user
-        prefs=self.preferences
-        if prefs.get('mode')=='immich' and prefs.get('remember') and prefs.get('server') and prefs.get('user_id'):
-            user=dict(prefs['last_user']) if isinstance(prefs.get('last_user'),dict) else {}
-            user.update(id=prefs['user_id']);user.setdefault('name',prefs.get('email','Immich'))
-            return None,user
-        return None,{}
-
-    def update_preview_accounts(self):
-        if self.external_preview:return
-        for window in self.get_application().get_windows():
-            if isinstance(window,GalleryWindow) and window.external_preview and hasattr(window,'avatar'):
-                window.update_account_ui()
-
     def update_account_ui(self):
-        client,user=self.account_context()
-        admin=bool(self.client and self.client.user.get('isAdmin'))
+        user=self.client.user if self.client else {}
+        admin=bool(user.get('isAdmin'))
         self.lookup_action('admin').set_enabled(admin)
         self.hamburger_menu.remove_all()
-        entries=[('Open library','source'),('Refresh files','refresh')] if self.external_preview else [('Choose library…','source'),('Refresh library','refresh'),('Folder sync','sync')]+([('Administration','admin')] if admin else [])
+        entries=[('Choose library…','source'),('Refresh library','refresh'),('Folder sync','sync')]+([('Administration','admin')] if admin else [])
         for title,action in entries+[('Preferences','preferences'),('About Galeria','about')]:
             self.hamburger_menu.append(title,'win.'+action)
         self.avatar.set_text(user.get('name','') if user else 'Galeria')
         self.avatar.set_show_initials(bool(user))
         self.avatar.set_custom_image(None)
         if user:self.load_profile_photo()
-        self.update_preview_accounts()
 
     def load_profile_photo(self):
-        client,user=self.account_context()
-        if not user:return
-        if client is None:
-            client=ImmichClient(self.preferences['server']);client.user=user
-        identity=(client.base,user.get('id'),user.get('profileChangedAt'))
+        client=self.client
+        if not client:return
+        revision=client.user.get('profileChangedAt')
         from imaging import decode_image
         def ready(pixels):
-            current,current_user=self.account_context()
-            current_base=current.base if current else self.preferences.get('server')
-            if not self.data_stopped and pixels is not None and identity==(current_base,current_user.get('id'),current_user.get('profileChangedAt')):
+            if self.client is client and pixels is not None and client.user.get('profileChangedAt')==revision:
                 self.avatar.set_custom_image(self.texture_from_pixels(pixels))
-                self.update_preview_accounts()
         def load():
-            data=client.profile_image(cached=True) if self.external_preview or getattr(client,'restoring',False) else client.profile_image()
+            data=client.profile_image(cached=True) if getattr(client,'restoring',False) else client.profile_image()
             return decode_image(data,96) if data else None
         self.background(load,ready,lambda _:None)
 
@@ -439,11 +416,11 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
     def account_menu(self):
         popover=Gtk.Popover()
         box=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=6,margin_top=12,margin_bottom=12,margin_start=12,margin_end=12,width_request=220)
-        client,user=self.account_context()
+        user=self.client.user if self.client else {}
         if user:
             box.append(label(user.get('name','Account'),'heading',xalign=0))
             box.append(label(user.get('email',''),'dim-label',xalign=0,ellipsize=3))
-        entries=[('Open Immich library' if user else 'Open library',self.welcome),('Preferences',lambda:preferences(self))] if self.external_preview else ([('Change profile photo…',self.change_profile_photo),('Folder sync',self.show_folder_sync),('Preferences',lambda:preferences(self)),('Switch library…',self.welcome),('Sign out',self.sign_out)] if self.client else [('Choose library…',self.welcome),('Preferences',lambda:preferences(self))])
+        entries=[('Change profile photo…',self.change_profile_photo),('Folder sync',self.show_folder_sync),('Preferences',lambda:preferences(self)),('Switch library…',self.welcome),('Sign out',self.sign_out)] if self.client else [('Choose library…',self.welcome),('Preferences',lambda:preferences(self))]
         for title,callback in entries:
             item=Gtk.Button(label=title,css_classes=['flat'],halign=Gtk.Align.FILL)
             item.connect('clicked',lambda _,callback=callback:(self.account_button.popdown(),callback()))
@@ -463,9 +440,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
     def collapsed(self, *_):
         self.update_header()
 
-    def navigate(self, nav, row, local=False):
-        if self.external_preview and not local:
-            self.get_application().open_library(row.key);return
+    def navigate(self, nav, row):
         if self.current_page=='locked' and row.key!='locked':self.lock_folder(refresh=False)
         self.search_generation+=1
         self.load_more.set_visible(False)
@@ -539,13 +514,11 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.14.5", developer_name="Negative Zero",
+                                 version="0.14.6", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 
     def welcome(self):
-        if self.external_preview:
-            self.get_application().open_library();return
         dialog=Adw.Dialog(title='Welcome to Galeria',content_width=360)
         body=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=20,
                      margin_top=24,margin_bottom=24,margin_start=24,margin_end=24)
@@ -661,12 +634,75 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.dialog = dialog
         dialog.present(self)
 
-    def open_viewer(self, index, source=None):
+    def clear_open_notice(self):
+        if self.open_notice:self.open_notice.dismiss();self.open_notice=None
+
+    def cancel_open_files(self):
+        self.open_serial+=1;self.reading_open_files=False
+        self.open_paths.clear();self.open_items.clear();self.clear_open_notice()
+
+    def queue_open_files(self,paths):
+        self.open_paths.extend(paths)
+        if not self.open_notice:
+            self.open_notice=Adw.Toast(title='Opening file…',timeout=0);self.toast.add_toast(self.open_notice)
+        self.read_open_files()
+
+    def read_open_files(self):
+        if self.restoring_library or self.reading_open_files or not self.open_paths:return
+        from imaging import image_ratio
+        from library import scan_folders
+        paths,self.open_paths=self.open_paths,[];self.reading_open_files=True;serial=self.open_serial
+        def probe(path):
+            try:return image_ratio(path)
+            except (OSError,ValueError):return 1.5
+        def ready(value):
+            if self.data_stopped or self.open_serial!=serial:return
+            self.reading_open_files=False;self.clear_open_notice()
+            if not self.get_visible():return
+            items,errors=value
+            self.open_items.extend(items)
+            if not items:self.notice(errors[0] if errors else 'No supported photos or videos found.')
+            elif self.viewer:
+                viewer=self.viewer
+                def leave_viewer():
+                    if self.data_stopped or self.viewer is not viewer or not self.open_items:return False
+                    if viewer.media_stack.get_transition_running():return True
+                    viewer.close();return False
+                if leave_viewer():GLib.timeout_add(30,leave_viewer)
+            else:self.show_next_open_file()
+            self.read_open_files()
+        def read():
+            items={};errors=[]
+            for path in dict.fromkeys(paths):
+                batch,problems=scan_folders([path],probe);errors.extend(problems)
+                for item in batch:items.setdefault(item.id,item)
+            return list(items.values()),errors
+        def done(future):
+            if future.cancelled():return
+            try:value=future.result()
+            except Exception:value=([],['Could not read the opened file.'])
+            GLib.idle_add(ready,value)
+        self.previews.submit(read).add_done_callback(done)
+
+    def show_next_open_file(self):
+        if self.data_stopped or not self.get_visible() or self.viewer or not self.open_items:return
+        dialog=self.get_visible_dialog()
+        if dialog:
+            if dialog.get_title()=='Welcome to Galeria':dialog.close()
+            else:
+                handler=dialog.connect('closed',lambda dialog:(dialog.disconnect(handler),GLib.idle_add(self.show_next_open_file)))
+                return
+        if self.current_page=='locked':
+            row=self.rows['library'];self.navigate(row.get_parent(),row)
+        item=self.open_items.popleft()
+        self.open_viewer(-1,SimpleNamespace(media_item=item,filename=item.filename,photo_ratio=item.ratio),device_file=True)
+
+    def open_viewer(self, index, source=None, device_file=False):
         if self.viewer:
             return
         source = source or self.mosaic.tiles[index % len(self.mosaic.tiles)]
         if source.media_item and source.media_item.metadata.get('placeholder'):return
-        self.viewer = Viewer(self, index, source)
+        self.viewer = Viewer(self, index, source, device_file=device_file)
         self.viewer.show()
 
 
@@ -717,7 +753,7 @@ class Gallery(Adw.Application):
     def force_quit(self):
         windows=[window for window in self.get_windows() if isinstance(window,GalleryWindow)]
         for window in windows:
-            if window.viewer and window.viewer.confirm_edit_exit(self.force_quit):return False
+            if window.viewer and window.viewer.confirm_leave(self.force_quit):return False
         self.quitting=True
         for window in windows:window.close()
         self.quit();return False
@@ -756,16 +792,13 @@ class Gallery(Adw.Application):
         self.window.present()
         return True
 
-    def open_library(self,page=None):
-        def ready():
-            self.finish_pending_sync()
-            if page and page in self.window.rows:
-                row=self.window.rows[page];self.window.navigate(row.get_parent(),row)
-        if self.ensure_window():GLib.idle_add(self.window.restore_last_library,ready)
-        else:ready()
-
     def do_activate(self):
-        if self.ensure_window():GLib.idle_add(self.window.restore_last_library,self.finish_pending_sync)
+        if self.ensure_window():
+            window=self.window;window.restoring_library=True
+            def restored():
+                window.restoring_library=False
+                self.finish_pending_sync();window.read_open_files()
+            GLib.idle_add(window.restore_last_library,restored)
         else:self.finish_pending_sync()
 
     def open_folder_sync(self):
@@ -791,11 +824,10 @@ class Gallery(Adw.Application):
 
     def do_open(self,files,_count,_hint):
         paths=[file.get_path() for file in files if file.get_path()]
+        self.activate()
         if paths:
-            window=GalleryWindow(self,external_preview=True)
-            window.present();window.connect_local(paths,focus_first=len(paths)==1)
-        else:
-            self.activate();self.window.notice('Open device files or connect an Immich library.')
+            self.window.queue_open_files(paths)
+        else:self.window.notice('Open device files or connect an Immich library.')
 
 
 if __name__ == "__main__":

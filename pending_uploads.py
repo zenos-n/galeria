@@ -56,7 +56,7 @@ class PendingUploads:
     def publish(self):
         if not self.current():return
         w=self.window
-        if w.viewer and not w.viewer.editing:w.pending_media=(w.media_items,True)
+        if w.viewer and not (w.viewer.editing or w.viewer.device_file):w.pending_media=(w.media_items,True)
         else:w.set_library_items(w.media_items,append=True,reflow=True)
     def merge(self,items):
         values={item.id:item for item in items if not item.metadata.get('optimistic_upload')}

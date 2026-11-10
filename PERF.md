@@ -606,3 +606,17 @@ After restricting native cells, image requests and metadata requests to the
 viewport plus one screen below, the same8,000-item fixture measured101.75ms.
 Upload acknowledgement no longer requests a full-grid refresh. Existing date
 buckets outside the window are left alone until scrolling requests them.
+
+
+## Open With feedback (0.14.6)
+
+`checks/open_with_native.py` enforces400ms to visible feedback on private
+X11/software GL. The old0.14.5 package fails the primary-window assertion
+because its desktop entry opens a separate preview. Real desktop Exec to the
+first library window paint with “Opening file…” was314ms; process-cold startup
+with a blocked connection was344–370ms. The delayed8,000-item/64MiB fixture
+painted “Checking Immich…” in7ms and “Saving to Immich…” in83ms. The largest
+heartbeat gap during cold grid restoration was143ms; a held duplicate check
+kept dispatching with17ms maximum gaps. This measures feedback and UI
+responsiveness with generated files, not upload or authentication duration.
+The optimistic upload native check now also enforces400ms first paint.

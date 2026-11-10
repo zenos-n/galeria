@@ -52,9 +52,11 @@ class LibraryUI:
         self.connect('close-request',self.request_close)
 
     def request_close(self,*_):
-        if self.viewer and self.viewer.confirm_edit_exit(self.close):return True
+        if self.viewer and self.viewer.confirm_leave(self.close):return True
+        if self.viewer and self.viewer.device_file:self.viewer.dismiss_action()
+        self.cancel_open_files()
         app=self.get_application()
-        if getattr(app,'background_enabled',False) and not getattr(app,'quitting',False) and not self.external_preview:
+        if getattr(app,'background_enabled',False) and not getattr(app,'quitting',False):
             if self.viewer and self.viewer.stage.video_player:self.viewer.stage.video_player.pause()
             if self.client and self.client.locked_until:self.lock_folder(refresh=self.current_page=='locked')
             self.set_visible(False);app.emit_state();return True
@@ -285,7 +287,7 @@ class LibraryUI:
         self.background(work,complete,failed)
 
     def selected_action(self,action,items=None,target=None):
-        if action=='trash' and self.current_page!='trash':
+        if action=='trash' and (self.current_page!='trash' or items and all(item.path for item in items)):
             from trash_ui import trash_selected
             values=list(items) if items is not None else [self.mosaic.tiles[i].media_item for i in self.mosaic.selected if not self.mosaic.tiles[i].media_item.metadata.get('placeholder')]
             trash_selected(self,values,target);return
@@ -442,7 +444,7 @@ class LibraryUI:
         self.stack.set_visible_child_name('status')
         self.notice(message)
 
-    def connect_local(self,paths,focus_first=False):
+    def connect_local(self,paths):
         from copy_ui import clear_locked_clipboard
         clear_locked_clipboard(self)
         self.timeline_index=None;self.timeline_pending=set()
@@ -457,15 +459,14 @@ class LibraryUI:
         self.local_items=[]
         self.library_mode='local'
         self.local_roots=paths
-        if not self.external_preview:
-            self.preferences.update(mode='local',folders=paths)
-            self.save_preferences()
+        self.preferences.update(mode='local',folders=paths)
+        self.save_preferences()
         self.page_cache.clear();self.collection_cache.clear();self.date_cover_cache.clear();self.collection_textures.clear();self.texture_cache.clear()
         self.pending_images.clear()
         self.disk_cache=MediaCache('local')
         self.search.set_mode('local')
         self.album_tree.set_albums([])
-        self.navigate(self.rows['library'].get_parent(),self.rows['library'],local=True)
+        self.navigate(self.rows['library'].get_parent(),self.rows['library'])
         self.busy_library('Reading your folders…')
         def probe(path):
             try:return image_ratio(path)
@@ -474,15 +475,10 @@ class LibraryUI:
             self.local_items,errors=value
             self.source_label.set_label(Path(paths[0]).name if len(paths)==1 else f'{len(paths)} folders')
             self.search_library()
-            if focus_first and self.media_items:
-                generation=self.data_generation
-                def focus():
-                    if generation==self.data_generation and not self.viewer and self.mosaic.tiles:self.open_viewer(0,self.mosaic.tiles[0])
-                    return False
-                GLib.timeout_add(80,focus)
             if errors:
                 self.notice(f'{len(errors)} files or folders could not be read.')
         self.background(lambda:scan_folders(paths,probe),loaded,self.library_failed)
+        self.restoring_library=False;self.read_open_files()
 
     def connect_immich(self,client):
         from copy_ui import clear_locked_clipboard
@@ -515,6 +511,7 @@ class LibraryUI:
         self.current_page='library'
         self.navigate(self.rows['library'].get_parent(),self.rows['library'])
         if not getattr(client,'restoring',False):self.refresh_connected_library()
+        self.restoring_library=False;self.read_open_files()
 
     def remember_user(self):
         self.preferences['last_user']={key:self.client.user.get(key) for key in ('id','name','email','profileImagePath','profileChangedAt')}
@@ -577,7 +574,7 @@ class LibraryUI:
             self.welcome()
 
     def search_library(self,append=False,preserve_folder=False,force=False):
-        if self.viewer:
+        if self.viewer and not self.viewer.device_file:
             return
         if self.client and self.current_page=='library' and not self.dates_ready:
             self.busy_library('Loading library dates…');return
@@ -647,7 +644,7 @@ class LibraryUI:
                 while len(self.page_cache)>24:self.page_cache.popitem(last=False)
             if force and result==self.media_items:
                 self.loading_more=False;self.load_more.set_sensitive(True);return
-            if self.viewer:
+            if self.viewer and not self.viewer.device_file:
                 self.pending_media=(result,append)
                 self.loading_more=False
             else:self.set_library_items(result,append=append or force,reflow=force)
@@ -769,7 +766,7 @@ class LibraryUI:
                 a,b=index.ranges[key];previous=index.items[a:b];changed=index.apply(key,items)
                 uploads=manager(self,False)
                 if self.mosaic.indexed and self.current_page=='library':
-                    if self.viewer:self.pending_media=(index.items,True)
+                    if self.viewer and not self.viewer.device_file:self.pending_media=(index.items,True)
                     elif (uploads and uploads.entries) or changed or previous and not previous[0].metadata.get('placeholder') and [item.id for item in previous]!=[item.id for item in index.items[index.ranges[key][0]:index.ranges[key][1]]]:self.set_library_items(index.items,append=True,reflow=True)
                     elif previous!=index.items[index.ranges[key][0]:index.ranges[key][1]]:
                         a,b=index.ranges[key];self.media_items[a:b]=index.items[a:b]
@@ -835,7 +832,7 @@ class LibraryUI:
                 position=rect[1]+anchor[1]
                 mosaic._target_cache.clear()
         if animate:mosaic.continue_from(old,'reflow' if reflow else None,scroll_shift=position-self.scroller.get_vadjustment().get_value())
-        if self.viewer:
+        if self.viewer and not self.viewer.device_file:
             source=next((tile for tile in mosaic.tiles if tile.media_item.id==self.viewer.source.media_item.id),None)
             if source:
                 self.viewer.source=source;self.viewer.index=source.index;self.viewer.stage.source=source;self.viewer.stage.index=source.index;mosaic.hide_tile(source)

@@ -34,7 +34,7 @@ def paste_image(window):
     window.get_clipboard().read_texture_async(None,ready)
 
 
-def start_upload(window,paths=(),image=None,retry_entry=None):
+def start_upload(window,paths=(),image=None,retry_entry=None,prepared=None,finished=None):
     if getattr(window,'upload_cancel',None) and not window.upload_cancel.is_set():window.notice('Wait for the current upload to finish.');return
     from datetime import datetime
     from library import MediaItem
@@ -50,6 +50,10 @@ def start_upload(window,paths=(),image=None,retry_entry=None):
     if image is not None:
         source=MediaItem('',time.strftime('pasted-image-%Y-%m-%d-%H%M%S.png'),datetime.now(),image.get_width()/max(1,image.get_height()))
         entries.append(uploads.add(source,image,image_transfer));uploads.prepare();uploads.publish()
+    elif prepared:
+        source,checked,texture=prepared
+        transfer=lambda cancel,progress:upload(client,source.path,cancel,progress=progress,checked=checked)
+        entries.append(uploads.add(source,texture,transfer,key='open:'+checked[1]));uploads.publish()
     elif retry_entry:
         retry_entry['item'].metadata.update(upload_state='uploading',upload_progress=0.)
         entries.append(retry_entry);uploads.prepare();uploads.publish()
@@ -81,9 +85,16 @@ def start_upload(window,paths=(),image=None,retry_entry=None):
     def finish(result):
         cancel.set();window.uploads.manual_finished()
         window.notice(f'{result[0]} uploaded · {result[1]} already saved.');window.upload_finished(client)
+        if finished:finished(True)
     def failed(message):
         cancel.set();window.uploads.manual_finished()
         message='Upload cancelled.' if 'InterruptedError' in message else message
-        for entry in entries:uploads.fail(entry,message)
+        if prepared:
+            key=entries[0]['item'].metadata['upload_key']
+            uploads.entries.pop(key,None);window.texture_cache.pop((key,''),None);uploads.publish()
+        else:
+            for entry in entries:uploads.fail(entry,message)
         window.notice(message)
+        if finished:finished(False)
     window.background(work,finish,failed)
+    return True

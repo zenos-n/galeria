@@ -35,13 +35,16 @@ def clear_locked_clipboard(window):
         window.locked_clipboard=None
 
 
-def media_menu(window,widget,item,x,y):
+def media_menu(window,widget,item,x,y,device_file=False):
     popover=Gtk.Popover();popover.set_parent(widget)
     rect=Gdk.Rectangle();rect.x=round(x);rect.y=round(y);rect.width=rect.height=1;popover.set_pointing_to(rect)
     body=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=4,margin_top=6,margin_bottom=6,margin_start=6,margin_end=6)
     from sharing_ui import share_media
     actions=([('Copy media',lambda:copy_media(window,item))] if item.kind!='VIDEO' else [])
-    actions += [('Share…',lambda:share_media(window,[item])),('Download…',lambda:window.download_items([item])),('Archive or unarchive',lambda:window.selected_action('archive',[item])),('Move to locked folder',lambda:window.move_selected_to_locked([item])),('Move to trash',lambda:window.selected_action('trash',[item]))]
+    actions.append(('Download…',lambda:window.download_items([item])))
+    if not device_file:
+        actions += [('Share…',lambda:share_media(window,[item])),('Archive or unarchive',lambda:window.selected_action('archive',[item])),('Move to locked folder',lambda:window.move_selected_to_locked([item]))]
+    actions.append(('Move to trash',lambda:window.selected_action('trash',[item])))
     for title,callback in actions:
         button=Gtk.Button(label=title,css_classes=['flat']);button.connect('clicked',lambda _,callback=callback:(popover.popdown(),callback()));body.append(button)
     popover.set_child(body);popover.connect('closed',lambda *_:popover.unparent() if popover.get_parent() else None);popover.popup()

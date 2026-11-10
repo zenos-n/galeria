@@ -16,7 +16,7 @@ def remember_copy(client,path,asset,checksum,stat):
     finally:journal.close()
 
 
-def fingerprint(path):
+def fingerprint(path,cancel=None):
     path=Path(path)
     if path.is_symlink():raise LibraryError('A local file is now a symbolic link; it was kept.')
     expected=path.stat()
@@ -24,7 +24,9 @@ def fingerprint(path):
     digest=hashlib.sha1()
     with os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK),'rb') as source:
         if signature(os.fstat(source.fileno()))!=signature(expected):raise LibraryError('A local file changed; it was kept.')
-        while chunk:=source.read(1024*1024):digest.update(chunk)
+        while chunk:=source.read(1024*1024):
+            if cancel is not None and cancel.is_set():raise InterruptedError()
+            digest.update(chunk)
     if signature(path.stat())!=signature(expected):raise LibraryError('A local file changed; it was kept.')
     return expected,digest.hexdigest()
 

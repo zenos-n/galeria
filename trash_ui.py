@@ -6,11 +6,9 @@ from local_media import copies_for,trash_copies
 def trash_selected(window,items,target=None):
     if not items or getattr(window,'media_action_pending',False):return
     client=window.client
-    if not client and window.external_preview:client=window.account_context()[0]
     generation=window.data_generation;mosaic=window.mosaic
     def current():
-        account=window.client or (window.account_context()[0] if window.external_preview else None)
-        return not window.data_stopped and window.data_generation==generation and account is client
+        return not window.data_stopped and window.data_generation==generation and window.client is client
     def review(value):
         if not current():return
         local,cloud=value

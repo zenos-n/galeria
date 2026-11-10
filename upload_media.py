@@ -1,21 +1,21 @@
 """Checksum preflight and original-preserving file uploads shared by imports/edits."""
-import hashlib,os
+import hashlib
 from pathlib import Path
 from library import LibraryError
-from sync_engine import signature,upload_file,post_asset
+from sync_engine import upload_file,post_asset
 from io import BytesIO
 
 
-def upload(client,path,cancel,visibility=None,progress=None):
-    path=Path(path);expected=path.stat();digest=hashlib.sha1()
-    with os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW),'rb') as source:
-        if signature(os.fstat(source.fileno()))!=signature(expected):raise LibraryError('File changed; try uploading it again.')
-        while chunk:=source.read(1024*1024):
-            if cancel.is_set():raise InterruptedError()
-            digest.update(chunk)
-    if signature(path.stat())!=signature(expected):raise LibraryError('File changed; try uploading it again.')
-    checksum=digest.hexdigest()
-    result=client.request('/assets/bulk-upload-check',{'assets':[{'id':str(path),'checksum':checksum}]})['results'][0]
+def check_file(client,path,cancel):
+    from local_media import fingerprint
+    path=Path(path);expected,checksum=fingerprint(path,cancel)
+    if cancel.is_set():raise InterruptedError()
+    result=client.request('/assets/bulk-upload-check',{'assets':[{'id':path.name,'checksum':checksum}]})['results'][0]
+    return expected,checksum,result
+
+
+def upload(client,path,cancel,visibility=None,progress=None,checked=None):
+    path=Path(path);expected,checksum,result=checked or check_file(client,path,cancel)
     asset=result.get('assetId');created=not bool(asset)
     if not asset:
         if result.get('action')!='accept':raise LibraryError('Immich rejected this file.')

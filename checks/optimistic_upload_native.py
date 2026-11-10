@@ -58,9 +58,9 @@ def check():
   elif phase==1:
    pending=entries('uploading')
    if not pending or not (tile:=visible(pending[0])) or not tile.media_texture or not tile.upload_ring:
-    assert time.monotonic()-mark<float(os.environ.get('GALERIA_UPLOAD_PAINT_BUDGET','.5')),('No immediate pasted pixels/ring',len(pending));return True
+    assert time.monotonic()-mark<float(os.environ.get('GALERIA_UPLOAD_PAINT_BUDGET','.4')),('No immediate pasted pixels/ring',len(pending));return True
    if paint_ms is None:
-    assert time.monotonic()-mark<float(os.environ.get('GALERIA_UPLOAD_PAINT_BUDGET','.5')),'Upload pixels did not paint within500ms';return True
+    assert time.monotonic()-mark<float(os.environ.get('GALERIA_UPLOAD_PAINT_BUDGET','.4')),'Upload pixels did not paint within400ms';return True
    assert not completed and not release.is_set();assert tile.upload_ring.get_mapped()
    w.mosaic.clicked(tile,tile.index);assert w.viewer is None,'Pending IDs must not issue server actions'
    current_cells={tile.media_item.id:tile for tile in w.mosaic.tiles}
@@ -74,7 +74,9 @@ def check():
    assert not completed;release.set();phase=3
   elif phase==3 and completed and not entries('uploading'):
    assert len(entries('complete'))==1 and entries()[0].id=='asset-1'
-   tile=visible(entries()[0]);assert tile is pending_tile and tile.media_texture and tile.upload_ring is None
+   tile=visible(entries()[0])
+   if not tile or not tile.button:return True
+   assert tile is pending_tile and tile.media_texture and tile.upload_ring is None
    backed=MediaItem('asset-1','server.png',datetime.now(),1.5,metadata={'visibility':'timeline','updatedAt':'server-revision','timeline_slot':True})
    w.timeline_index.apply('2026-11',[backed,*initial]);w.timeline_buckets=[{'timeBucket':'2026-11-01','count':len(initial)+1}]
    w.set_library_items(w.timeline_index.items,append=True,reflow=True)
