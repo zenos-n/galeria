@@ -324,3 +324,30 @@ as well as the existing saved-session/grid/cache/scroll preservation checks.
 The80unit tests and native viewer-controls, clipboard, editor-exit, opening
 latency and all six selection/focus action-target checks pass on the packaged
 GTK environment. Production Immich authentication was not exercised.
+
+
+Galeria0.14.4 accepts Ctrl+V image uploads in the connected gallery, selection
+and focus views. Clipboard pixels become a PNG in memory and use the existing
+checksum preflight, duplicate skipping, upload progress and incremental refresh.
+Text fields, dialogs and editing keep their normal paste behavior; late clipboard
+replies cannot upload to a newly selected account. No temporary image is written.
+
+Move to trash now offers This device and Immich, This device only, or Immich only,
+with both selected when both copies are known. Local files use the desktop Trash;
+cloud items use Immich Trash. Local-only deletion leaves the cloud item visible,
+and cloud-only deletion preserves local files. Sync-journal associations are
+reused; manual imports and new downloads record account/asset/path/checksum
+associations. Older unrecorded copies are not guessed or scanned for. Each known
+original is checked before removal; changed files and symlinks are kept. A failed
+cloud operation leaves local originals untouched. Local failures after a cloud
+success are reported separately. Restoring Immich Trash restores the cloud copy;
+local copies can be restored from the desktop Trash.
+
+Verification uses generated media and fixture accounts: actual cross-process
+clipboard pixels and real Ctrl+V, multipart uploads/alpha/checksum/duplicates,
+selection/focus/text paste, failure and account-change guards; the native Trash
+scope dialog and real reversible desktop Trash, local/cloud/both modes; existing
+six action animation targets and actual file-drop upload regressions. No
+production files or cloud assets were deleted in tests.
+All85unit tests pass, along with native image-paste, Trash-scope, action-target,
+file-drop upload, viewer clipboard, editor-exit and cold/warm Open With checks.

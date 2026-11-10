@@ -307,6 +307,8 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.add_controller(keys)
 
     def key_pressed(self, _controller, keyval, _keycode, state):
+        if keyval in (Gdk.KEY_v,Gdk.KEY_V) and state & Gdk.ModifierType.CONTROL_MASK and not state & (Gdk.ModifierType.ALT_MASK|Gdk.ModifierType.SUPER_MASK|Gdk.ModifierType.SHIFT_MASK) and not isinstance(self.get_focus(),(Gtk.Editable,Gtk.TextView)) and not self.get_visible_dialog() and not (self.viewer and self.viewer.editing):
+            self.paste_image();return True
         if self.viewer:
             return self.viewer.on_key(_controller, keyval, _keycode, state)
         if keyval in (Gdk.KEY_d,Gdk.KEY_D) and state & Gdk.ModifierType.SHIFT_MASK and not state & (Gdk.ModifierType.CONTROL_MASK|Gdk.ModifierType.ALT_MASK|Gdk.ModifierType.SUPER_MASK) and not isinstance(self.get_focus(),Gtk.Editable) and not self.get_visible_dialog() and self.mosaic.selection_mode and self.mosaic.selected:
@@ -537,7 +539,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.14.3", developer_name="Negative Zero",
+                                 version="0.14.4", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 
@@ -576,6 +578,10 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
     def choose_folders(self):
         dialog = Gtk.FileDialog(title="Choose photo folders", accept_label="Choose folders")
         dialog.select_multiple_folders(self, None, self.folders_selected)
+
+    def paste_image(self):
+        from import_ui import paste_image
+        paste_image(self)
 
     def choose_uploads(self):
         dialog = Gtk.FileDialog(title="Add files", accept_label="Add files")

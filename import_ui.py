@@ -1,9 +1,9 @@
 """Native file/folder import review and real streamed Immich uploads."""
-import threading
+import threading,time
 from pathlib import Path
 from gi.repository import Adw,GLib,Gtk
 from library import LibraryError,scan_folders
-from upload_media import upload
+from upload_media import upload,upload_bytes
 
 
 def import_sheet(window,files):
@@ -22,7 +22,19 @@ def import_sheet(window,files):
     window.dialog=dialog;dialog.present(window)
 
 
-def start_upload(window,paths):
+def paste_image(window):
+    if not window.client:window.notice('Connect Immich to upload an image.');return
+    client=window.client;generation=window.data_generation
+    def ready(clipboard,result):
+        if window.data_stopped or window.client is not client or window.data_generation!=generation:return
+        try:image=clipboard.read_texture_finish(result)
+        except GLib.Error:window.notice('The clipboard does not contain an image.');return
+        if image is None:window.notice('The clipboard does not contain an image.');return
+        start_upload(window,image=image)
+    window.get_clipboard().read_texture_async(None,ready)
+
+
+def start_upload(window,paths=(),image=None):
     if getattr(window,'upload_cancel',None) and not window.upload_cancel.is_set():window.notice('Wait for the current upload to finish.');return
     client=window.client;cancel=threading.Event();window.upload_cancel=cancel
     def progress(name,count,total):
@@ -31,6 +43,13 @@ def start_upload(window,paths):
             return False
         GLib.idle_add(show)
     def work():
+        if cancel.is_set() or window.client is not client:raise InterruptedError()
+        if image is not None:
+            progress('Pasted image',0,1)
+            data=image.save_to_png_bytes().get_data()
+            if cancel.is_set() or window.client is not client:raise InterruptedError()
+            _,created=upload_bytes(client,data,time.strftime('pasted-image-%Y-%m-%d-%H%M%S.png'),time.time(),cancel)
+            return int(created),int(not created)
         items,errors=scan_folders(paths);uploaded=existing=0
         if errors:raise LibraryError(errors[0])
         if not items:raise LibraryError('No supported photos or videos found.')

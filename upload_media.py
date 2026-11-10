@@ -16,10 +16,14 @@ def upload(client,path,cancel,visibility=None):
     if signature(path.stat())!=signature(expected):raise LibraryError('File changed; try uploading it again.')
     checksum=digest.hexdigest()
     result=client.request('/assets/bulk-upload-check',{'assets':[{'id':str(path),'checksum':checksum}]})['results'][0]
-    if result.get('assetId'):return result['assetId'],False
-    if result.get('action')!='accept':raise LibraryError('Immich rejected this file.')
-    if cancel.is_set():raise InterruptedError()
-    return upload_file(client,path,checksum,expected,cancel,visibility=visibility),True
+    asset=result.get('assetId');created=not bool(asset)
+    if not asset:
+        if result.get('action')!='accept':raise LibraryError('Immich rejected this file.')
+        if cancel.is_set():raise InterruptedError()
+        asset=upload_file(client,path,checksum,expected,cancel,visibility=visibility)
+    from local_media import remember_copy
+    remember_copy(client,path,asset,checksum,expected)
+    return asset,created
 
 
 def upload_bytes(client,data,filename,modified,cancel,visibility=None):

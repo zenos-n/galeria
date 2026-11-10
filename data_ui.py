@@ -283,6 +283,10 @@ class LibraryUI:
         self.background(work,complete,failed)
 
     def selected_action(self,action,items=None,target=None):
+        if action=='trash' and self.current_page!='trash':
+            from trash_ui import trash_selected
+            values=list(items) if items is not None else [self.mosaic.tiles[i].media_item for i in self.mosaic.selected if not self.mosaic.tiles[i].media_item.metadata.get('placeholder')]
+            trash_selected(self,values,target);return
         if not self.client:self.notice('Local files are read-only.');return
         if getattr(self,'media_action_pending',False):return
         ids=[item.id for item in items] if items is not None else [self.mosaic.tiles[i].media_item.id for i in self.mosaic.selected]
@@ -306,13 +310,7 @@ class LibraryUI:
                         if item.id in ids:item.metadata['isFavorite']=True
                     self.mosaic.set_selection(False)
             self.notice('Items restored.' if restore else 'Favorites updated.' if action=='favorite' else 'Items removed from archive.' if unarchive else 'Items archived.' if action=='archive' else 'Items moved to trash.')
-        if action=='trash' and not restore:
-            confirm=Adw.AlertDialog(heading=f'Move {len(ids)} items to trash?',body='You can restore them from Trash.')
-            confirm.add_response('cancel','Cancel');confirm.add_response('trash','Move to trash')
-            confirm.set_response_appearance('trash',Adw.ResponseAppearance.DESTRUCTIVE)
-            confirm.connect('response',lambda _,value:self.mutate_media(perform,done) if value=='trash' else None)
-            confirm.present(self)
-        else:self.mutate_media(perform,done)
+        self.mutate_media(perform,done)
 
     def add_selected_to_album(self):
         if not self.client:self.notice('Connect Immich to add items to albums.');return

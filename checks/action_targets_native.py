@@ -10,9 +10,10 @@ from library import MediaItem,ImmichClient,LibraryError
 from PIL import Image
 from imaging import decode_image
 path=Path(root.name)/'original.png';Image.new('RGB',(100,70),'purple').save(path);original=path.read_bytes()
-items=[MediaItem(str(i),'original.png',datetime(2026,11,30-i%20),10/7,path=str(path),metadata={'visibility':'timeline'}) for i in range(80)]
+items=[MediaItem(str(i),'original.png',datetime(2026,11,30-i%20),10/7,metadata={'visibility':'timeline'}) for i in range(80)]
 class Client(ImmichClient):
  def __init__(self):super().__init__('https://fixture.invalid');self.token='fixture';self.user={'id':'fixture'};self.locked_until=time.monotonic()+600;self.calls=[];self.fail=False
+ def image_bytes(self,*args,**kwargs):return original
  def update_assets(self,ids,fields):
   if self.fail:raise LibraryError('Fixture server failure')
   self.calls.append((ids,fields))

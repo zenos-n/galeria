@@ -1,5 +1,5 @@
 """Streaming, atomic original downloads; never overwrite a source file."""
-import os
+import os,hashlib
 from http.client import HTTPException
 from pathlib import Path
 import tempfile
@@ -25,13 +25,13 @@ def save_original(client,item,destination,cancel,progress=lambda *_:None,overwri
         with os.fdopen(fd,'wb') as output:
             with open(item.path,'rb') if item.path else client.open_original(item) as source:
                 total=os.fstat(source.fileno()).st_size if item.path else int(source.headers.get('Content-Length',0))
-                written=0
+                written=0;digest=hashlib.sha1()
                 while True:
                     if cancel.is_set():raise DownloadCancelled()
                     if not item.path:client.check_original_access(item)
                     chunk=source.read(1024*1024)
                     if not chunk:break
-                    output.write(chunk);written+=len(chunk);progress(written,total)
+                    output.write(chunk);digest.update(chunk);written+=len(chunk);progress(written,total)
                 if total and written!=total:raise LibraryError('The download ended before the file was complete.')
             output.flush();os.fsync(output.fileno())
         if cancel.is_set():raise DownloadCancelled()
@@ -43,6 +43,9 @@ def save_original(client,item,destination,cancel,progress=lambda *_:None,overwri
                 except FileExistsError:
                     target=destination.with_name(destination.stem+f' ({number})'+destination.suffix);number+=1
             destination=target
+        if not item.path:
+            from local_media import remember_copy
+            remember_copy(client,destination,item.id,digest.hexdigest(),destination.stat())
         return destination
     except HTTPException:
         raise LibraryError('The download ended before the file was complete. Try again.') from None
