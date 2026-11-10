@@ -11,6 +11,7 @@ pkgs.stdenv.mkDerivation {
   installPhase = ''
     mkdir -p $out/lib/galeria $out/bin $out/share/applications $out/share/metainfo $out/share/icons/hicolor/scalable/apps
     cp *.py style.css $out/lib/galeria/
+    ${pkgs.python3}/bin/python3 -m compileall -q --invalidation-mode unchecked-hash "$out/lib/galeria"
     cp -r icons $out/lib/galeria/
     cp data/com.neg-zero.Galeria.desktop $out/share/applications/
     cp data/com.neg-zero.Galeria.metainfo.xml $out/share/metainfo/
