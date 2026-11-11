@@ -39,7 +39,7 @@ def check():
    if mode=='selection' and time.monotonic()-mark<.25:return True
    target=getattr(w.viewer,'lock' if action=='locked' else action) if mode=='viewer' else w.selection_controls[action]
    if mode=='viewer':
-    controls=[w.viewer.fullscreen_button,w.viewer.download,w.viewer.share,w.viewer.info,w.viewer.edit_button]
+    controls=[w.viewer.download,w.viewer.share,w.viewer.info,w.viewer.edit_button,w.viewer.fullscreen_button]
     positions=[control.compute_bounds(w)[1].get_x() for control in controls]
     assert positions==sorted(positions) and positions[0]>w.get_width()/2,positions
    client.release.clear();client.waiting.clear()

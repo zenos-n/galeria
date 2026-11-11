@@ -406,3 +406,6 @@ the server response, with rollback after failures and reconciliation of partial
 local Trash results. Automatic folder sync requires ten seconds of observed
 size and modification-time stability and skips files open for writing on Linux.
 Details shows full local paths from the account-scoped upload journal.
+
+Version 0.14.8 places Fullscreen at the far right of the viewer header. Edit
+uses a pencil icon, with the existing Done button while editing.

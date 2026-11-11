@@ -46,14 +46,10 @@ class Viewer(Gtk.Overlay):
         self.favorite_syncing=False
         self.favorite.connect('toggled',self.toggle_favorite)
         self.header.pack_start(self.favorite)
-        self.edit_button = Gtk.Button(label='Edit',tooltip_text='Edit image')
-        self.edit_button.add_css_class('flat')
-        self.edit_button.connect('clicked',lambda _:self.set_editing(not self.editing))
-        self.header.pack_end(self.edit_button)
+        self.edit_button = icon_button('document-edit-symbolic','Edit',lambda _:self.set_editing(not self.editing))
         self.info = Gtk.ToggleButton(icon_name='info-outline-symbolic',tooltip_text='Photo details')
         self.info.add_css_class('flat')
         self.info.connect('toggled',self.toggle_details)
-        self.header.pack_end(self.info)
         self.download = icon_button('folder-download-symbolic','Download',lambda _:window.download_items([self.source.media_item]))
         self.share = icon_button('gallery-share-symbolic','Share',lambda _:share_sheet(window))
         self.fullscreen_button = icon_button('view-fullscreen-symbolic','Fullscreen media',lambda _:self.set_immersive(not self.immersive))
@@ -61,7 +57,7 @@ class Viewer(Gtk.Overlay):
         self.trash=icon_button('user-trash-symbolic','Restore from trash' if not device_file and window.current_page=='trash' else 'Move to trash',lambda widget:window.selected_action('trash',[self.source.media_item],target=widget))
         self.lock=icon_button('changes-prevent-symbolic','Move to locked folder',lambda widget:window.move_selected_to_locked([self.source.media_item],target=widget))
         for widget in (self.lock,self.trash,self.archive):self.header.pack_start(widget)
-        for widget in (self.share,self.download,self.fullscreen_button):self.header.pack_end(widget)
+        for widget in (self.fullscreen_button,self.edit_button,self.info,self.share,self.download):self.header.pack_end(widget)
         self.viewing_controls=[self.favorite,self.info,self.download,self.share,self.fullscreen_button,self.archive,self.trash,self.lock]
         if device_file:
             for control in (self.favorite,self.share,self.archive,self.lock):
@@ -502,7 +498,9 @@ class Viewer(Gtk.Overlay):
         self.stage.crop_frame.set_visible(active and self.editor_categories.get_active_name() == 'Crop')
         self.sync_editor_inset()
         self.stage.queue_allocate()
-        self.edit_button.set_label('Done' if active else 'Edit')
+        if active:self.edit_button.set_label('Done')
+        else:self.edit_button.set_icon_name('document-edit-symbolic')
+        self.edit_button.set_tooltip_text('Done editing' if active else 'Edit')
         self.title.set_title(('Edit video' if getattr(self,'video_editor',None) else 'Edit photo') if active else getattr(self.source,'filename','Photo preview'))
 
     def sync_editor_inset(self, *_):
