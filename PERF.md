@@ -717,3 +717,20 @@ materialization progress, group captions, date motion, concurrent actions and
 out-of-order rollback pass;97unit tests pass. GC traces show18–72ms full
 collections during fixture setup, with no evidence tying them to measured
 flight spikes in that run; no GC policy changes were introduced.
+
+
+A later unprofiled20-item compositor run still missed one refresh after the
+initial changes. The remaining per-item tile/check renumbering is now a plain
+ID→index map prepared on the worker. Cells resolve indices through that map,
+checks follow their cells, and the UI swaps it atomically. Metadata hydration
+updates ID slots, including after repeated removal. The former imperative
+index loop is gone; retained controls are accessed directly from cells.
+
+`checks/archive_presentation_native.py` is an explicit-monitor opt-in check
+with private fixture state,600unique generated textures,8k items/263months
+and a held mutation. It reads complete GDK compositor presentation timestamps,
+not click latency or just CPU after-paint intervals, and detects missed monitor
+refreshes. Baseline samples vary between0–2missed refreshes. Two single-item
+and two20-item runs of the final source each report0missed, with16.685–16.691ms
+presentation intervals on the60HzDP-2 monitor/Wayland/Vulkan. This is controlled
+fixture evidence; unrelated system load can still affect presentation.

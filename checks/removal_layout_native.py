@@ -36,6 +36,12 @@ for mode in ('all','months','years'):
             assert current.owners[tile]==(current.month_cards[key],current.year_cards[key[:4]])
         assert not (set(retained.values()) ^ current.tile_set)
         assert all(tile in current.tile_set for tile in current.owners if hasattr(tile,'media_item'))
+        # A second compaction followed by metadata hydration must keep click/check indices aligned.
+        assert current.apply_removal(prepare_timeline(current.items,None,900,removed={'11','13'},mode=mode,expanded_month=current.expanded_month,expanded_year=current.expanded_year))
+        from dataclasses import replace
+        key,_,_,a,b=next(month for month in current.months if month[4]>month[3])
+        current.update_bucket(key,[replace(item,id='hydrated:'+item.id) for item in current.items[a:b]])
+        assert all(tile.index==i and current.checks[i].index==i for i,tile in enumerate(current.tiles))
         current.dispose();expected.dispose()
 print('IN-PLACE ALL/MONTH/YEAR GEOMETRY, EMPTY MONTH PRUNING, RETAINED CELLS AND CHECK INDICES PASSED',flush=True)
 

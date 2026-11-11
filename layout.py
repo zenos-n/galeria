@@ -34,7 +34,7 @@ def prepare_timeline(items,buckets,width,target=154,query='',removed=(),mode='al
     for ids,row_width in groups:
         filtered=[i for i in ids if query.casefold() in items[i].filename.casefold()] if query else ids
         rows[(ids,row_width,target,query)]=(filtered,RowLayout([items[i].ratio for i in filtered],row_width,target))
-    return {'items':items,'asset_months':asset_months,'months':months,'bucket_counts':counts,'rows':rows}
+    return {'items':items,'indices':{item.id:i for i,item in enumerate(items)},'asset_months':asset_months,'months':months,'bucket_counts':counts,'rows':rows}
 
 
 class RowLayout:

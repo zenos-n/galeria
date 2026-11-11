@@ -22,6 +22,7 @@ class Mosaic(Gtk.Widget):
         self.bucket_counts={}
         self.indexed=bool(buckets and any(item.metadata.get('timeline_slot') for item in (items or [])))
         self.items=items
+        self.cell_indices=prepared['indices'] if prepared else {item.id:i for i,item in enumerate(items or [])}
         self.placeholder_paintable=Gdk.MemoryTexture.new(1,1,Gdk.MemoryFormat.R8G8B8A8,GLib.Bytes.new(bytes([58,58,61,255])),4)
         self.target=154
         self.mode='all'
@@ -266,26 +267,26 @@ class Mosaic(Gtk.Widget):
         existing={tile.media_item.id:tile for tile in self.tiles}
         if not items or any(item.id not in existing for item in items) or any(key not in self.month_cards for key,_,_,_,_ in months):return False
         selected={self.tiles[i].media_item.id for i in self.selected}
-        checks=self.checks
         tiles=[existing[item.id] for item in items];retained=set(tiles)
         removed=self.tile_set-retained;removed_ids={tile.media_item.id for tile in removed}
+        removed_checks=[tile.check for tile in removed]
+        retained_checks=[tile.check for tile in tiles]
         top,page=self.visible_range()
         anchor=min((tile for tile in self.active_widgets & retained if tile in self.rendered and self.rendered[tile][1]+self.rendered[tile][3]>=top),
                    key=lambda tile:(self.rendered[tile][1],self.rendered[tile][0]),default=None) if top>0 and self.mode=='all' else None
         offset=top-self.rendered[anchor][1] if anchor else 0
         self.items=items;self.tiles=tiles;self.tile_set=retained
-        self.checks=[checks[tile.index] for tile in tiles]
+        self.checks=retained_checks;self.cell_indices=prepared['indices']
         for i,(tile,item) in enumerate(zip(tiles,items)):
-            if tile.media_item is item:tile.index=i
-            else:
+            if tile.media_item is not item:
                 tile.rebind(self,i,item,item.ratio)
                 key=prepared['asset_months'][item.id]
                 self.owners[tile]=(self.month_cards[key],self.year_cards[key[:4]])
-            self.checks[i].index=i
         self.selected={i for i,tile in enumerate(tiles) if tile.media_item.id in selected} if selected else set()
         self.anchor_index=None
+        for check in removed_checks:check.dispose()
         for tile in removed:
-            checks[tile.index].dispose();tile.release();self.owners.pop(tile,None)
+            tile.release();self.owners.pop(tile,None)
             if tile.get_parent():tile.unparent()
         headings={month[0]:heading for month,heading in zip(self.months,self.headings)}
         keys={month[0] for month in months};years={month[2] for month in months}
@@ -339,6 +340,7 @@ class Mosaic(Gtk.Widget):
         geometry_changed=any(self.tiles[i].photo_ratio!=item.ratio or self.query and self.tiles[i].filename!=item.filename for i,item in enumerate(items,start))
         for i,item in enumerate(items,start):
             tile=self.tiles[i];previous=tile.media_item
+            if previous.id!=item.id:self.cell_indices.pop(previous.id,None);self.cell_indices[item.id]=i
             same=previous.id==item.id and previous.metadata.get('updatedAt')==item.metadata.get('updatedAt')
             rebuild=not same or previous.kind!=item.kind or previous.filename!=item.filename or previous.metadata.get('duration')!=item.metadata.get('duration')
             texture=tile.media_texture if same else None

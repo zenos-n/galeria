@@ -23,7 +23,9 @@ class Icon:
 
 
 class Check:
-    def __init__(self,owner,index):self.owner=owner;self.index=index;self.widget=None;self.visible=False;self.active=False;self.child_visible=False
+    def __init__(self,owner,index):self.owner=owner;self.cell=owner.tiles[index];self.cell.check=self;self.widget=None;self.visible=False;self.active=False;self.child_visible=False
+    @property
+    def index(self):return self.cell.index
     def ensure(self):
         if self.widget is None:
             self.widget=Gtk.CheckButton(tooltip_text='Select photo',css_classes=['media-check'],active=self.index in self.owner.selected)
@@ -49,6 +51,11 @@ class Check:
 
 
 class Cell(Gtk.Widget):
+    @property
+    def index(self):return self.owner.cell_indices.get(self.media_item.id,self._index) if self.media_item else self._index
+    @index.setter
+    def index(self,value):self._index=value
+
     def __init__(self,owner,index,item,ratio):
         super().__init__(css_classes=['photo-tile'])
         self.owner=owner;self.index=index;self.media_item=item;self.photo_ratio=ratio
