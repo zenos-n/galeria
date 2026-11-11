@@ -68,7 +68,11 @@ def check():
     client.release.set()
    phase=3
   elif phase==3 and len(w.media_items)==before-count and not w.loading_more and not w.mosaic.tick and not w.media_action_pending:
-   assert w.viewer is None and not w.mosaic.selection_mode
+   assert not w.mosaic.selection_mode
+   if mode=='viewer':
+    assert w.viewer is not None and not w.viewer.closing
+    w.viewer.dismiss_action()
+   else:assert w.viewer is None
    assert all(tile.media_texture is not None for tile in w.mosaic.active_widgets & w.mosaic.tile_set)
    case+=1
    if case<len(cases):phase=0;return True

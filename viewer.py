@@ -302,13 +302,17 @@ class Viewer(Gtk.Overlay):
         if self.stage.progress<1 or self.closing or self.media_stack.get_transition_running():
             return
         if self.confirm_edit_exit(lambda:self.move(step)):return
+        visible=[i for i,tile in enumerate(self.window.mosaic.tiles) if tile in self.window.mosaic.rendered and not tile.media_item.metadata.get('placeholder')]
+        index=visible[(visible.index(self.index)+step)%len(visible)]
+        self.show_item(self.window.mosaic.tiles[index],step)
+
+    def show_item(self,source,step=1):
         old=self.stage
         self.dispose_editors();self.photo_editor=None;self.video_editor=None
         if old.video_player:old.video_player.pause()
         self.window.mosaic.hide_tile(None)
-        visible=[i for i,tile in enumerate(self.window.mosaic.tiles) if tile in self.window.mosaic.rendered and not tile.media_item.metadata.get('placeholder')]
-        self.index=visible[(visible.index(self.index)+step)%len(visible)]
-        self.source=self.window.mosaic.tiles[self.index]
+        self.closing=False
+        self.index=source.index;self.source=source
         self.stage=PhotoStage(self.source,self.index)
         self.zoom_controls.reset()
         self.editor.set_child(self.make_editor())

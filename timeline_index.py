@@ -36,3 +36,15 @@ class TimelineIndex:
             if values:
                 start=len(result.items);result.items.extend(values);result.ranges[key]=(start,len(result.items))
         return result
+
+    def restored(self,items):
+        result=self.without(())
+        values={item.id:item for item in result.items}
+        for item in items:values.setdefault(item.id,item)
+        result.items=sorted(values.values(),key=lambda item:item.created,reverse=True)
+        result.ranges={}
+        for i,item in enumerate(result.items):
+            key=item.created.strftime('%Y-%m')
+            start=result.ranges.get(key,(i,i))[0]
+            result.ranges[key]=(start,i+1)
+        return result

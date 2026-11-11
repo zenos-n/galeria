@@ -4,7 +4,7 @@ from local_media import copies_for,trash_copies
 
 
 def trash_selected(window,items,target=None):
-    if not items or getattr(window,'media_action_pending',False):return
+    if not items:return
     client=window.client
     generation=window.data_generation;mosaic=window.mosaic
     def current():

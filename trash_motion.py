@@ -16,7 +16,7 @@ class ActionMotion(Gtk.Widget):
         icon=target.get_child() if isinstance(target,Gtk.Button) else target
         ok,bounds=icon.compute_bounds(window.root_overlay) if icon else (False,None)
         self.target=(bounds.get_x()+bounds.get_width()/2,bounds.get_y()+bounds.get_height()/2) if ok else None
-        self.destination=target;window.action_motion=self;window.root_overlay.add_overlay(self)
+        self.destination=target;window.action_motion=self;window.action_motions.add(self);window.root_overlay.add_overlay(self)
         started=None
         def frame(widget,clock):
             nonlocal started
@@ -28,15 +28,20 @@ class ActionMotion(Gtk.Widget):
                 for arrow in viewer.arrows:arrow.set_opacity(0)
             self.queue_draw()
             if self.progress>=1:
-                window.root_overlay.remove_overlay(self);window.action_motion=None;done();return GLib.SOURCE_REMOVE
+                self.tick=0
+                window.root_overlay.remove_overlay(self);window.action_motions.discard(self)
+                window.action_motion=next(iter(window.action_motions),None)
+                done();return GLib.SOURCE_REMOVE
             return GLib.SOURCE_CONTINUE
         self.tick=self.add_tick_callback(frame)
 
     def cancel(self):
-        if self.tick:self.remove_tick_callback(self.tick);self.tick=0
-        self.frames.clear()
-        if self.get_parent()==self.window.root_overlay:self.window.root_overlay.remove_overlay(self)
-        self.window.action_motion=None
+        for motion in list(self.window.action_motions):
+            if motion.tick:motion.remove_tick_callback(motion.tick);motion.tick=0
+            motion.frames.clear()
+            if motion.get_parent()==self.window.root_overlay:self.window.root_overlay.remove_overlay(motion)
+        self.window.action_motions.clear();self.window.action_motion=None
+        self.window.media_action_pending=False
 
     def do_measure(self,orientation,for_size):return 0,0,-1,-1
 

@@ -409,3 +409,11 @@ Details shows full local paths from the account-scoped upload journal.
 
 Version 0.14.8 places Fullscreen at the far right of the viewer header. Edit
 uses a pencil icon, with the existing Done button while editing.
+
+Version 0.14.10 starts Archive and Trash flights and grid removal at the click.
+Focus advances to the closest remaining file while the removed media flies to
+the action icon, preserving fullscreen. Further removals can run while earlier
+requests are pending. Failed requests restore their own items and timeline
+ranges, with pending removals filtered out of stale page data. Mutation I/O
+runs independently of preview and metadata loading. Image opening morphs use
+the decoded texture aspect and a clipped cover fit to avoid side strips.

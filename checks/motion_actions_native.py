@@ -17,6 +17,7 @@ items=[MediaItem(str(i),'original.png',datetime(2026-i//40//12,12-(i//40)%12,20-
 class Client:
  refresh_serial=0;locked_until=0;server_lock_pending=False;identity='fixture'
  def __init__(self):self.calls=[]
+ def image_bytes(self,*args,**kwargs):return path.read_bytes()
  def update_assets(self,ids,body):self.calls.append((ids,body))
  def trash_assets(self,ids):self.calls.append((ids,'trash'))
 class LockedClient(Client):
@@ -64,18 +65,23 @@ def check():
    formats=window.get_clipboard().get_formats()
    assert formats.contain_gtype(Gdk.Texture.__gtype__) and not formats.contain_gtype(Gdk.FileList.__gtype__),formats.to_string()
    media_menu(window,m,items[0],30,60)
-   window.client=client;m.set_selection(True);m.toggle(0);window.selected_action('archive');phase=11
-  elif phase==11 and len(window.media_items)==479 and not window.loading_more:
+   window.client=client
+   for item in window.media_items:item.path=''
+   m.set_selection(True);m.toggle(0);window.selected_action('archive');phase=11
+  elif phase==11 and len(window.media_items)==479 and not window.loading_more and not window.pending_mutations and not window.action_motions:
    assert client.calls[-1][1]=={'visibility':'archive'}
    window.open_viewer(0);phase=12
   elif phase==12 and window.viewer.stage.progress==1:
    window.viewer.archive.emit('clicked');phase=13
-  elif phase==13 and window.viewer is None and len(window.media_items)==478:
-   window.open_viewer(0);phase=14
+  elif phase==13 and window.viewer is not None and len(window.media_items)==478 and not window.pending_mutations and not window.action_motions:
+   phase=14
   elif phase==14 and window.viewer.stage.progress==1:
-   window.viewer.trash.emit('clicked');window.get_visible_dialog().emit('response','trash');phase=15
-  elif phase==15 and window.viewer is None and len(window.media_items)==477:
+   window.viewer.trash.emit('clicked');phase=141
+  elif phase==141 and isinstance(window.get_visible_dialog(),Adw.AlertDialog):
+   dialog=window.get_visible_dialog();dialog.emit('response','trash');dialog.close();phase=15
+  elif phase==15 and window.viewer is not None and len(window.media_items)==477 and not window.pending_mutations and not window.action_motions:
    assert client.calls[-1][1]=='trash';assert path.exists()
+   window.viewer.dismiss_action()
    window.client=LockedClient();window.get_clipboard().set_content(None)
    copy_media(window,MediaItem('locked','locked.png',datetime.now(),metadata={'visibility':'locked'}));phase=16
   elif phase==16 and getattr(window,'locked_clipboard',None):
@@ -96,6 +102,9 @@ def activate(app):
  window.library_mode='local';window.local_items=items
  texture=window.texture_from_pixels(decode_image(path))
  for item in items:window.texture_cache[window.texture_key(item)]=texture
+ for mode,format in [('months','%Y-%m'),('years','%Y')]:
+  for key in {item.created.strftime(format) for item in items}:
+   window.date_cover_cache[(mode,key)]=[(item.id,texture) for item in items if item.created.strftime(format)==key][:4]
  window.set_library_items(items);GLib.timeout_add(20,check)
 app.connect('activate',activate);app.run([])
 assert not errors

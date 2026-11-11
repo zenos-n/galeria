@@ -36,6 +36,7 @@ class LibraryUI:
         self.loading_more=False
         self.scroll_input_serial=0
         self.pending_media=None
+        self.pending_mutations={};self.pending_removals={};self.action_motions=set()
         self.vault=None
         self.sync_cancel=threading.Event()
         self.scope_filters={}
@@ -44,6 +45,7 @@ class LibraryUI:
         self.dates_ready=True
         self.bucket_scope={}
         self.io=ThreadPoolExecutor(max_workers=3,thread_name_prefix='gallery-io')
+        self.mutation_io=ThreadPoolExecutor(max_workers=2,thread_name_prefix='gallery-mutation')
         self.images=ImageQueue(4);self.image_wanted={}
         self.cached_images=ImageQueue(2)
         self.previews=ThreadPoolExecutor(max_workers=2,thread_name_prefix='gallery-preview')
@@ -77,6 +79,7 @@ class LibraryUI:
         if self.refresh_timer:GLib.source_remove(self.refresh_timer);self.refresh_timer=0
         self.data_generation+=1
         self.io.shutdown(wait=False,cancel_futures=True)
+        self.mutation_io.shutdown(wait=False,cancel_futures=True)
         self.images.shutdown(wait=False,cancel_futures=True)
         self.cached_images.shutdown(wait=False,cancel_futures=True)
         self.previews.shutdown(wait=False,cancel_futures=True)
@@ -274,21 +277,22 @@ class LibraryUI:
             self.status_actions.set_visible(True)
 
     def mutate_media(self,work,done,optimistic=None):
-        if getattr(self,'media_action_pending',False):return
-        scope=(self.data_generation,self.mosaic)
-        pending=getattr(self,'mutation_pending',None)
-        if pending and pending[0]==scope[0]:return
-        self.mutation_pending=scope
+        if getattr(self,'media_action_pending',False) and not optimistic:return
+        self.pending_mutations={key:value for key,value in self.pending_mutations.items() if value[0]==self.data_generation}
+        if self.pending_mutations and (not optimistic or any(not value[1] for value in self.pending_mutations.values())):
+            self.notice('Finishing the previous media action…');return
+        token=object()
+        self.pending_mutations[token]=(self.data_generation,bool(optimistic))
         settle=optimistic() if optimistic else None
         def complete(value):
-            if self.mutation_pending==scope:self.mutation_pending=None
+            self.pending_mutations.pop(token,None)
             removed=done(value)
             if settle:settle(removed)
         def failed(message):
-            if self.mutation_pending==scope:self.mutation_pending=None
+            self.pending_mutations.pop(token,None)
             if settle:settle([])
             self.notice(message)
-        self.background(work,complete,failed)
+        self.background(work,complete,failed,executor=self.mutation_io)
 
     def selected_action(self,action,items=None,target=None):
         if action=='trash' and (self.current_page!='trash' or items and all(item.path for item in items)):
@@ -296,16 +300,16 @@ class LibraryUI:
             values=list(items) if items is not None else [self.mosaic.tiles[i].media_item for i in self.mosaic.selected if not self.mosaic.tiles[i].media_item.metadata.get('placeholder')]
             trash_selected(self,values,target);return
         if not self.client:self.notice('Local files are read-only.');return
-        if getattr(self,'media_action_pending',False):return
+        if getattr(self,'media_action_pending',False) and action not in ('trash','archive'):return
         ids=[item.id for item in items] if items is not None else [self.mosaic.tiles[i].media_item.id for i in self.mosaic.selected]
         if not ids:return
-        mosaic=self.mosaic
+        mosaic=self.mosaic;client=self.client
         restore=action=='trash' and self.current_page=='trash'
         unarchive=action=='archive' and self.current_page=='archive'
         def perform():
-            if action=='favorite':return self.client.update_assets(ids,{'isFavorite':True})
-            if action=='archive':return self.client.update_assets(ids,{'visibility':'timeline' if unarchive else 'archive'})
-            return self.client.restore_assets(ids) if restore else self.client.trash_assets(ids)
+            if action=='favorite':return client.update_assets(ids,{'isFavorite':True})
+            if action=='archive':return client.update_assets(ids,{'visibility':'timeline' if unarchive else 'archive'})
+            return client.restore_assets(ids) if restore else client.trash_assets(ids)
         def done(_):
             self.page_cache.clear();self.collection_cache.clear()
             self.client.refresh_serial=getattr(self.client,'refresh_serial',0)+1
@@ -376,27 +380,32 @@ class LibraryUI:
         ids=set(ids)
         generation=self.data_generation;page=self.current_page
         viewer=self.viewer if self.viewer and self.viewer.source.media_item.id in ids else None
+        viewer_item=viewer.source.media_item if viewer else None
         uploads=manager(self,False)
         upload_entries={key:entry for key,entry in uploads.entries.items() if entry['asset'] in ids} if uploads else {}
         for key in upload_entries:uploads.entries.pop(key)
         original_items=[item for item in self.media_items if item.id in ids]
-        original_index=self.timeline_index
+        index_items=[item for item in self.timeline_index.items if item.id in ids] if self.timeline_index else []
+        token=object()
+        self.pending_removals={key:value for key,value in self.pending_removals.items() if value[0]==generation}
+        self.pending_removals[token]=(generation,ids)
         self.remove_from_timeline(ids)
-        pending_index=self.timeline_index
         finished=False;result=None
         def reconcile():
             if not finished or result is None:return
-            if self.data_stopped or self.data_generation!=generation or self.current_page!=page:return
-            self.media_action_pending=False
+            self.pending_removals.pop(token,None)
+            if self.data_stopped or self.data_generation!=generation:return
             for key,entry in upload_entries.items():
                 if entry['asset'] not in result:uploads.entries[key]=entry
+            index_restored=[item for item in index_items if item.id not in result]
+            if self.timeline_index and index_restored:
+                self.timeline_index=self.timeline_index.restored(index_restored)
+                self.timeline_buckets=[{'timeBucket':key+'-01','count':b-a} for key,(a,b) in self.timeline_index.ranges.items()]
+            if self.current_page!=page:return
             restored=[item for item in original_items if item.id not in result]
             if restored:
-                if original_index and self.timeline_index is pending_index:
-                    self.timeline_index=original_index.without(result)
-                    self.timeline_buckets=[{'timeBucket':key+'-01','count':b-a} for key,(a,b) in self.timeline_index.ranges.items()]
                 self.set_library_items([*self.media_items,*restored],append=True,reflow=True)
-            if viewer and viewer.source.media_item.id not in result and self.viewer is None:
+            if viewer and viewer.source.media_item is viewer_item and viewer_item.id not in result and self.viewer is None:
                 if viewer.device_file:self.open_viewer(viewer.index,viewer.source,device_file=True)
                 else:
                     tile=next((tile for tile in self.mosaic.tiles if tile.media_item.id==viewer.source.media_item.id),None)
@@ -404,7 +413,6 @@ class LibraryUI:
         def animation_finished():
             nonlocal finished
             finished=True
-            if result is None:self.media_action_pending=True
             reconcile()
         def settle(removed):
             nonlocal result
@@ -422,42 +430,57 @@ class LibraryUI:
         if viewer:
             viewer.closing=True;viewer.show_chrome(True)
             if viewer.stage.video_player:viewer.stage.video_player.pause()
-        self.media_action_pending=True;animated_mosaic=mosaic
+        self.media_action_pending=True;advanced=False
         def update_grid():
             self.pending_media=None
             values=self.timeline_index.items if self.timeline_index and mosaic.indexed else [item for item in self.media_items if item.id not in ids]
             self.set_library_items(values,append=True,reflow=True)
             return self.mosaic
         def finish():
-            self.media_action_pending=False
-            if self.mosaic!=animated_mosaic:return
-            if viewer:
+            self.media_action_pending=bool(self.action_motions)
+            if viewer and not advanced:
                 if self.viewer==viewer:viewer.dismiss_action()
-                update_grid()
-            self.mosaic.set_selection(False)
+            if not self.action_motions and not self.mosaic.selected:self.mosaic.set_selection(False)
             if on_finish:on_finish()
         def begin():
-            nonlocal animated_mosaic
-            if self.data_stopped or self.mosaic!=mosaic:self.media_action_pending=False;return False
+            nonlocal advanced
+            if self.data_stopped or self.mosaic!=mosaic:
+                self.media_action_pending=bool(self.action_motions)
+                if on_finish:on_finish()
+                return False
             from trash_motion import ActionMotion
             sources=[viewer.stage.picture] if viewer else [tile.get_child() for tile in mosaic.active_widgets & mosaic.tile_set if tile.media_item.id in ids]
-            ActionMotion(self,sources,target,finish,viewer)
-            if not viewer:animated_mosaic=update_grid()
+            remaining=[tile for tile in mosaic.tiles if tile.media_item.id not in ids and not tile.media_item.metadata.get('placeholder')]
+            next_id=min(remaining,key=lambda tile:(abs(tile.index-viewer.index),tile.index<viewer.index)).media_item.id if viewer and not viewer.device_file and remaining else None
+            ActionMotion(self,sources,target,finish,viewer if next_id is None else None)
+            update_grid()
+            if next_id is not None and self.viewer is viewer:
+                next_tile=next(tile for tile in self.mosaic.tiles if tile.media_item.id==next_id)
+                viewer.show_item(next_tile)
+                advanced=True
             return False
-        GLib.timeout_add(180 if not viewer and not self.selection_bar.get_child_revealed() else 20,begin)
+        if target and target.get_mapped():begin()
+        else:GLib.timeout_add(180 if not viewer else 20,begin)
 
     def remove_from_timeline(self,ids):
         if self.timeline_index:
             self.timeline_index=self.timeline_index.without(ids);self.timeline_pending=set()
             self.timeline_buckets=[{'timeBucket':key+'-01','count':b-a} for key,(a,b) in self.timeline_index.ranges.items()]
 
-    def background(self,work,done,failed=None,images=False,priority=10):
+    def background(self,work,done,failed=None,images=False,priority=10,executor=None):
         generation=self.data_generation
         def execute():
             if generation!=self.data_generation:
                 return None
             return work()
-        future=(self.cached_images if images=='cached' else self.images).submit(execute,priority) if images is True or images=='cached' else (self.video_io if images=='video' else self.previews if images=='preview' else self.io).submit(execute)
+        if executor:
+            future=executor.submit(execute)
+        elif images is True or images=='cached':
+            queue=self.cached_images if images=='cached' else self.images
+            future=queue.submit(execute,priority)
+        else:
+            queue=self.video_io if images=='video' else self.previews if images=='preview' else self.io
+            future=queue.submit(execute)
         def completed(result):
             if result.cancelled():
                 return
@@ -712,7 +735,7 @@ class LibraryUI:
         uploads=manager(self,False)
         if uploads and uploads.active():return True
         if self.data_stopped:return False
-        if not self.client or getattr(self.client,'restoring',False) or self.viewer or self.loading_more or getattr(self,'media_action_pending',False) or not self.get_visible():return True
+        if not self.client or getattr(self.client,'restoring',False) or self.viewer or self.loading_more or getattr(self,'media_action_pending',False) or any(generation==self.data_generation for generation,_ in self.pending_mutations.values()) or not self.get_visible():return True
         if self.current_page in ('albums','people','tags','duplicates','sharing','map'):
             if self.current_page!='map':
                 from collections_ui import collection_view
@@ -835,6 +858,8 @@ class LibraryUI:
         uploads=manager(self,False)
         reuse_uploads=bool(uploads and uploads.entries and reflow)
         if uploads:items=uploads.merge(items)
+        removing={id for generation,ids in self.pending_removals.values() if generation==self.data_generation for id in ids}
+        if removing:items=[item for item in items if item.id not in removing]
         scroll_input=self.scroll_input_serial
         position=self.scroller.get_vadjustment().get_value() if append or self.bucket_scope else 0
         self.loading_more=True

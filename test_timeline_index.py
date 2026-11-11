@@ -10,6 +10,19 @@ from timeline_index import TimelineIndex
 
 
 class TimelineIndexTests(unittest.TestCase):
+    def test_out_of_order_rollbacks_preserve_other_removals_and_month_ranges(self):
+        index=TimelineIndex([{'timeBucket':'2026-11-01','count':2},{'timeBucket':'2026-10-01','count':1}])
+        a=MediaItem('a','a',datetime(2026,11,3));b=MediaItem('b','b',datetime(2026,11,2));c=MediaItem('c','c',datetime(2026,10,1))
+        index.apply('2026-11',[a,b]);index.apply('2026-10',[c])
+        pending=index.without(['a']).without(['b','c'])
+        restored=pending.restored([a,a])
+        self.assertEqual([item.id for item in restored.items],['a'])
+        self.assertEqual(restored.ranges,{'2026-11':(0,1)})
+        restored=restored.restored([c])
+        self.assertEqual([item.id for item in restored.items],['a','c'])
+        self.assertEqual(restored.ranges,{'2026-11':(0,1),'2026-10':(1,2)})
+        self.assertEqual(len(pending.items),0)
+
     def test_full_scroll_slots_and_compact_sizes_removal(self):
         index=TimelineIndex([{'timeBucket':'2026-01-01','count':3},{'timeBucket':'2018-02-01','count':2}])
         self.assertEqual(len(index.items),5);self.assertTrue(all(item.metadata['placeholder'] for item in index.items))

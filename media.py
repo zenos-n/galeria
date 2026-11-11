@@ -48,7 +48,8 @@ class PhotoStage(Gtk.Widget):
         self.picture.add_overlay(self.thumbnail)
         self.material.set_opacity(1)
         self.symbol.set_opacity(0)
-        self.image=Gtk.Picture(can_shrink=True,content_fit=Gtk.ContentFit.CONTAIN)
+        self.image=Gtk.Picture(can_shrink=True,content_fit=Gtk.ContentFit.COVER)
+        self.image.set_overflow(Gtk.Overflow.HIDDEN)
         self.material.set_child(self.image)
         self.material.add_overlay(self.surface)
         self.surface.set_can_target(False)
@@ -57,8 +58,10 @@ class PhotoStage(Gtk.Widget):
         self.picture.set_parent(self)
 
     def set_texture(self,texture):
+        self.ratio=texture.get_intrinsic_width()/texture.get_intrinsic_height()
         self.image.set_paintable(texture)
         self.symbol.set_visible(False)
+        self.queue_allocate()
 
     def set_video(self,uri):
         from video_ui import VideoPlayer
