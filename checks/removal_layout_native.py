@@ -3,7 +3,7 @@ import os,sys
 from datetime import datetime,timedelta
 from pathlib import Path
 assert os.environ.get('DISPLAY')==':91'
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0,os.environ.get('GALERIA_CHECK_SOURCE_ROOT',str(Path(__file__).resolve().parents[1])))
 from app import *
 from library import MediaItem
 from layout import prepare_timeline
@@ -31,6 +31,11 @@ for mode in ('all','months','years'):
         expected.mode=mode;expected.expanded_month=current.expanded_month;expected.expanded_year=current.expanded_year
         assert geometry(current)==geometry(expected),(mode,removed)
         assert all(retained[tile.media_item.id] is tile and tile.index==i and current.checks[i].index==i for i,tile in enumerate(current.tiles))
+        for tile in current.tiles:
+            key=tile.media_item.created.strftime('%Y-%m')
+            assert current.owners[tile]==(current.month_cards[key],current.year_cards[key[:4]])
+        assert not (set(retained.values()) ^ current.tile_set)
+        assert all(tile in current.tile_set for tile in current.owners if hasattr(tile,'media_item'))
         current.dispose();expected.dispose()
 print('IN-PLACE ALL/MONTH/YEAR GEOMETRY, EMPTY MONTH PRUNING, RETAINED CELLS AND CHECK INDICES PASSED',flush=True)
 
@@ -51,7 +56,24 @@ pump(lambda:any(tile in mosaic.rendered and mosaic.rendered[tile][1]+mosaic.rend
 anchor=min((tile for tile in mosaic.active_widgets & mosaic.tile_set if tile in mosaic.rendered and mosaic.rendered[tile][1]+mosaic.rendered[tile][3]>=1700),key=lambda tile:(mosaic.rendered[tile][1],mosaic.rendered[tile][0]))
 offset=adjustment.get_value()-mosaic.rendered[anchor][1]
 assert mosaic.apply_removal(prepare_timeline(items,None,mosaic.last_width,removed={'0','1','2'}))
+target=mosaic.target_layout(mosaic.last_width)[0]
+top,page=mosaic.visible_range()
+for heading in mosaic.headings:
+    if heading in target and heading not in mosaic.from_map and target[heading][1]>top+page*2:
+        assert heading not in mosaic.motion_widgets,'Offscreen date label animated during removal'
 pump(lambda:not mosaic.tick and not mosaic.cell_build_tick)
 assert abs(adjustment.get_value()-mosaic.rendered[anchor][1]-offset)<2
-mosaic.dispose();window.destroy()
 print('SCROLLED REMOVAL KEEPS VISIBLE ANCHOR OFFSET PASSED',flush=True)
+
+# Existing layout work must not exhaust the budget before any controls are built.
+positions=mosaic.positions
+def slow_positions(width):
+    time.sleep(.004)
+    return positions(width)
+mosaic.positions=slow_positions
+for tile in mosaic.active_widgets & mosaic.tile_set:
+    tile.release();mosaic.checks[tile.index].dispose()
+mosaic.incremental_cells=True;mosaic.set_selection(True);mosaic.queue_allocate()
+pump(lambda:not mosaic.incremental_cells and all(tile.button and mosaic.checks[tile.index].widget for tile in mosaic.active_widgets & mosaic.tile_set))
+mosaic.dispose();window.destroy()
+print('CONTROL BUILDING PROGRESSES AFTER EXPENSIVE EXISTING LAYOUT PASSED',flush=True)

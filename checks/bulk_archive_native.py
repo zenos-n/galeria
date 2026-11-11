@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 from datetime import datetime, timedelta
+from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -70,7 +71,11 @@ GLib.source_remove(w.refresh_timer)
 w.refresh_timer = 0
 context = GLib.MainContext.default()
 count = int(os.environ.get('GALERIA_BULK_ITEMS', '8000'))
-items = [MediaItem(str(i), 'photo.png', datetime(2026, 11, 30)-timedelta(minutes=i), 10/7) for i in range(count)]
+step=int(os.environ.get('GALERIA_BULK_DATE_STEP_MINUTES','1'))
+items = [MediaItem(str(i), 'photo.png', datetime(2026, 11, 30)-timedelta(minutes=i*step), 10/7) for i in range(count)]
+groups=defaultdict(list)
+for item in items:groups[item.created.strftime('%Y-%m')].append(item)
+buckets=[{'timeBucket':key+'-01','count':len(values)} for key,values in groups.items()]
 path = Path(root.name) / 'photo.png'
 Image.new('RGB', (100, 70), 'purple').save(path)
 texture = w.texture_from_pixels(decode_image(path))
@@ -116,12 +121,12 @@ def frame(*_):
 try:
     pump(w.get_mapped)
     w.get_frame_clock().connect('after-paint', frame)
-    for selected in (20, 2, 200, 1):
+    for selected,focus in ((20,False),(1,False),(2,False),(200,False),(1,True)):
         for repeat in range(3):
-            index = TimelineIndex([{'timeBucket': '2026-11-01', 'count': count}])
-            index.apply('2026-11', items)
+            index = TimelineIndex(buckets)
+            for key,values in groups.items():index.apply(key,values)
             w.timeline_index = index
-            w.timeline_buckets = [{'timeBucket': '2026-11-01', 'count': count}]
+            w.timeline_buckets = buckets
             w.set_library_items(index.items, append=True, reflow=True)
             pump(lambda: not w.loading_more and not w.mosaic.tick and bool(w.mosaic.rendered))
             w.mosaic.selected = set(range(selected))
@@ -129,7 +134,7 @@ try:
             pump(w.selection_bar.get_child_revealed)
             original_mosaic = w.mosaic
             before = {tile.media_item.id: tile for tile in w.mosaic.tiles}
-            if selected == 1:
+            if focus:
                 w.mosaic.set_selection(False)
                 w.open_viewer(0)
                 pump(lambda: w.viewer.stage.progress == 1 and not w.viewer.stage.tick)
@@ -157,7 +162,7 @@ try:
             pump(lambda: grid_painted is not None)
             if hasattr(w.mosaic,'apply_removal'):
                 assert w.mosaic is original_mosaic, 'Removal rebuilt the grid tree'
-            samples.append({'selected': selected, 'paint_ms': round(painted, 2), 'grid_ms': round(grid_painted, 2), 'before_reflow': before_reflow})
+            samples.append({'selected': selected,'focus':focus, 'paint_ms': round(painted, 2), 'grid_ms': round(grid_painted, 2), 'before_reflow': before_reflow})
             print(json.dumps(samples[-1]), flush=True)
             assert all(before[tile.media_item.id] is tile for tile in w.mosaic.tiles), 'Bulk removal rebuilt unchanged cells'
             pump(received.is_set)
@@ -176,7 +181,7 @@ try:
     if hasattr(w.mosaic,'apply_removal'):
         assert statistics.median(sample['max_frame_gap_ms'] for sample in samples)<50,samples
         assert statistics.median(sample['interior_frames'] for sample in samples)>=16,samples
-    print(json.dumps({'items': count, 'median_paint_ms': statistics.median(sample['paint_ms'] for sample in samples), 'samples': samples}), flush=True)
+    print(json.dumps({'items': count,'months':len(buckets), 'median_paint_ms': statistics.median(sample['paint_ms'] for sample in samples), 'samples': samples}), flush=True)
 finally:
     release.set()
     server.shutdown()

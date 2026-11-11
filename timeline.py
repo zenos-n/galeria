@@ -266,7 +266,7 @@ class Mosaic(Gtk.Widget):
         existing={tile.media_item.id:tile for tile in self.tiles}
         if not items or any(item.id not in existing for item in items) or any(key not in self.month_cards for key,_,_,_,_ in months):return False
         selected={self.tiles[i].media_item.id for i in self.selected}
-        checks={tile:self.checks[tile.index] for tile in self.tiles}
+        checks=self.checks
         tiles=[existing[item.id] for item in items];retained=set(tiles)
         removed=self.tile_set-retained;removed_ids={tile.media_item.id for tile in removed}
         top,page=self.visible_range()
@@ -274,15 +274,18 @@ class Mosaic(Gtk.Widget):
                    key=lambda tile:(self.rendered[tile][1],self.rendered[tile][0]),default=None) if top>0 and self.mode=='all' else None
         offset=top-self.rendered[anchor][1] if anchor else 0
         self.items=items;self.tiles=tiles;self.tile_set=retained
-        self.checks=[checks[tile] for tile in tiles]
+        self.checks=[checks[tile.index] for tile in tiles]
         for i,(tile,item) in enumerate(zip(tiles,items)):
             if tile.media_item is item:tile.index=i
-            else:tile.rebind(self,i,item,item.ratio)
+            else:
+                tile.rebind(self,i,item,item.ratio)
+                key=prepared['asset_months'][item.id]
+                self.owners[tile]=(self.month_cards[key],self.year_cards[key[:4]])
             self.checks[i].index=i
-        self.selected={i for i,tile in enumerate(tiles) if tile.media_item.id in selected}
+        self.selected={i for i,tile in enumerate(tiles) if tile.media_item.id in selected} if selected else set()
         self.anchor_index=None
         for tile in removed:
-            checks[tile].dispose();tile.release()
+            checks[tile.index].dispose();tile.release();self.owners.pop(tile,None)
             if tile.get_parent():tile.unparent()
         headings={month[0]:heading for month,heading in zip(self.months,self.headings)}
         keys={month[0] for month in months};years={month[2] for month in months}
@@ -291,17 +294,17 @@ class Mosaic(Gtk.Widget):
             for key in set(cards)-keep:
                 card=cards.pop(key);discarded.add(card);self.card_pictures.pop(card)
         for widget in discarded:
+            self.owners.pop(widget,None)
             if widget.get_parent():widget.unparent()
         self.widgets=[widget for widget in self.widgets if widget not in discarded]
         self.headings=[headings[month[0]] for month in months]
         self.months=months;self.asset_months=prepared['asset_months'];self.bucket_counts=prepared['bucket_counts']
         self._row_cache=OrderedDict(prepared['rows']);self._target_cache.clear()
-        self.members={};self.owners={};self.cover_slots={}
+        self.members={};self.cover_slots={}
         for key,_,year,a,b in months:
             card=self.month_cards[key];year_card=self.year_cards[year];members=tiles[a:b]
             self.members[card]=members;self.members.setdefault(year_card,[]).extend(members)
             self.owners[card]=(year_card,)
-            self.owners.update((tile,(card,year_card)) for tile in members)
         for card,members in self.members.items():
             for i,picture in enumerate(self.card_pictures[card]):
                 if members:
@@ -431,7 +434,7 @@ class Mosaic(Gtk.Widget):
             self.tier_groups=motion_groups(sources,destinations,self.asset_months,self.mode,cards)
             self.tier_images=[(paintable,start,end) for _,images,_,_ in self.tier_groups for _,paintable,start,end in images]
             self.from_map={widget:(rect[0],rect[1]+shift,*rect[2:]) for widget,rect in self.from_map.items()}
-        self.motion_widgets=tuple(dict.fromkeys([*self.from_map,*target]))
+        self.motion_widgets=tuple(dict.fromkeys([*self.from_map,*(visible_layout(target) if kind=='reflow' else target)]))
         self.folder_membership={}
         if kind=='folder':
             for widget in dict.fromkeys([*self.from_map,*target]):
@@ -585,7 +588,10 @@ class Mosaic(Gtk.Widget):
         target,height=self.target_layout(width)
         if self.p>=1 or not self.from_map:
             return target,height
-        result={}
+        # GTK measure and allocation use the same interpolated frame.
+        cached=getattr(self,'_positions_cache',None)
+        if cached and cached[0]==width and cached[1]==self.p and cached[2] is self.from_map and cached[3] is target:return cached[4]
+        result=dict(target) if self.motion_kind=='reflow' else {}
         for widget in self.motion_widgets:
             if self.motion_kind=='tier' and self.tier_groups and widget in self.tile_set:continue
             old=self.from_map.get(widget)
@@ -596,7 +602,9 @@ class Mosaic(Gtk.Widget):
             if new is None:
                 new=self.folder_endpoint(widget,old,False) if self.motion_kind=='folder' else self.anchor(widget,target,old)
             result[widget]=tuple(a+(b-a)*self.p for a,b in zip(old,new))
-        return result,round(self.from_height+(height-self.from_height)*self.p)
+        value=result,round(self.from_height+(height-self.from_height)*self.p)
+        self._positions_cache=(width,self.p,self.from_map,target,value)
+        return value
 
     def folder_endpoint(self,widget,rect,opening):
         x,y,w,h,_=rect
@@ -609,6 +617,14 @@ class Mosaic(Gtk.Widget):
 
     def do_get_request_mode(self):
         return Gtk.SizeRequestMode.HEIGHT_FOR_WIDTH
+
+    def can_build_cell(self):
+        if not self.incremental_cells:return True
+        now=GLib.get_monotonic_time()
+        if not self.cell_build_deadline:self.cell_build_deadline=now+3000
+        if now<self.cell_build_deadline:return True
+        self.cell_build_pending=True
+        return False
 
     def dispose(self,retained=()):
         if self.cell_build_tick:self.remove_tick_callback(self.cell_build_tick);self.cell_build_tick=0
@@ -637,7 +653,7 @@ class Mosaic(Gtk.Widget):
 
     def do_size_allocate(self,width,height,baseline):
         # Incoming tiles paint textures while their controls are built across frames.
-        self.cell_build_deadline=GLib.get_monotonic_time()+3000 if self.incremental_cells else 0
+        self.cell_build_deadline=0
         self.cell_build_pending=False
         self.last_width=width
         rects,self.last_height=self.positions(width)
@@ -645,8 +661,10 @@ class Mosaic(Gtk.Widget):
         stable=self.target_layout(width)[0] if self.p<1 else rects
         top,page=self.visible_range()
         tier=self.motion_kind=='tier' and self.p<1 and bool(self.tier_images)
-        for pictures in self.card_pictures.values():
-            for picture in pictures:picture.set_opacity(0 if tier else 1)
+        if getattr(self,'_covers_tier',None)!=tier:
+            for pictures in self.card_pictures.values():
+                for picture in pictures:picture.set_opacity(0 if tier else 1)
+            self._covers_tier=tier
         if not hasattr(self,'_visible_index') or self._visible_index[0] is not rects:
             order={widget:i for i,widget in enumerate(rects)}
             entries=sorted((rect[1],order[widget],widget) for widget,rect in rects.items() if widget not in self.panels)
@@ -670,6 +688,7 @@ class Mosaic(Gtk.Widget):
             x,y,w,h,opacity=rects[widget]
             widget.set_opacity(0 if widget==self.hidden_tile else max(0,min(1,opacity)))
             reference=stable.get(widget,self.from_map.get(widget,(x,y,w,h,opacity)))
+            if widget in self.tile_set:widget.ensure(defer=True)
             min_w=widget.measure(Gtk.Orientation.HORIZONTAL,-1)[0]
             allocated_w=max(1,round(reference[2]),min_w)
             min_h=widget.measure(Gtk.Orientation.VERTICAL,allocated_w)[0]
@@ -684,8 +703,7 @@ class Mosaic(Gtk.Widget):
             active=tile in rects and tile.get_child_visible() and check.get_visible()
             check.set_child_visible(active)
             if active:
-                if check.widget is None and self.cell_build_deadline and GLib.get_monotonic_time()>=self.cell_build_deadline:
-                    self.cell_build_pending=True;continue
+                if check.widget is None and not self.can_build_cell():continue
                 x,y,_,_,_=rects[tile]
                 size=check.measure(Gtk.Orientation.HORIZONTAL,-1)[0]
                 size=max(size,check.measure(Gtk.Orientation.VERTICAL,size)[0])

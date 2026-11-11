@@ -684,3 +684,36 @@ loop pass;97unit tests pass. An initial incremental-check snapshot tried to
 paint an unbuilt control; the native snapshot now skips it until materialized.
 The intermediate in-place-only attempt improved gaps but still bulk-created
 incoming buttons; retained with incremental materialization rather than shipped.
+
+
+## Archive frame drops, including single-item actions (0.14.14)
+
+The remaining issue is frames during flight/rearrangement, not click latency.
+The8k fixture now includes single selection and single focus as separate cases
+and supports GALERIA_BULK_DATE_STEP_MINUTES=1440 to cover263months.
+
+Remove redundant whole-library Check and owner-map reconstruction during plan
+application, retaining unchanged owners and updating hydrated items. Profiled
+8k single/20-item UI application fell12.5–16.7ms→about9ms. Cache the interpolated
+frame shared by GTK measure/allocation. Interpolate only viewport reflow
+entries; offscreen labels retain their final rectangles. Set cover opacity
+only when tier visibility changes, rather than touching hidden covers every
+frame. In the native263-month profile, positions CPU fell52ms→29ms across the
+flight after caching; limiting offscreen work reduces it further.
+
+The control-build budget previously began before existing layout work and
+could expire before creating anything. Start it at the first new control,
+and explicitly attempt deferred cells even when GTK reuses their allocation.
+A fixture with4ms existing layout work consistently times out on0.14.13 and
+finishes on the fix; this prevents delayed controls being left unbuilt.
+
+Actual Wayland/Vulkan fixtures onDP-2 use generated320x224noisy thumbnails,
+unique textures and8,000items across263months. With profiling enabled, worst
+flight gaps fell30.24→21.56ms for single removal,33.23→26.65ms for20items.
+These small samples include profiler overhead and are diagnostic, not a
+guarantee of constant60fps. Repeated X11/softwareGL full-flight checks and
+all/month/year geometry, empty-month ownership pruning, scroll anchoring,
+materialization progress, group captions, date motion, concurrent actions and
+out-of-order rollback pass;97unit tests pass. GC traces show18–72ms full
+collections during fixture setup, with no evidence tying them to measured
+flight spikes in that run; no GC policy changes were introduced.

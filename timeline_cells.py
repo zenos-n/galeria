@@ -1,6 +1,6 @@
 """Light timeline cells: native controls exist only around the viewport."""
 import math
-from gi.repository import Gdk,GLib,Graphene,Gtk
+from gi.repository import Gdk,Graphene,Gtk
 from imaging import duration_label
 
 
@@ -68,8 +68,7 @@ class Cell(Gtk.Widget):
 
     def ensure(self,defer=False):
         if self.button:return
-        if defer and self.owner.cell_build_deadline and GLib.get_monotonic_time()>=self.owner.cell_build_deadline:
-            self.owner.cell_build_pending=True;return
+        if defer and not self.owner.can_build_cell():return
         if self.media_texture is None and self.media_item:self.media_texture=self.owner.cached_texture(self.media_item)
         overlay=Gtk.Overlay()
         self.image=Gtk.Picture(paintable=self.media_texture,can_shrink=True,content_fit=Gtk.ContentFit.COVER,can_target=False,css_classes=[f'shade-{self.index%5}'])
