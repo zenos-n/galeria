@@ -82,6 +82,12 @@ grid_painted = None
 before_reflow = None
 selected = 0
 samples = []
+flight_frames = []
+callback_errors = []
+original_excepthook = sys.excepthook
+def callback_error(kind,value,tb):
+    callback_errors.append(str(value));original_excepthook(kind,value,tb)
+sys.excepthook = callback_error
 
 
 def pump(until, timeout=12):
@@ -95,6 +101,10 @@ def pump(until, timeout=12):
 def frame(*_):
     global painted, grid_painted, before_reflow
     motion = getattr(w, 'action_motion', None)
+    if started and motion and motion.get_mapped() and motion.frames:
+        flight_frames.append((time.monotonic(),motion.progress))
+    elif started and flight_frames and flight_frames[-1][1]<1:
+        flight_frames.append((time.monotonic(),1))
     if started and motion and motion.frames and motion.get_mapped():
         if painted is None and motion.progress > 0:
             painted = (time.monotonic()-started)*1000
@@ -117,6 +127,7 @@ try:
             w.mosaic.selected = set(range(selected))
             w.mosaic.set_selection(True)
             pump(w.selection_bar.get_child_revealed)
+            original_mosaic = w.mosaic
             before = {tile.media_item.id: tile for tile in w.mosaic.tiles}
             if selected == 1:
                 w.mosaic.set_selection(False)
@@ -132,6 +143,7 @@ try:
             received.clear()
             release.clear()
             painted = grid_painted = before_reflow = None
+            flight_frames.clear()
             started = time.monotonic()
             subprocess.run(['/tmp/gallery-app-identification/xdotool/bin/xdotool', 'windowfocus', xid,
                             'mousemove', '--window', xid,
@@ -143,6 +155,8 @@ try:
                 assert before_reflow, 'First flight waited for grid rearrangement'
                 assert all(name.startswith('gallery-layout') for name in layout_threads), layout_threads
             pump(lambda: grid_painted is not None)
+            if hasattr(w.mosaic,'apply_removal'):
+                assert w.mosaic is original_mosaic, 'Removal rebuilt the grid tree'
             samples.append({'selected': selected, 'paint_ms': round(painted, 2), 'grid_ms': round(grid_painted, 2), 'before_reflow': before_reflow})
             print(json.dumps(samples[-1]), flush=True)
             assert all(before[tile.media_item.id] is tile for tile in w.mosaic.tiles), 'Bulk removal rebuilt unchanged cells'
@@ -150,10 +164,18 @@ try:
             assert not release.is_set()
             release.set()
             pump(lambda: not w.pending_mutations and not w.action_motions and not w.mosaic.tick)
+            gaps=[(b[0]-a[0])*1000 for a,b in zip(flight_frames,flight_frames[1:])]
+            samples[-1]['max_frame_gap_ms']=round(max(gaps,default=0),2)
+            samples[-1]['interior_frames']=sum(.05<p<.95 for _,p in flight_frames)
+            print(json.dumps({'animation':samples[-1]}),flush=True)
             started = None
             if w.viewer:
                 w.viewer.close()
                 pump(lambda: w.viewer is None)
+    assert not callback_errors,callback_errors
+    if hasattr(w.mosaic,'apply_removal'):
+        assert statistics.median(sample['max_frame_gap_ms'] for sample in samples)<50,samples
+        assert statistics.median(sample['interior_frames'] for sample in samples)>=16,samples
     print(json.dumps({'items': count, 'median_paint_ms': statistics.median(sample['paint_ms'] for sample in samples), 'samples': samples}), flush=True)
 finally:
     release.set()

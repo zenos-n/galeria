@@ -1,6 +1,6 @@
 """Light timeline cells: native controls exist only around the viewport."""
 import math
-from gi.repository import Gdk,Graphene,Gtk
+from gi.repository import Gdk,GLib,Graphene,Gtk
 from imaging import duration_label
 
 
@@ -66,8 +66,10 @@ class Cell(Gtk.Widget):
         if rebuild:self.release();self.media_texture=texture
         self.owner=owner;self.index=index;self.media_item=item;self.photo_ratio=ratio;self.filename=item.filename
 
-    def ensure(self):
+    def ensure(self,defer=False):
         if self.button:return
+        if defer and self.owner.cell_build_deadline and GLib.get_monotonic_time()>=self.owner.cell_build_deadline:
+            self.owner.cell_build_pending=True;return
         if self.media_texture is None and self.media_item:self.media_texture=self.owner.cached_texture(self.media_item)
         overlay=Gtk.Overlay()
         self.image=Gtk.Picture(paintable=self.media_texture,can_shrink=True,content_fit=Gtk.ContentFit.COVER,can_target=False,css_classes=[f'shade-{self.index%5}'])
@@ -107,7 +109,12 @@ class Cell(Gtk.Widget):
         if self.button:return self.button.measure(orientation,for_size)
         return 0,0,-1,-1
     def do_size_allocate(self,width,height,baseline):
-        self.ensure();self.button.measure(Gtk.Orientation.HORIZONTAL,-1);self.button.measure(Gtk.Orientation.VERTICAL,width)
+        self.ensure(defer=True)
+        if not self.button:return
+        self.button.measure(Gtk.Orientation.HORIZONTAL,-1);self.button.measure(Gtk.Orientation.VERTICAL,width)
         self.button.allocate(width,height,baseline,None)
     def do_snapshot(self,snapshot):
         if self.button:self.snapshot_child(self.button,snapshot)
+        else:
+            texture=self.media_texture or self.owner.cached_texture(self.media_item) or self.owner.placeholder_paintable
+            snapshot.append_texture(texture,Graphene.Rect().init(0,0,self.get_width(),self.get_height()))

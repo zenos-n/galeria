@@ -652,3 +652,35 @@ for rearrangement. Gap filling still costs128.95–250.27ms in this controlled
 X11/software-GL fixture and is the next measurement target. Worker thread
 identity, retained cells, concurrent operations, stale scope, out-of-order
 rollback, privacy guards and local/cloud Trash scopes are checked.
+
+
+## Keep action flights moving while applying results (0.14.13)
+
+The0.14.12 worker stage shipped before changing arithmetic. Isolated seven-run
+benchmarks then identified redundant date formatting, not justified row math:
+8,000items23.805ms→4.564ms;80,000items247.616ms→49.968ms. Formatting once per
+month removes16,005strftime calls in the8k profile (12 remain). RowLayout was
+about3ms, so no C dependency is warranted by these measurements. Geometry is
+unchanged; focused unit/native checks compare against the original calculator.
+
+First-frame latency alone missed a mid-flight stall reported by the user.
+Applying a plan now keeps the existing Mosaic, tile parents, headings/cards and
+checks; it updates indices/membership instead of rebuilding the scroller tree.
+Newly exposed tiles paint cached textures immediately while native buttons and
+checks are constructed with a3ms per-allocation budget across frames.
+
+With8,000items, held HTTP and three runs each for2/20/200selected or single-file
+focus, the median of each flight's worst frame gap fell66.44ms→35.995ms.
+Median interior animation frames rose15→17. First motion remains about32ms.
+The native guard now measures the whole flight, including its last frame,
+checks for swallowed GTK callback exceptions, requires median worst gap<50ms
+and median interior frames>=16, and asserts the Mosaic itself is retained.
+These are X11/software-GL fixture results, not a claim of constant60fps on hardware.
+
+Prepared vs fresh all/month/year geometry, empty-month pruning, retained check
+indices, scrolled anchor offsets, held real HTTP, repeated actions, out-of-order
+rollback, six icon destinations, local/cloud Trash, uploads and persisted video
+loop pass;97unit tests pass. An initial incremental-check snapshot tried to
+paint an unbuilt control; the native snapshot now skips it until materialized.
+The intermediate in-place-only attempt improved gaps but still bulk-created
+incoming buttons; retained with incremental materialization rather than shipped.

@@ -926,6 +926,15 @@ class LibraryUI:
         self.loading_more=True
         self.media_items=prepared['items'] if prepared else sorted({item.id:item for item in items}.values(),key=lambda item:item.created,reverse=True)
         old=self.mosaic
+        if prepared and old.apply_removal(prepared):
+            if self.viewer and not self.viewer.device_file:
+                source=next((tile for tile in old.tiles if tile.media_item.id==self.viewer.source.media_item.id),None)
+                if source:
+                    self.viewer.source=source;self.viewer.index=source.index;self.viewer.stage.source=source;self.viewer.stage.index=source.index;old.hide_tile(source)
+            self.loading_more=False
+            self.load_more.set_visible(False);self.load_more.set_sensitive(True)
+            self.selection_changed();self.update_period();self.load_visible_thumbnails()
+            return
         top,height=old.visible_range()
         visible_pixels={self.texture_key(tile.media_item):tile.media_texture for tile in old.active_widgets & old.tile_set if tile.media_texture is not None and (rect:=old.rendered.get(tile)) and rect[1]+rect[3]>=top-old.target*2 and rect[1]<=top+height+old.target*2}
         buckets=self.timeline_buckets if self.current_page=='library' and not self.search.entry.get_text() else None

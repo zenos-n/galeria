@@ -6,14 +6,17 @@ from datetime import datetime
 def prepare_timeline(items,buckets,width,target=154,query='',removed=(),mode='all',expanded_month=None,expanded_year=None):
     removed=set(removed)
     items=sorted({item.id:item for item in items if item.id not in removed}.values(),key=lambda item:item.created,reverse=True)
-    asset_months={item.id:item.created.strftime('%Y-%m') for item in items}
-    months=[]
+    asset_months={};months=[];previous=None
     for i,item in enumerate(items):
-        key=item.created.strftime('%Y-%m')
-        if months and months[-1][0]==key:
+        period=(item.created.year,item.created.month)
+        if period==previous:
             k,title,year,a,_=months[-1]
             months[-1]=(k,title,year,a,i+1)
-        else:months.append((key,item.created.strftime('%B %Y'),item.created.strftime('%Y'),i,i+1))
+        else:
+            key=item.created.strftime('%Y-%m')
+            months.append((key,item.created.strftime('%B %Y'),item.created.strftime('%Y'),i,i+1))
+            previous=period
+        asset_months[item.id]=key
     counts={}
     if buckets is not None:
         groups={month[0]:month for month in months}

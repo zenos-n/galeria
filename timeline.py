@@ -91,6 +91,7 @@ class Mosaic(Gtk.Widget):
         ratios=[item.ratio for item in items] if items is not None else RATIOS[:12]+RATIOS[12:]+RATIOS[4:18]
         from timeline_cells import Cell,Check
         self.active_widgets=set()
+        self.cell_build_deadline=0;self.cell_build_pending=False;self.cell_build_tick=0;self.incremental_cells=False
         reusable={tile.media_item.id:tile for tile in reuse.tiles} if reuse else {}
         uploads={tile.media_item.metadata['upload_key']:tile for tile in reuse.tiles if tile.media_item.metadata.get('upload_key')} if reuse else {}
         for index,ratio in enumerate(ratios):
@@ -258,6 +259,71 @@ class Mosaic(Gtk.Widget):
         for badge in self.badges:
             badge.set_visible(self.show_durations)
         self.queue_resize()
+
+    def apply_removal(self,prepared):
+        """Keep the viewport's native parents intact while applying a worker plan."""
+        items=prepared['items'];months=prepared['months']
+        existing={tile.media_item.id:tile for tile in self.tiles}
+        if not items or any(item.id not in existing for item in items) or any(key not in self.month_cards for key,_,_,_,_ in months):return False
+        selected={self.tiles[i].media_item.id for i in self.selected}
+        checks={tile:self.checks[tile.index] for tile in self.tiles}
+        tiles=[existing[item.id] for item in items];retained=set(tiles)
+        removed=self.tile_set-retained;removed_ids={tile.media_item.id for tile in removed}
+        top,page=self.visible_range()
+        anchor=min((tile for tile in self.active_widgets & retained if tile in self.rendered and self.rendered[tile][1]+self.rendered[tile][3]>=top),
+                   key=lambda tile:(self.rendered[tile][1],self.rendered[tile][0]),default=None) if top>0 and self.mode=='all' else None
+        offset=top-self.rendered[anchor][1] if anchor else 0
+        self.items=items;self.tiles=tiles;self.tile_set=retained
+        self.checks=[checks[tile] for tile in tiles]
+        for i,(tile,item) in enumerate(zip(tiles,items)):
+            if tile.media_item is item:tile.index=i
+            else:tile.rebind(self,i,item,item.ratio)
+            self.checks[i].index=i
+        self.selected={i for i,tile in enumerate(tiles) if tile.media_item.id in selected}
+        self.anchor_index=None
+        for tile in removed:
+            checks[tile].dispose();tile.release()
+            if tile.get_parent():tile.unparent()
+        headings={month[0]:heading for month,heading in zip(self.months,self.headings)}
+        keys={month[0] for month in months};years={month[2] for month in months}
+        discarded={headings[key] for key in headings if key not in keys}
+        for cards,keep in ((self.month_cards,keys),(self.year_cards,years)):
+            for key in set(cards)-keep:
+                card=cards.pop(key);discarded.add(card);self.card_pictures.pop(card)
+        for widget in discarded:
+            if widget.get_parent():widget.unparent()
+        self.widgets=[widget for widget in self.widgets if widget not in discarded]
+        self.headings=[headings[month[0]] for month in months]
+        self.months=months;self.asset_months=prepared['asset_months'];self.bucket_counts=prepared['bucket_counts']
+        self._row_cache=OrderedDict(prepared['rows']);self._target_cache.clear()
+        self.members={};self.owners={};self.cover_slots={}
+        for key,_,year,a,b in months:
+            card=self.month_cards[key];year_card=self.year_cards[year];members=tiles[a:b]
+            self.members[card]=members;self.members.setdefault(year_card,[]).extend(members)
+            self.owners[card]=(year_card,)
+            self.owners.update((tile,(card,year_card)) for tile in members)
+        for card,members in self.members.items():
+            for i,picture in enumerate(self.card_pictures[card]):
+                if members:
+                    tile=members[min(i,len(members)-1)]
+                    if not getattr(picture,'media_id',None) or picture.media_id in removed_ids:
+                        picture.media_id=tile.media_item.id;picture.set_paintable(tile.media_texture)
+                    self.cover_slots.setdefault(tile,[]).append(picture)
+        self.caption_widgets=set(self.card_pictures)|set(self.headings)
+        self.active_widgets-=removed|discarded
+        self.rendered={widget:rect for widget,rect in self.rendered.items() if widget not in removed and widget not in discarded}
+        if anchor:
+            rect=self.target_layout(self.last_width)[0].get(anchor)
+            if rect:
+                position=max(0,rect[1]+offset);shift=position-top
+                self.rendered={widget:(r[0],r[1]+shift,*r[2:]) for widget,r in self.rendered.items()}
+                parent=self.get_parent()
+                while parent and not isinstance(parent,Gtk.ScrolledWindow):parent=parent.get_parent()
+                if parent:parent.get_vadjustment().set_value(position)
+                self._target_cache.clear()
+        self.incremental_cells=True
+        self.change(lambda:None,'reflow');self.update_selection()
+        return True
 
     def update_bucket(self,key,items):
         month=next((month for month in self.months if month[0]==key),None)
@@ -545,6 +611,7 @@ class Mosaic(Gtk.Widget):
         return Gtk.SizeRequestMode.HEIGHT_FOR_WIDTH
 
     def dispose(self,retained=()):
+        if self.cell_build_tick:self.remove_tick_callback(self.cell_build_tick);self.cell_build_tick=0
         child=self.get_first_child()
         while child:
             following=child.get_next_sibling()
@@ -569,6 +636,9 @@ class Mosaic(Gtk.Widget):
         return height,height,-1,-1
 
     def do_size_allocate(self,width,height,baseline):
+        # Incoming tiles paint textures while their controls are built across frames.
+        self.cell_build_deadline=GLib.get_monotonic_time()+3000 if self.incremental_cells else 0
+        self.cell_build_pending=False
         self.last_width=width
         rects,self.last_height=self.positions(width)
         self.rendered=rects
@@ -598,7 +668,6 @@ class Mosaic(Gtk.Widget):
             if widget in self.tile_set:
                 widget.add_css_class('selected') if widget.index in self.selected else widget.remove_css_class('selected')
             x,y,w,h,opacity=rects[widget]
-            if widget in self.tile_set:widget.ensure()
             widget.set_opacity(0 if widget==self.hidden_tile else max(0,min(1,opacity)))
             reference=stable.get(widget,self.from_map.get(widget,(x,y,w,h,opacity)))
             min_w=widget.measure(Gtk.Orientation.HORIZONTAL,-1)[0]
@@ -615,11 +684,19 @@ class Mosaic(Gtk.Widget):
             active=tile in rects and tile.get_child_visible() and check.get_visible()
             check.set_child_visible(active)
             if active:
+                if check.widget is None and self.cell_build_deadline and GLib.get_monotonic_time()>=self.cell_build_deadline:
+                    self.cell_build_pending=True;continue
                 x,y,_,_,_=rects[tile]
                 size=check.measure(Gtk.Orientation.HORIZONTAL,-1)[0]
                 size=max(size,check.measure(Gtk.Orientation.VERTICAL,size)[0])
                 point=Graphene.Point();point.init(x+6,y+6)
                 check.allocate(size,size,-1,Gsk.Transform.new().translate(point))
+        if self.cell_build_pending:
+            if not self.cell_build_tick:
+                def build_next(widget,clock):
+                    self.cell_build_tick=0;self.queue_allocate();return GLib.SOURCE_REMOVE
+                self.cell_build_tick=self.add_tick_callback(build_next)
+        else:self.incremental_cells=False;self.cell_build_deadline=0
         signature=(width,top,page,self.mode,self.expanded_month,self.expanded_year,id(stable))
         if signature!=self.window_signature:self.window_signature=signature;self.on_window()
 
@@ -659,7 +736,7 @@ class Mosaic(Gtk.Widget):
                     self.snapshot_clipped(widget,snapshot)
         for tile in self.active_widgets & self.tile_set:
             i=tile.index;check=self.checks[i]
-            if check.get_visible() and check.get_child_visible():
+            if check.get_visible() and check.get_child_visible() and check.widget is not None:
                 self.snapshot_clipped(check,snapshot,self.tiles[i])
 
     def snapshot_clipped(self,widget,snapshot,owner=None):
