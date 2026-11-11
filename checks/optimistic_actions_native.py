@@ -119,7 +119,7 @@ def click(widget):
     subprocess.run(['/tmp/gallery-app-identification/xdotool/bin/xdotool', 'windowfocus', xid,
                     'mousemove', '--window', xid,
                     str(round(bounds.get_x() + bounds.get_width() / 2 + dx)),
-                    str(round(bounds.get_y() + bounds.get_height() / 2 + dy)), 'click', '1'], check=True)
+                    str(round(bounds.get_y() + bounds.get_height() / 2 + dy)), 'click', '--delay', '0', '1'], check=True)
 
 
 def walk(widget):
@@ -167,6 +167,8 @@ try:
                 dialog = w.get_visible_dialog()
                 confirm = next(node for node in walk(dialog) if isinstance(node, Gtk.Button) and node.get_label() == 'Move to trash')
                 pump(confirm.get_mapped)
+                # Metadata can replace the grid while the scope dialog is open.
+                w.set_library_items(w.media_items, append=True)
                 expected_paint = (time.monotonic(), len(values)-number-1, None if mode == 'selection' else values[number+1].id)
                 click(confirm)
             pump(lambda: painted is not None, .4)

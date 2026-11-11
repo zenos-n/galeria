@@ -423,6 +423,8 @@ class LibraryUI:
 
     def animate_media_removal(self,ids,mosaic,action,target=None,on_finish=None):
         ids=set(ids)
+        generation=self.data_generation;page=self.current_page
+        ready_until=time.monotonic()+.35
         viewer=self.viewer if self.viewer and self.viewer.source.media_item.id in ids else None
         if target is None:target=getattr(viewer,'lock' if action=='locked' else action,None) if viewer else self.selection_controls.get(action)
         if not viewer and not mosaic.selection_mode:
@@ -443,10 +445,14 @@ class LibraryUI:
             if not self.action_motions and not self.mosaic.selected:self.mosaic.set_selection(False)
             if on_finish:on_finish()
         def begin():
-            nonlocal advanced
-            if self.data_stopped or self.mosaic!=mosaic:
+            nonlocal advanced,mosaic
+            if self.data_stopped or self.data_generation!=generation or self.current_page!=page:
                 self.media_action_pending=bool(self.action_motions)
                 if on_finish:on_finish()
+                return False
+            mosaic=self.mosaic
+            if not viewer and (self.loading_more or not mosaic.get_mapped() or not mosaic.active_widgets) and time.monotonic()<ready_until:
+                GLib.timeout_add(16,begin)
                 return False
             from trash_motion import ActionMotion
             sources=[viewer.stage.picture] if viewer else [tile.get_child() for tile in mosaic.active_widgets & mosaic.tile_set if tile.media_item.id in ids]
