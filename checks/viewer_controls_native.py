@@ -53,13 +53,13 @@ def check():
    assert w.viewer is not None and player.player.get_state()==Clapper.PlayerState.PAUSED
    keys('space');phase=7
   elif phase==7 and player.player.get_state()==Clapper.PlayerState.PLAYING:
-   player.loop.set_active(True);assert player.player.get_queue().get_progression_mode()==Clapper.QueueProgressionMode.REPEAT_ITEM
+   player.player.get_queue().set_progression_mode(Clapper.QueueProgressionMode.REPEAT_ITEM)
    player.player.seek(1.05);mark=time.monotonic();positions=[];phase=8
   elif phase==8:
    positions.append(player.player.get_position())
    if time.monotonic()-mark<.65:return True
    assert player.player.get_state()==Clapper.PlayerState.PLAYING and any(value<.5 for value in positions),positions
-   player.loop.set_active(False);player.player.seek(1.1);mark=time.monotonic();phase=9
+   player.player.get_queue().set_progression_mode(Clapper.QueueProgressionMode.NONE);player.player.seek(1.1);mark=time.monotonic();phase=9
   elif phase==9 and time.monotonic()-mark>.4:
    assert player.end_replay.get_visible(),(player.player.get_state(),player.player.get_position())
    player.end_replay.emit('clicked');mark=time.monotonic();phase=10

@@ -24,12 +24,6 @@ class VideoPlayer(Gtk.Overlay):
         self.add_overlay(self.error_label)
         self.player=self.video.get_player()
         self.player.set_autoplay(False)
-        tools=Gtk.Box(spacing=6,halign=Gtk.Align.START,valign=Gtk.Align.START,margin_top=12,margin_start=12,css_classes=['osd'])
-        self.replay=Gtk.Button(icon_name='media-skip-backward-symbolic',tooltip_text='Replay from beginning',css_classes=['flat'])
-        self.replay.connect('clicked',lambda _:self.restart());tools.append(self.replay)
-        self.loop=Gtk.ToggleButton(icon_name='media-playlist-repeat-symbolic',tooltip_text='Loop video',css_classes=['flat'])
-        self.loop.connect('toggled',lambda button:self.player.get_queue().set_progression_mode(Clapper.QueueProgressionMode.REPEAT_ITEM if button.get_active() else Clapper.QueueProgressionMode.NONE))
-        tools.append(self.loop);self.video.add_fading_overlay(tools)
         self.end_replay=Gtk.Button(label='Replay',halign=Gtk.Align.CENTER,valign=Gtk.Align.CENTER,visible=False,css_classes=['osd','pill'])
         self.end_replay.connect('clicked',lambda _:self.restart());self.add_overlay(self.end_replay)
         self.player.connect('notify::state',self.state_changed)
@@ -53,7 +47,8 @@ class VideoPlayer(Gtk.Overlay):
         if state in (Clapper.PlayerState.PLAYING,Clapper.PlayerState.PAUSED):self.has_played=True
         item=self.player.get_queue().get_current_item();duration=item.get_duration() if item else 0
         ended=state==Clapper.PlayerState.STOPPED or state==Clapper.PlayerState.PAUSED and duration>0 and self.player.get_position()>=duration-.05
-        self.end_replay.set_visible(ended and self.has_played and not self.loop.get_active())
+        looping=self.player.get_queue().get_progression_mode()==Clapper.QueueProgressionMode.REPEAT_ITEM
+        self.end_replay.set_visible(ended and self.has_played and not looping)
         loading=(state==Clapper.PlayerState.BUFFERING or state==Clapper.PlayerState.STOPPED and not self.has_played) and not self.error_label.get_visible()
         self.spinner.set_visible(loading)
         if not loading:self.video.set_opacity(1)
