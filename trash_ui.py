@@ -35,11 +35,14 @@ def trash_selected(window,items,target=None):
                     client.refresh_serial=getattr(client,'refresh_serial',0)+1
                 if ids:
                     if not window.client:window.local_items=[item for item in window.local_items if item.id not in ids]
-                    if window.mosaic==mosaic:window.animate_media_removal(ids,mosaic,'trash',target)
                 elif not window.viewer:window.mosaic.set_selection(False)
                 message=f'{len(removed)} local files · {len(cloud) if remote else 0} Immich items moved to Trash.'
                 if errors:message+=f' {len(errors)} local files kept. '+errors[0]
                 window.notice(message)
-            window.mutate_media(perform,done)
+                return ids
+            paths={path for path,*_ in local} if scope!='cloud' else set()
+            ids=[item.id for item in items if item.path in paths or scope!='local' and not item.path]
+            optimistic=(lambda:window.optimistic_media_removal(ids,mosaic,'trash',target)) if ids else None
+            window.mutate_media(perform,done,optimistic)
         dialog.connect('response',confirm);dialog.present(window)
     window.background(lambda:copies_for(client,items),review)

@@ -60,7 +60,8 @@ class Viewer(Gtk.Overlay):
         self.archive=icon_button('folder-symbolic','Remove from archive' if window.current_page=='archive' else 'Archive',lambda widget:window.selected_action('archive',[self.source.media_item],target=widget))
         self.trash=icon_button('user-trash-symbolic','Restore from trash' if not device_file and window.current_page=='trash' else 'Move to trash',lambda widget:window.selected_action('trash',[self.source.media_item],target=widget))
         self.lock=icon_button('changes-prevent-symbolic','Move to locked folder',lambda widget:window.move_selected_to_locked([self.source.media_item],target=widget))
-        for widget in (self.lock,self.trash,self.archive,self.fullscreen_button,self.share,self.download):self.header.pack_start(widget)
+        for widget in (self.lock,self.trash,self.archive):self.header.pack_start(widget)
+        for widget in (self.share,self.download,self.fullscreen_button):self.header.pack_end(widget)
         self.viewing_controls=[self.favorite,self.info,self.download,self.share,self.fullscreen_button,self.archive,self.trash,self.lock]
         if device_file:
             for control in (self.favorite,self.share,self.archive,self.lock):
@@ -101,6 +102,10 @@ class Viewer(Gtk.Overlay):
         while child:
             self.detail_labels.append(child.get_last_child())
             child=child.get_next_sibling()
+        self.local_path_group=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=6,visible=False)
+        self.local_path_group.append(text('Local path','dim-label',xalign=0))
+        self.local_path_label=text('',xalign=0,wrap=True,wrap_mode=Pango.WrapMode.WORD_CHAR,max_width_chars=30,selectable=True)
+        self.local_path_group.append(self.local_path_label);details_body.append(self.local_path_group)
         self.viewer_split.set_sidebar(self.details)
         breakpoint=Adw.Breakpoint.new(Adw.BreakpointCondition.parse('max-width: 760sp'))
         breakpoint.add_setter(self.viewer_split,'collapsed',True)
@@ -198,6 +203,9 @@ class Viewer(Gtk.Overlay):
                 ', '.join(str(exif[key]) for key in ('city','state','country') if exif.get(key)) or 'No location',
                 ' '.join(str(exif[key]) for key in ('make','model') if exif.get(key)) or 'No camera information']
         for widget,value in zip(self.detail_labels,values):widget.set_label(value)
+        self.local_path_label.set_label(item.path or '')
+        self.local_path_group.set_visible(bool(item.path))
+        if self.info.get_active():self.load_local_paths()
         self.edit_button.set_sensitive(not self.metadata_pending and item.kind in ('IMAGE','VIDEO'))
         self.favorite_syncing=True;self.favorite.set_active(bool(item.metadata.get('isFavorite')));self.favorite_syncing=False
         self.favorite.set_sensitive(bool(self.window.client) and not self.metadata_pending)
@@ -240,6 +248,15 @@ class Viewer(Gtk.Overlay):
         if widget.get_active() and self.stage.progress<1:
             widget.set_active(False);return
         self.viewer_split.set_show_sidebar(widget.get_active())
+        if widget.get_active():self.load_local_paths()
+
+    def load_local_paths(self):
+        from local_media import local_paths
+        item=self.source.media_item;client=self.window.client
+        def loaded(paths):
+            if self.closing or self.source.media_item.id!=item.id or self.window.client is not client:return
+            self.local_path_label.set_label('\n'.join(paths));self.local_path_group.set_visible(bool(paths))
+        self.window.background(lambda:local_paths(client,item),loaded)
 
     def fade(self,progress):
         self.backdrop.set_opacity(progress)
@@ -338,11 +355,13 @@ class Viewer(Gtk.Overlay):
         self.stage.queue_allocate()
         self.info.set_active(False)
         if active:
+            self.header.add_css_class('immersive')
             self.window.fullscreen()
             self.fullscreen_button.set_icon_name('view-restore-symbolic')
             self.fullscreen_button.set_tooltip_text('Exit fullscreen (Esc)')
             self.show_chrome(False)
         else:
+            self.header.remove_css_class('immersive')
             if not self.was_fullscreen:
                 self.window.unfullscreen()
             self.fullscreen_button.set_icon_name('view-fullscreen-symbolic')

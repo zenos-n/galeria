@@ -16,6 +16,14 @@ def remember_copy(client,path,asset,checksum,stat):
     finally:journal.close()
 
 
+def local_paths(client,item):
+    if item.path:return [str(Path(item.path).absolute())]
+    if not client or not journal_path().exists():return []
+    db=sqlite3.connect(journal_path())
+    try:return [row[0] for row in db.execute('SELECT DISTINCT path FROM files WHERE account=? AND asset=? ORDER BY path',(client.identity,item.id))]
+    finally:db.close()
+
+
 def fingerprint(path,cancel=None):
     path=Path(path)
     if path.is_symlink():raise LibraryError('A local file is now a symbolic link; it was kept.')

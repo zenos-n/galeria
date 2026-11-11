@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from types import SimpleNamespace
-from local_media import copies_for,remember_copy,trash_copies
+from local_media import copies_for,remember_copy,trash_copies,local_paths
 from sync_engine import SyncJournal
 from library import LibraryError
 
@@ -16,6 +16,12 @@ class LocalMediaTests(unittest.TestCase):
         self.item=SimpleNamespace(id='asset',path=None)
         self.remember()
     def remember(self):remember_copy(self.client,self.path,'asset',hashlib.sha1(self.path.read_bytes()).hexdigest(),self.path.stat())
+    def test_full_local_paths_are_account_scoped_and_survive_missing_original(self):
+        self.assertEqual(local_paths(self.client,self.item),[str(self.path)])
+        self.assertEqual(local_paths(SimpleNamespace(identity='other'),self.item),[])
+        self.path.unlink()
+        self.assertEqual(local_paths(self.client,self.item),[str(self.path)])
+        self.assertEqual(local_paths(None,SimpleNamespace(path=str(self.path))),[str(self.path)])
     def test_scope_and_account_isolation(self):
         local,cloud=copies_for(self.client,[self.item]);self.assertEqual(len(local),1);self.assertEqual(cloud,['asset'])
         calls=[];self.client.trash_assets=lambda ids:calls.append(ids)

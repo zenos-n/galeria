@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import secrets
 import sqlite3
+import stat as file_stat
 import threading
 import time
 from urllib.parse import quote
@@ -15,6 +16,28 @@ from library import LibraryError,media_paths,VIDEO_TYPES
 
 
 def signature(stat):return stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime_ns
+
+FILE_QUIET_SECONDS=10
+
+
+def open_writers():
+    writers=set()
+    try:processes=list(Path('/proc').iterdir())
+    except OSError:return writers
+    for process in processes:
+        if not process.name.isdigit():continue
+        try:
+            if process.stat().st_uid!=os.getuid():continue
+            descriptors=list((process/'fd').iterdir())
+        except OSError:continue
+        for descriptor in descriptors:
+            try:
+                info=descriptor.stat()
+                if not file_stat.S_ISREG(info.st_mode):continue
+                fields=dict(line.split(':',1) for line in (process/'fdinfo'/descriptor.name).read_text().splitlines() if ':' in line)
+                if int(fields.get('flags','0').strip(),8)&os.O_ACCMODE:writers.add((info.st_dev,info.st_ino))
+            except (OSError,ValueError):continue
+    return writers
 
 
 def post_asset(client,filename,size,modified,checksum,source,cancel,visibility=None,check=None,progress=None):
@@ -41,6 +64,7 @@ def post_asset(client,filename,size,modified,checksum,source,cancel,visibility=N
                 if not chunk:raise LibraryError('File changed during upload; retrying later.')
                 remaining-=len(chunk);yield chunk
                 if progress:progress(size-remaining,size)
+            if check:check(stream)
             yield ending
     request=Request(client.base+'/assets',data=chunks(),headers={'Authorization':'Bearer '+client.token,
         'Content-Type':'multipart/form-data; boundary='+boundary,'Content-Length':str(len(prefix)+size+len(ending)),
@@ -71,13 +95,22 @@ class SyncJournal:
         self.db=sqlite3.connect(path)
         self.db.execute('CREATE TABLE IF NOT EXISTS files (account TEXT, rule TEXT, path TEXT, size INTEGER, mtime INTEGER, checksum TEXT, asset TEXT, destination TEXT, PRIMARY KEY(account,rule,path))')
         self.db.execute('CREATE TABLE IF NOT EXISTS albums (account TEXT, rule TEXT, name TEXT, album TEXT, PRIMARY KEY(account,rule))')
+        self.db.execute('CREATE TABLE IF NOT EXISTS observations (account TEXT, path TEXT, device INTEGER, inode INTEGER, size INTEGER, mtime INTEGER, since REAL, PRIMARY KEY(account,path))')
+
+    def stable(self,account,path,stat):
+        now=time.time();observed=signature(stat)
+        row=self.db.execute('SELECT device,inode,size,mtime,since FROM observations WHERE account=? AND path=?',(account,str(path))).fetchone()
+        if row and row[:4]==observed and now>=row[4]:return now-row[4]>=FILE_QUIET_SECONDS
+        self.db.execute('INSERT OR REPLACE INTO observations VALUES (?,?,?,?,?,?,?)',(account,str(path),*observed,now));self.db.commit()
+        return FILE_QUIET_SECONDS==0
 
     def known(self,account,rule,path,stat,destination):
         row=self.db.execute('SELECT size,mtime,destination FROM files WHERE account=? AND rule=? AND path=?',(account,rule,str(path))).fetchone()
         return row==(stat.st_size,stat.st_mtime_ns,destination)
 
     def record(self,account,rule,path,stat,checksum,asset,destination):
-        self.db.execute('INSERT OR REPLACE INTO files VALUES (?,?,?,?,?,?,?,?)',(account,rule,str(path),stat.st_size,stat.st_mtime_ns,checksum,asset,destination));self.db.commit()
+        self.db.execute('INSERT OR REPLACE INTO files VALUES (?,?,?,?,?,?,?,?)',(account,rule,str(path),stat.st_size,stat.st_mtime_ns,checksum,asset,destination))
+        self.db.execute('DELETE FROM observations WHERE account=? AND path=?',(account,str(path)));self.db.commit()
 
     def close(self):self.db.close()
 
@@ -107,6 +140,7 @@ class SyncEngine:
         recursive=rule.get('recursive',True);depth=int(rule.get('max_depth',0))
         if depth<0:raise LibraryError('Subfolder depth must be non-negative.')
         destination=self.destination(rule) if not rule.get('folder_albums') else ''
+        writers=open_writers()
         def failed(_error):counts['errors'].append('A folder could not be read.')
         for path in media_paths(root,recursive,depth,failed):
             if self.cancel.is_set() or not self.valid_rule(rule):break
@@ -117,7 +151,8 @@ class SyncEngine:
                     destination=self.destination(dict(rule,id=rule['id']+':'+relative,album_id='',album_name=name))
                 stat=path.stat()
                 if self.journal.known(self.client.identity,rule['id'],path,stat,destination):counts['unchanged']+=1;continue
-                if time.time()-stat.st_mtime<2:counts['pending']+=1;continue
+                stable=self.journal.stable(self.client.identity,path,stat)
+                if not stable or (stat.st_dev,stat.st_ino) in writers:counts['pending']+=1;continue
                 digest=hashlib.sha1()
                 fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
                 with os.fdopen(fd,'rb') as stream:

@@ -23,12 +23,34 @@ class Client:
 
 class SyncTests(unittest.TestCase):
     def setUp(self):
+        quiet=patch('sync_engine.FILE_QUIET_SECONDS',0);quiet.start();self.addCleanup(quiet.stop)
         self.temp=TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name)/'photos';self.root.mkdir()
         self.path=self.root/'original.jpg';self.path.write_bytes(b'original')
         os.utime(self.path,(time.time()-10,time.time()-10))
         self.journal=SyncJournal(Path(self.temp.name)/'state'/'sync.sqlite');self.addCleanup(self.journal.close)
         self.client=Client();self.rule={'id':'rule','path':str(self.root),'recursive':True,'max_depth':0,'album_id':'album'}
+
+    def test_size_changes_restart_stability_window_across_engine_cycles(self):
+        with patch('sync_engine.FILE_QUIET_SECONDS',10),patch('sync_engine.time.time',return_value=1000) as clock,patch('sync_engine.upload_file',return_value='asset') as upload:
+            self.assertEqual(SyncEngine(self.client,self.journal).run_folder(self.rule)['pending'],1)
+            clock.return_value=1008;self.path.write_bytes(b'larger recording')
+            self.assertEqual(SyncEngine(self.client,self.journal).run_folder(self.rule)['pending'],1)
+            clock.return_value=1011
+            self.assertEqual(SyncEngine(self.client,self.journal).run_folder(self.rule)['pending'],1)
+            upload.assert_not_called()
+            clock.return_value=1019
+            self.assertEqual(SyncEngine(self.client,self.journal).run_folder(self.rule)['uploaded'],1)
+            self.assertEqual(upload.call_args.args[3].st_size,len(b'larger recording'))
+
+    @unittest.skipUnless(Path('/proc/self/fdinfo').is_dir(),'Linux descriptor inspection')
+    def test_open_recording_waits_even_when_its_buffer_has_not_flushed(self):
+        with patch('sync_engine.upload_file',return_value='asset') as upload:
+            with self.path.open('ab') as recorder:
+                recorder.write(b'buffered video')
+                self.assertEqual(SyncEngine(self.client,self.journal).run_folder(self.rule)['pending'],1)
+                upload.assert_not_called()
+            self.assertEqual(SyncEngine(self.client,self.journal).run_folder(self.rule)['uploaded'],1)
 
     def test_upload_idempotence_change_and_deletion_preserve_originals(self):
         engine=SyncEngine(self.client,self.journal)

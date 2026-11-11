@@ -22,6 +22,7 @@
 .viewer-backdrop { background: rgba(5,5,7,.88); }
 .viewer-header { background: transparent; box-shadow: none; color: #fafafa; }
 .viewer-header button { color: #fafafa; }
+.viewer-header.immersive { background-image: linear-gradient(to bottom, rgba(0,0,0,.5), rgba(0,0,0,0)); }
 .viewer-arrow { background: rgba(28,28,28,.85); color: white; margin: 14px; min-width: 32px; min-height: 32px; }
 .expanded-photo { background: #353739; color: #ececec; }
 .expanded-photo.shade-0 { background: #303234; }

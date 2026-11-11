@@ -1,5 +1,5 @@
 """Selection/viewer trash, archive and Locked snapshots target their actual icons."""
-import os,sys,tempfile,time
+import os,sys,tempfile,time,threading
 from pathlib import Path
 from datetime import datetime
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -12,12 +12,15 @@ from imaging import decode_image
 path=Path(root.name)/'original.png';Image.new('RGB',(100,70),'purple').save(path);original=path.read_bytes()
 items=[MediaItem(str(i),'original.png',datetime(2026,11,30-i%20),10/7,metadata={'visibility':'timeline'}) for i in range(80)]
 class Client(ImmichClient):
- def __init__(self):super().__init__('https://fixture.invalid');self.token='fixture';self.user={'id':'fixture'};self.locked_until=time.monotonic()+600;self.calls=[];self.fail=False
+ def __init__(self):super().__init__('https://fixture.invalid');self.token='fixture';self.user={'id':'fixture'};self.locked_until=time.monotonic()+600;self.calls=[];self.fail=False;self.release=threading.Event();self.waiting=threading.Event()
  def image_bytes(self,*args,**kwargs):return original
  def update_assets(self,ids,fields):
   if self.fail:raise LibraryError('Fixture server failure')
+  if fields.get('visibility')=='archive':self.waiting.set();assert self.release.wait(4),'Archive waited for acknowledgement before animating'
   self.calls.append((ids,fields))
- def trash_assets(self,ids):self.calls.append((ids,{'trash':True}))
+ def trash_assets(self,ids):
+  self.waiting.set();assert self.release.wait(4),'Trash waited for acknowledgement before animating'
+  self.calls.append((ids,{'trash':True}))
 client=Client();cases=[(mode,action) for action in ('trash','archive','locked') for mode in ('selection','viewer')]
 app=Adw.Application(application_id='com.neg-zero.Galeria.ActionTargets',flags=Gio.ApplicationFlags.NON_UNIQUE)
 phase=0;case=0;start=time.monotonic();errors=[];mark=0;notices=[]
@@ -35,13 +38,20 @@ def check():
    if mode=='viewer' and w.viewer.stage.progress<1:return True
    if mode=='selection' and time.monotonic()-mark<.25:return True
    target=getattr(w.viewer,'lock' if action=='locked' else action) if mode=='viewer' else w.selection_controls[action]
+   if mode=='viewer':
+    controls=[w.viewer.fullscreen_button,w.viewer.download,w.viewer.share,w.viewer.info,w.viewer.edit_button]
+    positions=[control.compute_bounds(w)[1].get_x() for control in controls]
+    assert positions==sorted(positions) and positions[0]>w.get_width()/2,positions
+   client.release.clear();client.waiting.clear()
+   mark=time.monotonic()
    target.emit('clicked');phase=2
   elif phase==2:
    dialog=w.get_visible_dialog()
-   if isinstance(dialog,Adw.AlertDialog):dialog.emit('response','trash');dialog.close()
+   if isinstance(dialog,Adw.AlertDialog):mark=time.monotonic();dialog.emit('response','trash');dialog.close()
    motion=getattr(w,'action_motion',None)
    if motion is None or not .1<motion.progress<.9:return True
    assert motion.frames and motion.destination is target
+   assert time.monotonic()-mark<.4,('Action feedback exceeded 400 ms',mode,action)
    if mode=='selection':
     assert len(w.media_items)==before-count,('Grid still waits for flight',action,len(w.media_items),before)
     assert w.mosaic.tick and 0<w.mosaic.p<1,('No concurrent reflow',action,w.mosaic.p)
@@ -53,6 +63,9 @@ def check():
    assert all(abs(a-b)<1 for a,b in zip(expected,motion.target)),(mode,action,expected,motion.target)
    assert motion.target[0]<w.get_width()/2 if mode=='viewer' else motion.target[0]>w.get_width()/2
    assert motion.target[1]<65 if mode=='viewer' else motion.target[1]>w.get_height()-65
+   if action in ('archive','trash'):
+    assert client.waiting.is_set() and len(client.calls)==case,('Animation waited for server',mode,action)
+    client.release.set()
    phase=3
   elif phase==3 and len(w.media_items)==before-count and not w.loading_more and not w.mosaic.tick and not w.media_action_pending:
    assert w.viewer is None and not w.mosaic.selection_mode
@@ -60,10 +73,10 @@ def check():
    case+=1
    if case<len(cases):phase=0;return True
    client.fail=True;before=len(w.media_items);w.mosaic.selected={0};w.mosaic.set_selection(True);w.selected_action('archive');phase=4
-  elif phase==4 and any('Fixture server failure' in text for text in notices):
+  elif phase==4 and any('Fixture server failure' in text for text in notices) and not w.media_action_pending and not w.mosaic.tick:
    assert len(w.media_items)==before and getattr(w,'action_motion',None) is None and path.read_bytes()==original
    assert len(client.calls)==6
-   client.fail=False;Gtk.Settings.get_default().set_property('gtk-enable-animations',False)
+   client.fail=False;client.release.set();Gtk.Settings.get_default().set_property('gtk-enable-animations',False)
    w.mosaic.selected=set(range(len(w.mosaic.tiles)));w.mosaic.set_selection(True);w.selected_action('archive');phase=5
   elif phase==5 and not w.media_items and not w.media_action_pending:
    assert not w.mosaic.selection_mode and not w.selection_bar.get_reveal_child()

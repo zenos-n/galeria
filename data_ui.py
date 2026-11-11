@@ -273,16 +273,20 @@ class LibraryUI:
             self.status.set_description('A private space for your photos.')
             self.status_actions.set_visible(True)
 
-    def mutate_media(self,work,done):
+    def mutate_media(self,work,done,optimistic=None):
         if getattr(self,'media_action_pending',False):return
         scope=(self.data_generation,self.mosaic)
-        if getattr(self,'mutation_pending',None)==scope:return
+        pending=getattr(self,'mutation_pending',None)
+        if pending and pending[0]==scope[0]:return
         self.mutation_pending=scope
+        settle=optimistic() if optimistic else None
         def complete(value):
             if self.mutation_pending==scope:self.mutation_pending=None
-            done(value)
+            removed=done(value)
+            if settle:settle(removed)
         def failed(message):
             if self.mutation_pending==scope:self.mutation_pending=None
+            if settle:settle([])
             self.notice(message)
         self.background(work,complete,failed)
 
@@ -304,17 +308,16 @@ class LibraryUI:
             return self.client.restore_assets(ids) if restore else self.client.trash_assets(ids)
         def done(_):
             self.page_cache.clear();self.collection_cache.clear()
-            if action=='trash' or action=='archive' and not unarchive:self.remove_from_timeline(ids)
             self.client.refresh_serial=getattr(self.client,'refresh_serial',0)+1
             if self.mosaic==mosaic:
-                if action in ('trash','archive'):
-                    self.animate_media_removal(ids,mosaic,action,target)
-                else:
+                if action=='favorite':
                     for item in self.media_items:
                         if item.id in ids:item.metadata['isFavorite']=True
                     self.mosaic.set_selection(False)
             self.notice('Items restored.' if restore else 'Favorites updated.' if action=='favorite' else 'Items removed from archive.' if unarchive else 'Items archived.' if action=='archive' else 'Items moved to trash.')
-        self.mutate_media(perform,done)
+            return ids
+        optimistic=(lambda:self.optimistic_media_removal(ids,mosaic,action,target)) if action in ('trash','archive') else None
+        self.mutate_media(perform,done,optimistic)
 
     def add_selected_to_album(self):
         if not self.client:self.notice('Connect Immich to add items to albums.');return
@@ -368,7 +371,50 @@ class LibraryUI:
             unlock_folder(self,after=move)
         else:move()
 
-    def animate_media_removal(self,ids,mosaic,action,target=None):
+    def optimistic_media_removal(self,ids,mosaic,action,target=None):
+        from pending_uploads import manager
+        ids=set(ids)
+        generation=self.data_generation;page=self.current_page
+        viewer=self.viewer if self.viewer and self.viewer.source.media_item.id in ids else None
+        uploads=manager(self,False)
+        upload_entries={key:entry for key,entry in uploads.entries.items() if entry['asset'] in ids} if uploads else {}
+        for key in upload_entries:uploads.entries.pop(key)
+        original_items=[item for item in self.media_items if item.id in ids]
+        original_index=self.timeline_index
+        self.remove_from_timeline(ids)
+        pending_index=self.timeline_index
+        finished=False;result=None
+        def reconcile():
+            if not finished or result is None:return
+            if self.data_stopped or self.data_generation!=generation or self.current_page!=page:return
+            self.media_action_pending=False
+            for key,entry in upload_entries.items():
+                if entry['asset'] not in result:uploads.entries[key]=entry
+            restored=[item for item in original_items if item.id not in result]
+            if restored:
+                if original_index and self.timeline_index is pending_index:
+                    self.timeline_index=original_index.without(result)
+                    self.timeline_buckets=[{'timeBucket':key+'-01','count':b-a} for key,(a,b) in self.timeline_index.ranges.items()]
+                self.set_library_items([*self.media_items,*restored],append=True,reflow=True)
+            if viewer and viewer.source.media_item.id not in result and self.viewer is None:
+                if viewer.device_file:self.open_viewer(viewer.index,viewer.source,device_file=True)
+                else:
+                    tile=next((tile for tile in self.mosaic.tiles if tile.media_item.id==viewer.source.media_item.id),None)
+                    if tile:self.open_viewer(tile.index,tile)
+        def animation_finished():
+            nonlocal finished
+            finished=True
+            if result is None:self.media_action_pending=True
+            reconcile()
+        def settle(removed):
+            nonlocal result
+            result=set(removed or [])
+            reconcile()
+        self.animate_media_removal(ids,mosaic,action,target,animation_finished)
+        return settle
+
+    def animate_media_removal(self,ids,mosaic,action,target=None,on_finish=None):
+        ids=set(ids)
         viewer=self.viewer if self.viewer and self.viewer.source.media_item.id in ids else None
         if target is None:target=getattr(viewer,'lock' if action=='locked' else action,None) if viewer else self.selection_controls.get(action)
         if not viewer and not mosaic.selection_mode:
@@ -389,6 +435,7 @@ class LibraryUI:
                 if self.viewer==viewer:viewer.dismiss_action()
                 update_grid()
             self.mosaic.set_selection(False)
+            if on_finish:on_finish()
         def begin():
             nonlocal animated_mosaic
             if self.data_stopped or self.mosaic!=mosaic:self.media_action_pending=False;return False

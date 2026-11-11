@@ -397,3 +397,12 @@ batch focus, same-window navigation, duplicate skip, cancel/retry/discard/save,
 failed saves, background close and Save on Quit. Fixture originals and saved
 preferences are byte-identical.92unit tests and native editor/viewer/clipboard/
 upload/Trash/account/cache regressions pass. All upload checks use fixtures.
+
+
+Version 0.14.7 adds a 50%-to-transparent black gradient behind fullscreen
+viewer controls. Fullscreen, Download and Share sit immediately before Info
+and Edit on the right. Archive and Trash start their icon animation before
+the server response, with rollback after failures and reconciliation of partial
+local Trash results. Automatic folder sync requires ten seconds of observed
+size and modification-time stability and skips files open for writing on Linux.
+Details shows full local paths from the account-scoped upload journal.
