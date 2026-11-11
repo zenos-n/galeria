@@ -6,6 +6,7 @@ class ActionMotion(Gtk.Widget):
     def __init__(self,window,sources,target,done,viewer=None):
         super().__init__(hexpand=True,vexpand=True,can_target=False)
         self.frames=[];self.progress=0;self.window=window;self.viewer=viewer
+        self.reflow_clock=None;self.reflow_handler=0;self.reflow_source=0
         for source in sources:
             if not source or not source.get_mapped():continue
             ok,bounds=source.compute_bounds(window.root_overlay)
@@ -17,12 +18,10 @@ class ActionMotion(Gtk.Widget):
         ok,bounds=icon.compute_bounds(window.root_overlay) if icon else (False,None)
         self.target=(bounds.get_x()+bounds.get_width()/2,bounds.get_y()+bounds.get_height()/2) if ok else None
         self.destination=target;window.action_motion=self;window.action_motions.add(self);window.root_overlay.add_overlay(self)
-        started=None
+        started=GLib.get_monotonic_time()
         def frame(widget,clock):
-            nonlocal started
             now=clock.get_frame_time()
-            if started is None:started=now
-            self.progress=min(1,(now-started)/360000) if self.target and self.frames and Gtk.Settings.get_default().get_property('gtk-enable-animations') else 1
+            self.progress=min(1,max(0,(now-started)/360000)) if self.target and self.frames and Gtk.Settings.get_default().get_property('gtk-enable-animations') else 1
             if viewer:
                 viewer.backdrop.set_opacity(1-self.progress)
                 for arrow in viewer.arrows:arrow.set_opacity(0)
@@ -37,6 +36,9 @@ class ActionMotion(Gtk.Widget):
 
     def cancel(self):
         for motion in list(self.window.action_motions):
+            if motion.reflow_handler:
+                motion.reflow_clock.disconnect(motion.reflow_handler);motion.reflow_handler=0
+            if motion.reflow_source:GLib.source_remove(motion.reflow_source);motion.reflow_source=0
             if motion.tick:motion.remove_tick_callback(motion.tick);motion.tick=0
             motion.frames.clear()
             if motion.get_parent()==self.window.root_overlay:self.window.root_overlay.remove_overlay(motion)

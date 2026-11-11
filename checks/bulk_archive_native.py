@@ -21,6 +21,15 @@ from app import *
 from imaging import decode_image
 from library import ImmichClient, MediaItem
 from timeline_index import TimelineIndex
+import layout
+
+layout_threads = []
+if hasattr(layout, "prepare_timeline"):
+    original_prepare = layout.prepare_timeline
+    def measured_prepare(*args, **kwargs):
+        layout_threads.append(threading.current_thread().name)
+        return original_prepare(*args, **kwargs)
+    layout.prepare_timeline = measured_prepare
 from PIL import Image
 
 gi.require_version('GdkX11', '4.0')
@@ -69,6 +78,8 @@ for item in items[:600]:
     w.texture_cache[w.texture_key(item)] = texture
 started = None
 painted = None
+grid_painted = None
+before_reflow = None
 selected = 0
 samples = []
 
@@ -82,16 +93,20 @@ def pump(until, timeout=12):
 
 
 def frame(*_):
-    global painted
+    global painted, grid_painted, before_reflow
     motion = getattr(w, 'action_motion', None)
-    if started and painted is None and motion and motion.frames and motion.get_mapped() and len(w.media_items) == count-selected:
-        painted = (time.monotonic()-started)*1000
+    if started and motion and motion.frames and motion.get_mapped():
+        if painted is None and motion.progress > 0:
+            painted = (time.monotonic()-started)*1000
+            before_reflow = len(w.media_items) == count
+        if grid_painted is None and len(w.media_items) == count-selected:
+            grid_painted = (time.monotonic()-started)*1000
 
 
 try:
     pump(w.get_mapped)
     w.get_frame_clock().connect('after-paint', frame)
-    for selected in (20, 2, 200):
+    for selected in (20, 2, 200, 1):
         for repeat in range(3):
             index = TimelineIndex([{'timeBucket': '2026-11-01', 'count': count}])
             index.apply('2026-11', items)
@@ -103,14 +118,20 @@ try:
             w.mosaic.set_selection(True)
             pump(w.selection_bar.get_child_revealed)
             before = {tile.media_item.id: tile for tile in w.mosaic.tiles}
-            target = w.selection_controls['archive']
+            if selected == 1:
+                w.mosaic.set_selection(False)
+                w.open_viewer(0)
+                pump(lambda: w.viewer.stage.progress == 1 and not w.viewer.stage.tick)
+                target = w.viewer.archive
+            else:
+                target = w.selection_controls['archive']
             ok, bounds = target.compute_bounds(w)
             assert ok and target.get_mapped()
             dx, dy = w.get_surface_transform()
             xid = str(GdkX11.X11Surface.get_xid(w.get_surface()))
             received.clear()
             release.clear()
-            painted = None
+            painted = grid_painted = before_reflow = None
             started = time.monotonic()
             subprocess.run(['/tmp/gallery-app-identification/xdotool/bin/xdotool', 'windowfocus', xid,
                             'mousemove', '--window', xid,
@@ -118,7 +139,11 @@ try:
                             str(round(bounds.get_y()+bounds.get_height()/2+dy)), 'click', '--delay', '0', '1'], check=True)
             pump(lambda: painted is not None, .4)
             assert painted < 400, painted
-            samples.append({'selected': selected, 'paint_ms': round(painted, 2)})
+            if layout_threads:
+                assert before_reflow, 'First flight waited for grid rearrangement'
+                assert all(name.startswith('gallery-layout') for name in layout_threads), layout_threads
+            pump(lambda: grid_painted is not None)
+            samples.append({'selected': selected, 'paint_ms': round(painted, 2), 'grid_ms': round(grid_painted, 2), 'before_reflow': before_reflow})
             print(json.dumps(samples[-1]), flush=True)
             assert all(before[tile.media_item.id] is tile for tile in w.mosaic.tiles), 'Bulk removal rebuilt unchanged cells'
             pump(received.is_set)
@@ -126,6 +151,9 @@ try:
             release.set()
             pump(lambda: not w.pending_mutations and not w.action_motions and not w.mosaic.tick)
             started = None
+            if w.viewer:
+                w.viewer.close()
+                pump(lambda: w.viewer is None)
     print(json.dumps({'items': count, 'median_paint_ms': statistics.median(sample['paint_ms'] for sample in samples), 'samples': samples}), flush=True)
 finally:
     release.set()

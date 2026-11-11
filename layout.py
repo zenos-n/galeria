@@ -1,5 +1,37 @@
 """Justified rows shared by the native widget and its geometry checks."""
 from bisect import bisect_left,bisect_right
+from datetime import datetime
+
+
+def prepare_timeline(items,buckets,width,target=154,query='',removed=(),mode='all',expanded_month=None,expanded_year=None):
+    removed=set(removed)
+    items=sorted({item.id:item for item in items if item.id not in removed}.values(),key=lambda item:item.created,reverse=True)
+    asset_months={item.id:item.created.strftime('%Y-%m') for item in items}
+    months=[]
+    for i,item in enumerate(items):
+        key=item.created.strftime('%Y-%m')
+        if months and months[-1][0]==key:
+            k,title,year,a,_=months[-1]
+            months[-1]=(k,title,year,a,i+1)
+        else:months.append((key,item.created.strftime('%B %Y'),item.created.strftime('%Y'),i,i+1))
+    counts={}
+    if buckets is not None:
+        groups={month[0]:month for month in months}
+        for bucket in buckets:
+            key=bucket['timeBucket'][:7]
+            counts[key]=counts.get(key,0)+bucket['count']
+            groups.setdefault(key,(key,datetime.strptime(key,'%Y-%m').strftime('%B %Y'),key[:4],0,0))
+        months=[groups[key] for key in sorted(groups,reverse=True)]
+    rows={}
+    groups=[(range(a,b),width) for _,_,_,a,b in months] if mode=='all' else []
+    if mode=='months' and expanded_month:
+        groups=[(range(a,b),width-32) for key,_,_,a,b in months if key==expanded_month]
+    if mode=='years' and expanded_year:
+        groups=[(tuple(i for _,_,year,a,b in months if year==expanded_year for i in range(a,b)),width-32)]
+    for ids,row_width in groups:
+        filtered=[i for i in ids if query.casefold() in items[i].filename.casefold()] if query else ids
+        rows[(ids,row_width,target,query)]=(filtered,RowLayout([items[i].ratio for i in filtered],row_width,target))
+    return {'items':items,'asset_months':asset_months,'months':months,'bucket_counts':counts,'rows':rows}
 
 
 class RowLayout:

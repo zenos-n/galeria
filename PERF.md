@@ -632,3 +632,23 @@ for 2, 20 and 200 selected files. Overall median first paint fell from
 163.53 ms to 101.72 ms. The 200-file median fell from 281.84 ms to 116.23 ms.
 The bulk check enforces under-400 ms paint and identity retention for every
 unchanged cell. These are controlled X11/software-GL fixture measurements.
+
+
+## First motion before worker layout (0.14.12)
+
+Archive/Trash now capture their flight and advance focus before a frame-clock
+after-paint callback queues pure timeline preparation on gallery-layout_0.
+Only GTK cell rebinding/allocation remains on the UI thread. The worker keeps
+the existing grouping/RowLayout arithmetic unchanged for this release. Plans
+are rejected and recalculated if items, dimensions, mode or pending removals
+change. Existing cell identities and per-operation rollback remain intact.
+
+The bulk native check now distinguishes the first *moving* flight frame from
+the grid update frame. With8,000items, three pointer runs each for2/20/200
+selected and single-item focus, while real HTTP replies are held:
+0.14.11 median first motion120.625ms;0.14.12 median31.425ms (27.54–43.65ms).
+Every new first motion painted before rearrangement; old frames all waited
+for rearrangement. Gap filling still costs128.95–250.27ms in this controlled
+X11/software-GL fixture and is the next measurement target. Worker thread
+identity, retained cells, concurrent operations, stale scope, out-of-order
+rollback, privacy guards and local/cloud Trash scopes are checked.

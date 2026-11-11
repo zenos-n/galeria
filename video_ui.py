@@ -2,13 +2,13 @@
 import gi
 gi.require_version('Clapper','0.0')
 gi.require_version('ClapperGtk','0.0')
-from gi.repository import Adw,Clapper,ClapperGtk,Gtk
+from gi.repository import Adw,Clapper,ClapperGtk,Gio,GLib,Gtk
 
 Clapper.init(None)
 
 
 class VideoPlayer(Gtk.Overlay):
-    def __init__(self,uri):
+    def __init__(self,uri,window=None):
         super().__init__(hexpand=True,vexpand=True,css_classes=['galeria-video'])
         self.has_played=False
         self.video=ClapperGtk.Video.new()
@@ -24,6 +24,26 @@ class VideoPlayer(Gtk.Overlay):
         self.add_overlay(self.error_label)
         self.player=self.video.get_player()
         self.player.set_autoplay(False)
+        from session_store import preferences_read,preferences_write
+        prefs=window.preferences if window and hasattr(window,'preferences') else preferences_read()
+        self.loop_switch=Gtk.Switch(active=prefs.get('video_loop',False),valign=Gtk.Align.CENTER)
+        row=Gtk.Box(spacing=18,margin_start=10,margin_end=10,margin_top=6,margin_bottom=6)
+        row.append(Gtk.Label(label='Loop',xalign=0,hexpand=True));row.append(self.loop_switch)
+        self.loop_switch.update_property([Gtk.AccessibleProperty.LABEL],['Loop video'])
+        # Clapper 0.10 exposes its mutable menu through the inner GtkMenuButton.
+        popover=controls.get_extra_menu_button().get_first_child().get_popover()
+        section=popover.get_menu_model().get_item_link(0,Gio.MENU_LINK_SECTION)
+        item=Gio.MenuItem();item.set_attribute_value('custom',GLib.Variant('s','galeria-loop'))
+        section.remove(1);section.insert_item(1,item);popover.add_child(row,'galeria-loop')
+        def loop_changed(*_):
+            active=self.loop_switch.get_active()
+            self.player.get_queue().set_progression_mode(Clapper.QueueProgressionMode.REPEAT_ITEM if active else Clapper.QueueProgressionMode.NONE)
+            prefs['video_loop']=active
+            if window and hasattr(window,'save_preferences'):window.save_preferences()
+            else:preferences_write(prefs)
+            self.state_changed()
+        self.player.get_queue().set_progression_mode(Clapper.QueueProgressionMode.REPEAT_ITEM if self.loop_switch.get_active() else Clapper.QueueProgressionMode.NONE)
+        self.loop_switch.connect('notify::active',loop_changed)
         self.end_replay=Gtk.Button(label='Replay',halign=Gtk.Align.CENTER,valign=Gtk.Align.CENTER,visible=False,css_classes=['osd','pill'])
         self.end_replay.connect('clicked',lambda _:self.restart());self.add_overlay(self.end_replay)
         self.player.connect('notify::state',self.state_changed)

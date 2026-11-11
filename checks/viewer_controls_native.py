@@ -10,6 +10,7 @@ from app import *
 gi.require_version('GdkX11','4.0');gi.require_version('Clapper','0.0')
 from gi.repository import GdkX11,Clapper
 from library import MediaItem
+from session_store import preferences_read
 from PIL import Image
 from imaging import decode_image
 image=Path(root.name)/'photo.png';Image.new('RGB',(320,240),'purple').save(image)
@@ -48,18 +49,29 @@ def check():
    v.zoom_controls.reset();assert v.stage.zoom==1 and v.stage.pan_x==v.stage.pan_y==0
    v.move(1);phase=5
   elif phase==5 and w.viewer.stage.progress==1 and w.viewer.stage.video_player and w.viewer.stage.video_player.player.get_state()==Clapper.PlayerState.PLAYING:
-   player=w.viewer.stage.video_player;w.viewer.close_button.grab_focus();keys('space');mark=time.monotonic();phase=6
+   player=w.viewer.stage.video_player
+   popover=player.loop_switch.get_parent()
+   while not isinstance(popover,Gtk.PopoverMenu):popover=popover.get_parent()
+   menu=popover.get_menu_model().get_item_link(0,Gio.MENU_LINK_SECTION)
+   assert menu.get_item_attribute_value(1,'custom',None).get_string()=='galeria-loop'
+   assert [menu.get_item_attribute_value(i,'label',None).get_string() for i in (2,3)]==['Audio','Subtitles']
+   w.viewer.close_button.grab_focus();keys('space');mark=time.monotonic();phase=6
   elif phase==6 and time.monotonic()-mark>.15:
    assert w.viewer is not None and player.player.get_state()==Clapper.PlayerState.PAUSED
    keys('space');phase=7
   elif phase==7 and player.player.get_state()==Clapper.PlayerState.PLAYING:
-   player.player.get_queue().set_progression_mode(Clapper.QueueProgressionMode.REPEAT_ITEM)
+   player.loop_switch.set_active(True)
+   assert preferences_read()['video_loop'] is True
+   from video_ui import VideoPlayer
+   other=VideoPlayer(video.as_uri(),w)
+   assert other.loop_switch.get_active() and other.player.get_queue().get_progression_mode()==Clapper.QueueProgressionMode.REPEAT_ITEM
+   other.stop()
    player.player.seek(1.05);mark=time.monotonic();positions=[];phase=8
   elif phase==8:
    positions.append(player.player.get_position())
    if time.monotonic()-mark<.65:return True
    assert player.player.get_state()==Clapper.PlayerState.PLAYING and any(value<.5 for value in positions),positions
-   player.player.get_queue().set_progression_mode(Clapper.QueueProgressionMode.NONE);player.player.seek(1.1);mark=time.monotonic();phase=9
+   player.loop_switch.set_active(False);assert preferences_read()['video_loop'] is False;player.player.seek(1.1);mark=time.monotonic();phase=9
   elif phase==9 and time.monotonic()-mark>.4:
    assert player.end_replay.get_visible(),(player.player.get_state(),player.player.get_position())
    player.end_replay.emit('clicked');mark=time.monotonic();phase=10

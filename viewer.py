@@ -146,14 +146,18 @@ class Viewer(Gtk.Overlay):
 
     def prepare_media(self):
         item=self.source.media_item
-        client=self.window.client;source=self.source;stage=self.stage;mosaic=self.window.mosaic
+        client=self.window.client;stage=self.stage
         if client and item and item.metadata.get('timeline_stub'):
-            def current():return not self.closing and self.window.viewer is self and self.stage is stage and self.window.client is client and self.window.mosaic is mosaic
+            def current():
+                return (not self.closing and self.window.viewer is self and self.stage is stage and
+                        self.window.client is client and self.source.media_item.id==item.id and
+                        self.index<len(self.window.media_items) and self.window.media_items[self.index].id==item.id)
             def ready(details):
                 if not current() or details is None:return
                 if details.metadata.get('visibility') in ('locked','hidden') and client.locked_until<=time.monotonic():
                     self.window.notice('This item is no longer in the public timeline.');self.close();return
-                details.metadata['timeline_slot']=True;source.media_item=details;source.filename=details.filename;self.window.media_items[self.index]=details
+                current_source=self.source
+                details.metadata['timeline_slot']=True;current_source.media_item=details;current_source.filename=details.filename;self.window.media_items[self.index]=details
                 self.update_metadata();self.prepare_media()
                 if stage.video_player and stage.progress>=1 and not self.media_stack.get_transition_running():stage.video_player.play()
             def failed(message):

@@ -13,7 +13,7 @@ MONTHS=[('2026-01','January 2026','2026',0,12),('2025-12','December 2025','2025'
 class Mosaic(Gtk.Widget):
     __gtype_name__='GalleryMosaic'
 
-    def __init__(self,open_photo,items=None,buckets=None,on_bucket=None,reuse=None):
+    def __init__(self,open_photo,items=None,buckets=None,on_bucket=None,reuse=None,prepared=None):
         super().__init__(hexpand=True,margin_start=10,margin_end=10)
         self.open_photo=open_photo
         self.on_bucket=on_bucket
@@ -57,12 +57,15 @@ class Mosaic(Gtk.Widget):
         self.month_extents={}
         self.on_window=lambda:None;self.window_signature=None
         self.tier_images=[];self.tier_groups=[];self.tier_sources=None
-        self.asset_months={item.id:item.created.strftime('%Y-%m') for item in (items or [])}
+        self.asset_months=prepared['asset_months'] if prepared else {item.id:item.created.strftime('%Y-%m') for item in (items or [])}
         self.motion_kind='tier'
         self.folder_membership={}
         self.folder_swap=False
         self.months=MONTHS
-        if items is not None:
+        if prepared:
+            self.months=prepared['months'];self.bucket_counts=prepared['bucket_counts']
+            self._row_cache.update(prepared['rows'])
+        elif items is not None:
             self.months=[]
             for i,item in enumerate(items):
                 key=item.created.strftime('%Y-%m')
@@ -71,7 +74,7 @@ class Mosaic(Gtk.Widget):
                     self.months[-1]=(k,title,year,a,i+1)
                 else:
                     self.months.append((key,item.created.strftime('%B %Y'),item.created.strftime('%Y'),i,i+1))
-        if buckets is not None:
+        if buckets is not None and not prepared:
             from datetime import datetime
             groups={month[0]:month for month in self.months}
             for bucket in buckets:

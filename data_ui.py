@@ -46,6 +46,7 @@ class LibraryUI:
         self.bucket_scope={}
         self.io=ThreadPoolExecutor(max_workers=3,thread_name_prefix='gallery-io')
         self.mutation_io=ThreadPoolExecutor(max_workers=2,thread_name_prefix='gallery-mutation')
+        self.layout_io=ThreadPoolExecutor(max_workers=1,thread_name_prefix='gallery-layout')
         self.images=ImageQueue(4);self.image_wanted={}
         self.cached_images=ImageQueue(2)
         self.previews=ThreadPoolExecutor(max_workers=2,thread_name_prefix='gallery-preview')
@@ -80,6 +81,7 @@ class LibraryUI:
         self.data_generation+=1
         self.io.shutdown(wait=False,cancel_futures=True)
         self.mutation_io.shutdown(wait=False,cancel_futures=True)
+        self.layout_io.shutdown(wait=False,cancel_futures=True)
         self.images.shutdown(wait=False,cancel_futures=True)
         self.cached_images.shutdown(wait=False,cancel_futures=True)
         self.previews.shutdown(wait=False,cancel_futures=True)
@@ -433,12 +435,50 @@ class LibraryUI:
             viewer.closing=True;viewer.show_chrome(True)
             if viewer.stage.video_player:viewer.stage.video_player.pause()
         self.media_action_pending=True;advanced=False
+        grid_updated=False;finish_pending=False
         def update_grid():
+            nonlocal grid_updated
             self.pending_media=None
-            values=self.timeline_index.items if self.timeline_index and mosaic.indexed else [item for item in self.media_items if item.id not in ids]
-            self.set_library_items(values,append=True,reflow=True)
-            return self.mosaic
+            if self.data_stopped or self.data_generation!=generation or self.current_page!=page:
+                grid_updated=True
+                if finish_pending:finish()
+                return False
+            from layout import prepare_timeline
+            from pending_uploads import manager
+            current_mosaic=self.mosaic;original=tuple(self.media_items)
+            uploads=manager(self,False)
+            values=uploads.merge(original) if uploads else list(original)
+            removed=ids|{id for gen,values in self.pending_removals.values() if gen==generation for id in values}
+            buckets=[dict(bucket) for bucket in self.timeline_buckets] if self.current_page=='library' and not self.search.entry.get_text() else None
+            dimensions=(current_mosaic.last_width,current_mosaic.target,current_mosaic.query,current_mosaic.mode,current_mosaic.expanded_month,current_mosaic.expanded_year)
+            def applied(prepared):
+                nonlocal grid_updated
+                if self.current_page!=page:
+                    grid_updated=True
+                    if finish_pending:finish()
+                    return
+                current_removed=ids|{id for gen,values in self.pending_removals.values() if gen==generation for id in values}
+                current_dimensions=(self.mosaic.last_width,self.mosaic.target,self.mosaic.query,self.mosaic.mode,self.mosaic.expanded_month,self.mosaic.expanded_year)
+                if self.mosaic is not current_mosaic or dimensions!=current_dimensions or current_removed!=removed or len(original)!=len(self.media_items) or any(a is not b for a,b in zip(original,self.media_items)):
+                    update_grid();return
+                self.set_library_items(prepared['items'],append=True,reflow=True,prepared=prepared)
+                grid_updated=True
+                if finish_pending:finish()
+            def failed(message):
+                nonlocal grid_updated
+                if self.current_page==page:
+                    self.notice(message)
+                    self.set_library_items([item for item in self.media_items if item.id not in ids],append=True,reflow=True)
+                grid_updated=True
+                if finish_pending:finish()
+            self.background(lambda:prepare_timeline(values,buckets,*dimensions[:3],removed=removed,mode=dimensions[3],expanded_month=dimensions[4],expanded_year=dimensions[5]),applied,failed,executor=self.layout_io)
+            return False
         def finish():
+            nonlocal finish_pending
+            if not grid_updated:
+                finish_pending=True
+                return
+            if self.data_stopped:return
             self.media_action_pending=bool(self.action_motions)
             if viewer and not advanced:
                 if self.viewer==viewer:viewer.dismiss_action()
@@ -456,14 +496,30 @@ class LibraryUI:
                 return False
             from trash_motion import ActionMotion
             sources=[viewer.stage.picture] if viewer else [tile.get_child() for tile in mosaic.active_widgets & mosaic.tile_set if tile.media_item.id in ids]
-            remaining=[tile for tile in mosaic.tiles if tile.media_item.id not in ids and not tile.media_item.metadata.get('placeholder')]
+            removing=ids|{id for gen,values in self.pending_removals.values() if gen==generation for id in values}
+            remaining=[tile for tile in mosaic.tiles if tile.media_item.id not in removing and not tile.media_item.metadata.get('placeholder')]
             next_id=min(remaining,key=lambda tile:(abs(tile.index-viewer.index),tile.index<viewer.index)).media_item.id if viewer and not viewer.device_file and remaining else None
-            ActionMotion(self,sources,target,finish,viewer if next_id is None else None)
-            update_grid()
+            motion=ActionMotion(self,sources,target,finish,viewer if next_id is None else None)
+            for tile in mosaic.active_widgets & mosaic.tile_set:
+                if tile.media_item.id in ids:
+                    tile.set_sensitive(False);tile.get_child().set_opacity(0)
+            mosaic.selected={i for i in mosaic.selected if mosaic.tiles[i].media_item.id not in ids}
+            mosaic.update_selection()
             if next_id is not None and self.viewer is viewer:
-                next_tile=next(tile for tile in self.mosaic.tiles if tile.media_item.id==next_id)
+                next_tile=next(tile for tile in mosaic.tiles if tile.media_item.id==next_id)
                 viewer.show_item(next_tile)
                 advanced=True
+            clock=self.get_frame_clock()
+            if clock and motion.frames and Gtk.Settings.get_default().get_property('gtk-enable-animations'):
+                def reflow():
+                    motion.reflow_source=0
+                    return update_grid()
+                def painted(clock):
+                    clock.disconnect(motion.reflow_handler);motion.reflow_handler=0
+                    motion.reflow_source=GLib.idle_add(reflow)
+                motion.reflow_clock=clock
+                motion.reflow_handler=clock.connect_after('after-paint',painted)
+            else:update_grid()
             return False
         if target and target.get_mapped():begin()
         else:GLib.timeout_add(180 if not viewer else 20,begin)
@@ -859,21 +915,21 @@ class LibraryUI:
                 return client.time_bucket(key,fresh=True) if len(items)!=expected and not fresh else items
             self.background(load,loaded,failed)
 
-    def set_library_items(self,items,append=False,reflow=False):
+    def set_library_items(self,items,append=False,reflow=False,prepared=None):
         from pending_uploads import manager
         uploads=manager(self,False)
-        if uploads:items=uploads.merge(items)
+        if uploads and prepared is None:items=uploads.merge(items)
         removing={id for generation,ids in self.pending_removals.values() if generation==self.data_generation for id in ids}
-        if removing:items=[item for item in items if item.id not in removing]
+        if removing and prepared is None:items=[item for item in items if item.id not in removing]
         scroll_input=self.scroll_input_serial
         position=self.scroller.get_vadjustment().get_value() if append or self.bucket_scope else 0
         self.loading_more=True
-        self.media_items=sorted({item.id:item for item in items}.values(),key=lambda item:item.created,reverse=True)
+        self.media_items=prepared['items'] if prepared else sorted({item.id:item for item in items}.values(),key=lambda item:item.created,reverse=True)
         old=self.mosaic
         top,height=old.visible_range()
         visible_pixels={self.texture_key(tile.media_item):tile.media_texture for tile in old.active_widgets & old.tile_set if tile.media_texture is not None and (rect:=old.rendered.get(tile)) and rect[1]+rect[3]>=top-old.target*2 and rect[1]<=top+height+old.target*2}
         buckets=self.timeline_buckets if self.current_page=='library' and not self.search.entry.get_text() else None
-        mosaic=Mosaic(self.open_viewer,self.media_items,buckets,self.open_date_bucket if buckets else None,reuse=old if reflow else None)
+        mosaic=Mosaic(self.open_viewer,self.media_items,buckets,self.open_date_bucket if buckets else None,reuse=old if reflow else None,prepared=prepared)
         mosaic.cached_texture=lambda item:self.texture_cache.get(self.texture_key(item)) or visible_pixels.get(self.texture_key(item))
         mosaic.retry_upload=lambda key:uploads.retry(key) if uploads else None
         from copy_ui import media_menu
