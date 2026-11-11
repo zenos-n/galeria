@@ -3,6 +3,7 @@ import os,sys,tempfile,time,threading,subprocess,json,hashlib
 from pathlib import Path
 from datetime import datetime
 from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
+from unittest.mock import patch
 assert os.environ.get('DISPLAY')==':91'
 sys.path.insert(0,os.environ.get('GALERIA_CHECK_SOURCE_ROOT',str(Path(__file__).resolve().parents[1])))
 root=tempfile.TemporaryDirectory(prefix='galeria-optimistic-')
@@ -112,6 +113,8 @@ def check():
    dedicated=Path(root.name)/'sync-only';dedicated.mkdir();sync.rename(dedicated/sync.name)
    def run_sync():
     journal=SyncJournal(state_dir()/'folder-sync.sqlite')
+    with patch('sync_engine.time.time',return_value=time.time()-11):
+     journal.stable(client.identity,dedicated/sync.name,(dedicated/sync.name).stat())
     def publish(counts):atomic_write(state_dir()/'sync-status.json',json.dumps({'active':True,'updated':time.time(),'accounts':{client.identity:{'busy':True,'progress':counts}}}).encode())
     try:SyncEngine(client,journal,progress=publish).run_folder({'id':'fixture','path':str(dedicated),'recursive':False,'max_depth':0})
     finally:journal.close()

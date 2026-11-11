@@ -862,7 +862,6 @@ class LibraryUI:
     def set_library_items(self,items,append=False,reflow=False):
         from pending_uploads import manager
         uploads=manager(self,False)
-        reuse_uploads=bool(uploads and uploads.entries and reflow)
         if uploads:items=uploads.merge(items)
         removing={id for generation,ids in self.pending_removals.values() if generation==self.data_generation for id in ids}
         if removing:items=[item for item in items if item.id not in removing]
@@ -874,7 +873,7 @@ class LibraryUI:
         top,height=old.visible_range()
         visible_pixels={self.texture_key(tile.media_item):tile.media_texture for tile in old.active_widgets & old.tile_set if tile.media_texture is not None and (rect:=old.rendered.get(tile)) and rect[1]+rect[3]>=top-old.target*2 and rect[1]<=top+height+old.target*2}
         buckets=self.timeline_buckets if self.current_page=='library' and not self.search.entry.get_text() else None
-        mosaic=Mosaic(self.open_viewer,self.media_items,buckets,self.open_date_bucket if buckets else None,reuse=old if reuse_uploads else None)
+        mosaic=Mosaic(self.open_viewer,self.media_items,buckets,self.open_date_bucket if buckets else None,reuse=old if reflow else None)
         mosaic.cached_texture=lambda item:self.texture_cache.get(self.texture_key(item)) or visible_pixels.get(self.texture_key(item))
         mosaic.retry_upload=lambda key:uploads.retry(key) if uploads else None
         from copy_ui import media_menu
@@ -914,7 +913,7 @@ class LibraryUI:
             source=next((tile for tile in mosaic.tiles if tile.media_item.id==self.viewer.source.media_item.id),None)
             if source:
                 self.viewer.source=source;self.viewer.index=source.index;self.viewer.stage.source=source;self.viewer.stage.index=source.index;mosaic.hide_tile(source)
-        old.dispose(mosaic.tile_set if reuse_uploads else ())
+        old.dispose(mosaic.tile_set if reflow else ())
         mosaic.update_selection()
         self.selection_changed()
         self.update_period()

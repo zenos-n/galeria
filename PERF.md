@@ -620,3 +620,15 @@ heartbeat gap during cold grid restoration was143ms; a held duplicate check
 kept dispatching with17ms maximum gaps. This measures feedback and UI
 responsiveness with generated files, not upload or authentication duration.
 The optimistic upload native check now also enforces400ms first paint.
+
+
+Bulk archive in 0.14.11 reuses cells for removal and rollback reflows through
+the existing upload reuse path. The 8,000-item/20-selected cProfile run fell
+from 255 ms UI work and 328 ms first paint to 95 ms and 121 ms. Most removed
+time came from constructing thousands of unchanged Cell widgets.
+
+Repeated native pointer tests with held HTTP replies use three passes each
+for 2, 20 and 200 selected files. Overall median first paint fell from
+163.53 ms to 101.72 ms. The 200-file median fell from 281.84 ms to 116.23 ms.
+The bulk check enforces under-400 ms paint and identity retention for every
+unchanged cell. These are controlled X11/software-GL fixture measurements.
