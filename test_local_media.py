@@ -55,6 +55,19 @@ class LocalMediaTests(unittest.TestCase):
         finally:journal.close()
         local,cloud=copies_for(self.client,[self.item]);self.assertEqual(len(local),1)
 
+    def test_synced_only_excludes_device_copies_and_other_accounts(self):
+        self.assertEqual(copies_for(self.client,[self.item],synced_only=True),([],['asset']))
+        other=self.path.with_name('other-account.png');other.write_bytes(b'original')
+        journal=SyncJournal(self.journal)
+        try:
+            journal.record(self.client.identity,'folder-rule',self.path,self.path.stat(),hashlib.sha1(self.path.read_bytes()).hexdigest(),'asset','')
+            journal.record('other','folder-rule',other,other.stat(),hashlib.sha1(other.read_bytes()).hexdigest(),'asset','')
+        finally:journal.close()
+        local,cloud=copies_for(self.client,[self.item],synced_only=True)
+        self.assertEqual([row[0] for row in local],[str(self.path)])
+        self.assertEqual(cloud,['asset'])
+        self.assertEqual(copies_for(None,[SimpleNamespace(path=str(other))],synced_only=True),([],[]))
+
     def test_manual_upload_and_download_record_real_associations(self):
         from upload_media import upload
         from downloads import save_original

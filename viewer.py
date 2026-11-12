@@ -412,6 +412,7 @@ class Viewer(Gtk.Overlay):
         self.chrome_timer=GLib.timeout_add(1400,hide)
 
     def on_key(self,_controller,keyval,_keycode=0,state=0):
+        if self.window.media_shortcut(keyval,state):return True
         if self.metadata_pending and (keyval in (Gdk.KEY_d,Gdk.KEY_D) and state & Gdk.ModifierType.SHIFT_MASK or keyval in (Gdk.KEY_c,Gdk.KEY_C) and state & Gdk.ModifierType.CONTROL_MASK or keyval==Gdk.KEY_space and self.source.media_item.kind=='VIDEO'):return True
         if not self.editing and not isinstance(self.window.get_focus(),Gtk.Editable):
             if keyval in (Gdk.KEY_plus,Gdk.KEY_equal,Gdk.KEY_minus,Gdk.KEY_0):

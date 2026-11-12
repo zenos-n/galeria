@@ -303,11 +303,23 @@ class LibraryUI:
             trash_selected(self,values,target);return
         if not self.client:self.notice('Local files are read-only.');return
         if getattr(self,'media_action_pending',False) and action not in ('trash','archive'):return
-        ids=[item.id for item in items] if items is not None else [self.mosaic.tiles[i].media_item.id for i in self.mosaic.selected]
+        values=list(items) if items is not None else [self.mosaic.tiles[i].media_item for i in self.mosaic.selected]
+        ids=[item.id for item in values]
         if not ids:return
         mosaic=self.mosaic;client=self.client
         restore=action=='trash' and self.current_page=='trash'
         unarchive=action=='archive' and self.current_page=='archive'
+        delete_local=action=='archive' and not unarchive and self.preferences.get('archive_delete_local',False)
+        def cleanup_local():
+            from local_media import copies_for,trash_copies
+            local,_=copies_for(client,values,synced_only=True)
+            return trash_copies(client,local,[],'local',lambda path:Gio.File.new_for_path(path).trash(None))
+        def cleaned(result):
+            removed,_,errors=result
+            if removed or errors:
+                message=f'Archived · {len(removed)} synced local files moved to Trash.'
+                if errors:message+=f' {len(errors)} files kept. '+errors[0]
+                self.notice(message)
         def perform():
             if action=='favorite':return client.update_assets(ids,{'isFavorite':True})
             if action=='archive':return client.update_assets(ids,{'visibility':'timeline' if unarchive else 'archive'})
@@ -321,6 +333,7 @@ class LibraryUI:
                         if item.id in ids:item.metadata['isFavorite']=True
                     self.mosaic.set_selection(False)
             self.notice('Items restored.' if restore else 'Favorites updated.' if action=='favorite' else 'Items removed from archive.' if unarchive else 'Items archived.' if action=='archive' else 'Items moved to trash.')
+            if delete_local:self.background(cleanup_local,cleaned,lambda message:self.notice('Items archived, but local files could not be removed. '+message))
             return ids
         optimistic=(lambda:self.optimistic_media_removal(ids,mosaic,action,target)) if action in ('trash','archive') else None
         self.mutate_media(perform,done,optimistic)

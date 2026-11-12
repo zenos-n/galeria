@@ -309,6 +309,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         self.add_controller(keys)
 
     def key_pressed(self, _controller, keyval, _keycode, state):
+        if self.media_shortcut(keyval,state):return True
         if keyval in (Gdk.KEY_v,Gdk.KEY_V) and state & Gdk.ModifierType.CONTROL_MASK and not state & (Gdk.ModifierType.ALT_MASK|Gdk.ModifierType.SUPER_MASK|Gdk.ModifierType.SHIFT_MASK) and not isinstance(self.get_focus(),(Gtk.Editable,Gtk.TextView)) and not self.get_visible_dialog() and not (self.viewer and (self.viewer.editing or self.viewer.device_file)):
             self.paste_image();return True
         if self.viewer:
@@ -327,6 +328,22 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
             self.mosaic.set_selection(False)
             return True
         return False
+
+    def media_shortcut(self,keyval,state):
+        if state & (Gdk.ModifierType.CONTROL_MASK|Gdk.ModifierType.ALT_MASK|Gdk.ModifierType.SUPER_MASK):return False
+        shifted=bool(state & Gdk.ModifierType.SHIFT_MASK)
+        action='archive' if shifted and keyval in (Gdk.KEY_a,Gdk.KEY_A) else 'locked' if shifted and keyval in (Gdk.KEY_l,Gdk.KEY_L) else 'trash' if not shifted and keyval in (Gdk.KEY_Delete,Gdk.KEY_KP_Delete) else None
+        if not action or isinstance(self.get_focus(),(Gtk.Editable,Gtk.TextView)) or self.get_visible_dialog():return False
+        viewer=self.viewer
+        if viewer:
+            if viewer.editing:return False
+            if viewer.closing or viewer.metadata_pending:return True
+            target=getattr(viewer,'lock' if action=='locked' else action)
+        elif self.mosaic.selection_mode and self.mosaic.selected:target=self.selection_controls[action]
+        else:return False
+        if action=='trash' and self.current_page=='trash' and not (viewer and viewer.device_file):return True
+        if target.get_visible() and target.get_sensitive():target.emit('clicked')
+        return True
 
     def request_folder_sync(self):
         from sync_service import request_sync
@@ -514,7 +531,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.14.14", developer_name="Negative Zero",
+                                 version="0.14.15", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 

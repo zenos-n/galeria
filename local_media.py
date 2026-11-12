@@ -39,13 +39,16 @@ def fingerprint(path,cancel=None):
     return expected,digest.hexdigest()
 
 
-def copies_for(client,items):
+def copies_for(client,items,*,synced_only=False):
     records=[]
     if client and journal_path().exists():
         db=sqlite3.connect(journal_path())
-        try:records=db.execute('SELECT path,size,mtime,checksum,asset FROM files WHERE account=?',(client.identity,)).fetchall()
+        try:
+            query='SELECT path,size,mtime,checksum,asset FROM files WHERE account=?'
+            if synced_only:query+=" AND rule <> 'device-copy'"
+            records=db.execute(query,(client.identity,)).fetchall()
         finally:db.close()
-    ids={item.id for item in items if not item.path};paths={str(Path(item.path).absolute()) for item in items if item.path}
+    ids={item.id for item in items if not item.path};paths=set() if synced_only else {str(Path(item.path).absolute()) for item in items if item.path}
     matches={path:(size,mtime,checksum,asset) for path,size,mtime,checksum,asset in records if asset in ids or path in paths}
     local=[];cloud=set(ids) if client else set()
     for path in paths:
