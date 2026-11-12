@@ -2,6 +2,8 @@
 from bisect import bisect_left,bisect_right
 from datetime import datetime
 
+MIN_TILE_SIZE=64
+
 
 def prepare_timeline(items,buckets,width,target=154,query='',removed=(),mode='all',expanded_month=None,expanded_year=None):
     removed=set(removed)
@@ -41,55 +43,43 @@ class RowLayout:
     """Index whole rows; create per-photo rectangles only for the requested band."""
     def __init__(self,ratios,width,target=154,gap=3):
         self.ratios=[max(.05,float(ratio)) for ratio in ratios]
-        self.width=width;self.gap=gap;self.rows=[];self.ys=[];self.height=0;self.max_height=0
+        self.width=width;self.gap=gap;self.rows=[];self.ys=[];self.height=0;self.max_height=0;self.closed=[]
         if not self.ratios or width<=0:return
+        self.minimum=min(MIN_TILE_SIZE,max(1,int(width)))
+        capacity=max(1,int((width+gap)//(self.minimum+gap)))
         start=0;total=0.;y=0
+        def row(end,closed):
+            nonlocal start,total,y
+            height=max(self.minimum,round(min(target,(width-gap*(end-start-1))/total)))
+            self.rows.append((start,end,y,height));self.ys.append(y);self.closed.append(closed)
+            self.max_height=max(self.max_height,height)
+            y+=height+gap;start=end;total=0.
         for index,ratio in enumerate(self.ratios):
             total+=ratio
             count=index-start+1
-            if total*target+gap*(count-1)>=width:
-                height=max(1,round((width-gap*(count-1))/total))
-                self.rows.append((start,index+1,y,height));self.ys.append(y)
-                self.max_height=max(self.max_height,height)
-                y+=height+gap;start=index+1;total=0.
-        if start<len(self.ratios):
-            height=max(1,round(min(target,(width-gap*(len(self.ratios)-start-1))/total)))
-            self.rows.append((start,len(self.ratios),y,height));self.ys.append(y)
-            self.max_height=max(self.max_height,height);y+=height+gap
+            if count>=capacity or total*target+gap*(count-1)>=width:row(index+1,True)
+        if start<len(self.ratios):row(len(self.ratios),False)
         self.height=y-gap
 
     def visible(self,low,high):
         a=bisect_left(self.ys,low-self.max_height);b=bisect_right(self.ys,high)
-        for start,end,y,height in self.rows[a:b]:
+        for row_index in range(a,b):
+            start,end,y,height=self.rows[row_index]
             if y+height<low:continue
+            available=int(self.width)-self.gap*(end-start-1)
+            widths=[max(self.minimum,round(height*ratio)) for ratio in self.ratios[start:end]]
+            used=available if self.closed[row_index] else min(available,sum(widths))
+            weights=[width-self.minimum for width in widths]
+            if not any(weights):weights=[1]*len(widths)
+            total=sum(weights);extra=used-self.minimum*len(widths);cumulative=previous=0
             x=0
-            for index in range(start,end):
-                width=min(max(1,round(height*self.ratios[index])),max(1,self.width-x))
+            for index,weight in zip(range(start,end),weights):
+                cumulative+=weight;allocated=round(extra*cumulative/total)
+                width=self.minimum+allocated-previous;previous=allocated
                 yield index,x,y,width,height
                 x+=width+self.gap
 
 
 def justified_rows(ratios, width, target=154, gap=3):
-    if not ratios or width <= 0:
-        return []
-    rows, row, total = [], [], 0.0
-    for index, ratio in enumerate(ratios):
-        ratio = max(0.05, float(ratio))
-        row.append((index, ratio))
-        total += ratio
-        if total * target + gap * (len(row) - 1) >= width:
-            rows.append((row, (width - gap * (len(row) - 1)) / total))
-            row, total = [], 0.0
-    if row:
-        rows.append((row, min(target, (width - gap * (len(row) - 1)) / total)))
-    result, y = [], 0
-    for row, height in rows:
-        height = max(1, round(height))
-        x = 0
-        for index, ratio in row:
-            item_width = max(1, round(height * ratio))
-            item_width = min(item_width, max(1, width - x))
-            result.append((index, x, y, item_width, height))
-            x += item_width + gap
-        y += height + gap
-    return result
+    rows=RowLayout(ratios,width,target,gap)
+    return list(rows.visible(0,rows.height))

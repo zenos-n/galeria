@@ -1,6 +1,6 @@
 import unittest
 
-from layout import RowLayout,justified_rows,prepare_timeline
+from layout import MIN_TILE_SIZE,RowLayout,justified_rows,prepare_timeline
 
 
 class LayoutTest(unittest.TestCase):
@@ -27,22 +27,47 @@ class LayoutTest(unittest.TestCase):
                     self.assertTrue(all(query.casefold() in item.filename.casefold() for item in values))
                     self.assertEqual(list(rows.visible(-1,rows.height+1)),justified_rows([item.ratio for item in values],width,target))
 
-    def test_rows_preserve_proportions_and_stay_inside_viewport(self):
+    def test_rows_keep_minimum_sizes_and_preserve_uncropped_proportions(self):
         ratios = [1.78, .45, 1, .67, 1.5, .55, 2, 1, .8, 1.3]
         for width in (200, 360, 700, 1040, 1600):
             with self.subTest(width=width):
                 positions = justified_rows(ratios, width)
                 self.assertEqual(len(positions), len(ratios))
+                cropped_rows={y for _,_,y,w,h in positions if w==MIN_TILE_SIZE or h==MIN_TILE_SIZE}
                 previous = None
                 for index, x, y, w, h in positions:
                     self.assertGreater(w, 0)
                     self.assertGreater(h, 0)
                     self.assertLessEqual(x + w, width)
-                    self.assertAlmostEqual(w / h, ratios[index], delta=.035)
+                    if y not in cropped_rows:self.assertAlmostEqual(w / h, ratios[index], delta=.035)
                     if previous:
                         px, py, pw, ph = previous
                         self.assertTrue(y >= py + ph or (y == py and x >= px + pw))
                     previous = x, y, w, h
+
+    def test_extreme_portraits_and_panoramas_never_collapse_or_overflow(self):
+        ratios=[.0001,10000,.01,.001,1,1.5,2]+[.0001]*90+[10000]*10
+        for width in (1,32,63,64,128,168,200,361,1040,1920):
+            for target in (96,112,154,210,240):
+                with self.subTest(width=width,target=target):
+                    positions=justified_rows(ratios,width,target)
+                    self.assertEqual([row[0] for row in positions],list(range(len(ratios))))
+                    previous=None
+                    for _,x,y,w,h in positions:
+                        self.assertGreaterEqual(w,min(MIN_TILE_SIZE,width))
+                        self.assertGreaterEqual(h,min(MIN_TILE_SIZE,width))
+                        self.assertLessEqual(h,max(target,MIN_TILE_SIZE))
+                        self.assertLessEqual(x+w,width)
+                        if previous:
+                            px,py,pw,ph=previous
+                            self.assertTrue(y>=py+ph+3 or y==py and x>=px+pw+3)
+                        previous=x,y,w,h
+
+    def test_ordinary_images_keep_aspect_ratio_when_no_minimum_is_needed(self):
+        ratios=[1,1.5,2,1.2]*8
+        for width in (200,360,700,1600):
+            for i,x,y,w,h in justified_rows(ratios,width):
+                self.assertAlmostEqual(w/h,ratios[i],delta=.035)
 
     def test_empty_and_partial_rows(self):
         self.assertEqual(justified_rows([], 800), [])

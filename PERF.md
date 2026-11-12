@@ -734,3 +734,25 @@ refreshes. Baseline samples vary between0–2missed refreshes. Two single-item
 and two20-item runs of the final source each report0missed, with16.685–16.691ms
 presentation intervals on the60HzDP-2 monitor/Wayland/Vulkan. This is controlled
 fixture evidence; unrelated system load can still affect presentation.
+
+
+## Minimum usable grid cells (0.14.16)
+
+RowLayout now bounds row capacity by64px minimum columns, bounds height by
+the same minimum (or available width for narrower viewports), and distributes
+remaining row width without overflowing. Extreme thumbnails use existing COVER
+cropping; source aspect metadata, original bytes and full-focus aspect remain
+unchanged. Width allocation stays lazy for requested row bands. justified_rows
+now exports the same RowLayout geometry, so worker plans, startup estimates and
+the viewport agree.
+
+The native extreme-ratio fixture reproduces1px-wide/high tiles on0.14.15 and
+asserts64x64cells on the fix at all three densities and expanded month/year
+views, with selection checks fully inside their cells.100unit tests cover
+extreme ratios, narrow/wide windows, nonoverlap, ordinary aspect ratios and
+scroll-window indexing. The native crop image is inspected. Removal/group
+geometry and optimistic concurrent/rollback checks pass. The legacy cache
+fixture expected three loaded months although its viewport plus one screen
+reaches only two; the same timeout is reproduced on immutable0.14.15. Its
+expectation now asserts exactly the two requested months, preserving the
+blocked-HTTP/cached-pixels/scroll-anchor checks.

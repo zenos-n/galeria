@@ -29,11 +29,11 @@ def check():
   assert time.monotonic()-start<15,phase
   if phase==0 and w.mosaic.rendered and len(started)==4:
    old=w.mosaic;w.scroller.get_vadjustment().set_value(900);metadata.set();phase=1
-  elif phase==1 and len(w.timeline_index.loaded)==3 and all(tile.media_texture for tile in w.mosaic.active_widgets & w.mosaic.tile_set):
+  elif phase==1 and w.timeline_index.loaded=={'2026-12','2026-11'} and all(tile.media_texture for tile in w.mosaic.active_widgets & w.mosaic.tile_set):
    assert w.mosaic is old and not w.mosaic.tick
    assert not network.is_set() and len(started)==4
    assert w.scroller.get_vadjustment().get_value()==900
-   print('CACHED PIXELS READY WITH ALL FOUR HTTP WORKERS BLOCKED; THREE PLACEHOLDER MONTHS HYDRATE IN PLACE WITHOUT MOTION OR SCROLL RESET',flush=True)
+   print('CACHED PIXELS READY WITH ALL FOUR HTTP WORKERS BLOCKED; ONLY VISIBLE/PREFETCH MONTHS HYDRATE WITHOUT MOTION OR SCROLL RESET',flush=True)
    w.set_library_items(w.timeline_index.items,append=True)
    def wheel():
     w.user_scrolled();w.scroller.get_vadjustment().set_value(1300);return False
