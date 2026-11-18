@@ -756,3 +756,14 @@ fixture expected three loaded months although its viewport plus one screen
 reaches only two; the same timeout is reproduced on immutable0.14.15. Its
 expectation now asserts exactly the two requested months, preserving the
 blocked-HTTP/cached-pixels/scroll-anchor checks.
+
+### GNOME titlebar preferences (0.14.17)
+
+Bind GNOME button-layout read-only to process Gtk.Settings at startup; other
+desktops keep native GTK settings. The sidebar allows native start controls.
+The private memory-backend GTK check injects a stale minimize/maximize layout:
+0.14.16 fails, the fix shows close-only, follows live/right/left changes and
+collapsed sidebar placement without writing back. GNOME, ubuntu:GNOME and KDE
+cases pass; first mapped controls take 82–96 ms in private Xvfb/Cairo. The
+reported production process's original GTK/portal mismatch was not captured;
+a fresh Wayland probe already read close-only before this fix.

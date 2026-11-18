@@ -115,7 +115,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
         toolbar = Adw.ToolbarView()
         toolbar.add_css_class("gallery-sidebar")
         self.split.set_sidebar(toolbar)
-        header = Adw.HeaderBar(show_start_title_buttons=False, show_end_title_buttons=False)
+        header = Adw.HeaderBar(show_end_title_buttons=False)
         header.set_title_widget(label("Galeria", "heading"))
         self.search_toggle=Gtk.ToggleButton(icon_name='system-search-symbolic',tooltip_text='Search',css_classes=['flat'])
         self.search_toggle.connect('toggled',lambda widget:self.set_searching(widget.get_active()))
@@ -531,7 +531,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.14.16", developer_name="Negative Zero",
+                                 version="0.14.17", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 
@@ -738,6 +738,12 @@ class Gallery(Adw.Application):
 
     def do_startup(self):
         Adw.Application.do_startup(self)
+        # Keep GNOME's button choices authoritative even if GTK has a stale layout.
+        if 'GNOME' in os.environ.get('XDG_CURRENT_DESKTOP','').split(':'):
+            schema=Gio.SettingsSchemaSource.get_default().lookup('org.gnome.desktop.wm.preferences',True)
+            if schema:
+                self.window_preferences=Gio.Settings.new_full(schema,None,None)
+                self.window_preferences.bind('button-layout',Gtk.Settings.get_default(),'gtk-decoration-layout',Gio.SettingsBindFlags.GET)
         provider = Gtk.CssProvider()
         provider.load_from_path(str(Path(__file__).with_name("style.css")))
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
