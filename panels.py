@@ -288,6 +288,8 @@ def preferences(window):
     library.add_suffix(choose)
     source.add(library)
     general.add(source)
+    from timeline_visibility_ui import preferences_group
+    general.add(preferences_group(window))
     cache_group=Adw.PreferencesGroup(title='Storage')
     cache_row=Adw.ActionRow(title='Media cache',subtitle='512 MB for images · 128 MB for video preloads · encrypted copies kept separately')
     clear=Gtk.Button(label='Clear cache',valign=Gtk.Align.CENTER)

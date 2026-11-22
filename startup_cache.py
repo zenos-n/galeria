@@ -1,6 +1,6 @@
 """Restore ordinary timeline metadata and visible thumbnail pixels without HTTP."""
 from imaging import decode_image
-from layout import justified_rows
+from layout import justified_rows,prepare_timeline
 from timeline_index import TimelineIndex
 from library import LibraryError
 
@@ -30,4 +30,6 @@ def restore(client,width,height,target=154):
                 except (OSError,ValueError):pass
         y+=max((dy+h for _,_,dy,_,h in rows),default=0)+12
         if y>height*3:break
+    index.prepared=prepare_timeline(index.items,buckets,width,target)
+    index.prepared['startup']=True
     return buckets,index,pixels

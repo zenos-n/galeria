@@ -95,6 +95,15 @@ def collection_menu(window,kind,value,refresh):
             selected=value['id'] in window.preferences.get('pins',{}).get(window.client.identity,[])
             pin.set_label('Unpin album' if selected else 'Pin album')
         update_pin();popover.connect('show',update_pin)
+        from timeline_visibility_ui import rules,toggle_album
+        from timeline_visibility import screenshot_name
+        visibility=action('Hide from timeline',lambda:toggle_album(window,value['id']))
+        def update_visibility(*_):
+            hidden=rules(window)
+            automatic=hidden.get('screenshots') and screenshot_name(value.get('albumName',''))
+            visibility.set_label('Hidden with screenshots' if automatic else 'Show in timeline' if value['id'] in hidden.get('albums',[]) else 'Hide from timeline')
+            visibility.set_sensitive(not automatic)
+        update_visibility();popover.connect('show',update_visibility)
         from sharing_ui import share_album
         action('Share album…',lambda:share_album(window,value))
     action('Rename',lambda:edit_name(window,'albums' if kind=='sharing' else kind,value))

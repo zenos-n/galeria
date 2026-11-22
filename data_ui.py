@@ -95,6 +95,17 @@ class LibraryUI:
 
     def save_preferences(self):preferences_write(self.preferences)
 
+    def visibility_policy(self):
+        from timeline_visibility import TimelineVisibility,rules_for
+        if self.client:return getattr(self.client,'timeline_visibility',None)
+        return TimelineVisibility(rules_for(self.preferences,'local'))
+
+    def filtering_timeline(self):
+        if self.current_page!='library':return False
+        try:filters,query=self.search.request_filters()
+        except ValueError:return False
+        return not filters and not query
+
     def user_scrolled(self,*_):
         self.scroll_input_serial+=1
         return False
@@ -176,8 +187,10 @@ class LibraryUI:
                 client.user=dict(self.preferences.get('last_user') or {'id':self.preferences['user_id'],'name':self.preferences.get('email','Immich')})
                 client.user['id']=self.preferences['user_id'];client.user['isAdmin']=False
                 client.modern_search=self.preferences.get('modern_search',True)
+                from timeline_visibility import TimelineVisibility,rules_for
+                client.timeline_visibility=TimelineVisibility(rules_for(self.preferences,client.identity))
                 from startup_cache import restore as cached_restore
-                client.bootstrap=cached_restore(client,width,height) if client.modern_search else None
+                client.bootstrap=cached_restore(client,width,height,self.preferences.get('density',154)) if client.modern_search else None
                 client.restoring=bool(client.bootstrap)
                 if not client.bootstrap:
                     GLib.idle_add(self.busy_library,'Reconnecting to your library…')
@@ -590,6 +603,8 @@ class LibraryUI:
         self.notice(message)
 
     def connect_local(self,paths):
+        self.timeline_visibility_pending=False
+        self.pending_visibility_refresh=None;self.local_visibility_cache=None
         from copy_ui import clear_locked_clipboard
         clear_locked_clipboard(self)
         self.timeline_index=None;self.timeline_pending=set()
@@ -626,6 +641,8 @@ class LibraryUI:
         self.restoring_library=False;self.read_open_files()
 
     def connect_immich(self,client):
+        self.timeline_visibility_pending=False
+        self.pending_visibility_refresh=None;self.local_visibility_cache=None
         from copy_ui import clear_locked_clipboard
         clear_locked_clipboard(self)
         self.timeline_index=None;self.timeline_pending=set()
@@ -634,6 +651,9 @@ class LibraryUI:
         self.data_generation+=1
         self.search_generation+=1
         self.client=client
+        if not hasattr(client,'timeline_visibility'):
+            from timeline_visibility import TimelineVisibility,rules_for
+            client.timeline_visibility=TimelineVisibility(rules_for(self.preferences,client.identity))
         self.media_items=[]
         self.video_prefetch.clear()
         self.timeline_buckets=[];self.dates_ready=False;self.bucket_scope={}
@@ -664,11 +684,13 @@ class LibraryUI:
 
     def refresh_connected_library(self):
         client=self.client
+        visibility=getattr(client,'timeline_visibility',None)
         from sync_service import read_config
         sync_account=read_config().get('accounts',{}).get(client.identity,{})
         if sync_account.get('enabled') and sync_account.get('folders'):self.request_folder_sync()
         self.background(client.albums,self.album_tree.set_albums)
         def dates_loaded(buckets):
+            if self.client is not client or getattr(client,'timeline_visibility',None) is not visibility:return
             previous=self.timeline_index
             if previous and buckets==self.timeline_buckets:
                 self.dates_ready=True
@@ -721,6 +743,11 @@ class LibraryUI:
     def search_library(self,append=False,preserve_folder=False,force=False):
         if self.viewer and not self.viewer.device_file:
             return
+        building=getattr(self,'timeline_cell_build',None)
+        if building and building['index'] is self.timeline_index and self.filtering_timeline():
+            building['request']=self.search_generation;self.busy_library('Preparing timeline…');return
+        if self.current_page=='library' and getattr(self,'timeline_visibility_pending',False):
+            self.busy_library('Updating timeline…');return
         if self.client and self.current_page=='library' and not self.dates_ready:
             self.busy_library('Loading library dates…');return
         if self.current_page not in ('library','photos','videos','screenshots','live','favorites','archive','trash','locked','collection') and not self.current_page.startswith('album-'):
@@ -738,6 +765,16 @@ class LibraryUI:
         if self.library_mode=='local':
             items=self.local_items
             page=self.current_page
+            if self.filtering_timeline():
+                policy=self.visibility_policy();cached=getattr(self,'local_visibility_cache',None)
+                if policy.enabled and not (cached and cached[0] is items and cached[1]==policy.cache_key):
+                    def filtered(values):
+                        if request_id!=self.search_generation:return
+                        self.local_visibility_cache=(items,policy.cache_key,values)
+                        self.loading_more=False;self.search_library(append,preserve_folder,force)
+                    self.background(lambda:policy.filter(items),filtered,self.library_failed)
+                    return
+                if policy.enabled:items=cached[2]
             if page=='videos':items=[item for item in items if item.kind=='VIDEO']
             elif page=='photos':items=[item for item in items if item.kind=='IMAGE']
             elif page=='screenshots':items=[item for item in items if 'screenshot' in item.filename.lower()]
@@ -759,7 +796,9 @@ class LibraryUI:
         page=self.current_page
         if page=='library' and not filters and not query and not self.bucket_scope and self.timeline_index:
             self.next_page=None
-            self.set_library_items(self.timeline_index.items,append=preserve_folder or force)
+            prepared=getattr(self.timeline_index,'prepared',None)
+            self.timeline_index.prepared=None
+            self.set_library_items(self.timeline_index.items,append=preserve_folder or force,prepared=prepared)
             self.request_timeline_metadata();return
         if page.startswith('album-'):
             filters['albumIds']=[page.removeprefix('album-')]
@@ -798,14 +837,17 @@ class LibraryUI:
                 if force:self.loading_more=False;self.notice(message)
                 else:self.library_failed(message)
         count=len(self.media_items) if force else 0
+        policy=getattr(client,'timeline_visibility',None) if page=='library' and self.filtering_timeline() else None
         def load():
-            items,cursor=client.search(filters,query,next_page)
+            search=lambda cursor:policy.search(client,filters,cursor) if policy else client.search(filters,query,cursor)
+            items,cursor=search(next_page)
             while force and cursor and len(items)<count:
-                batch,cursor=client.search(filters,query,cursor);items.extend(batch)
+                batch,cursor=search(cursor);items.extend(batch)
             return items,cursor
         self.background(load,loaded,failed)
 
     def refresh_remote(self,*_):
+        if getattr(self,'timeline_visibility_pending',False):return True
         from pending_uploads import manager
         uploads=manager(self,False)
         if uploads and uploads.active():return True
@@ -888,6 +930,7 @@ class LibraryUI:
         return True
 
     def request_timeline_metadata(self):
+        if getattr(self,'timeline_visibility_pending',False):return
         from pending_uploads import manager
         uploads=manager(self,False)
         if uploads and uploads.active():return
@@ -929,11 +972,38 @@ class LibraryUI:
             self.background(load,loaded,failed)
 
     def set_library_items(self,items,append=False,reflow=False,prepared=None):
+        if prepared and prepared.pop('startup',False) and len(prepared['items'])>2048:
+            from timeline_cells import Cell
+            self.loading_more=True
+            if not self.media_items:self.busy_library('Preparing timeline…')
+            generation=self.data_generation;request=self.search_generation;page=self.current_page;old=self.mosaic
+            building={'index':self.timeline_index,'request':request};self.timeline_cell_build=building
+            cells={};position=0
+            def build():
+                nonlocal position
+                if self.data_stopped or generation!=self.data_generation or building['request']!=self.search_generation or page!=self.current_page or self.mosaic is not old:
+                    if self.timeline_cell_build is building:self.timeline_cell_build=None
+                    if not self.data_stopped and self.timeline_index is building['index']:
+                        prepared['startup']=True;self.timeline_index.prepared=prepared
+                    cells.clear();return False
+                deadline=time.monotonic()+.004
+                while position<len(prepared['items']) and time.monotonic()<deadline:
+                    item=prepared['items'][position]
+                    cells[item.id]=Cell(old,position,item,item.ratio);position+=1
+                if position<len(prepared['items']):return True
+                self.timeline_cell_build=None
+                prepared['cells']=cells
+                self.set_library_items(items,append,reflow,prepared)
+                return False
+            GLib.idle_add(build)
+            return
         from pending_uploads import manager
         uploads=manager(self,False)
         if uploads and prepared is None:items=uploads.merge(items)
         removing={id for generation,ids in self.pending_removals.values() if generation==self.data_generation for id in ids}
         if removing and prepared is None:items=[item for item in items if item.id not in removing]
+        policy=self.visibility_policy() if self.filtering_timeline() else None
+        if policy and prepared is None:items=policy.filter(items)
         scroll_input=self.scroll_input_serial
         position=self.scroller.get_vadjustment().get_value() if append or self.bucket_scope else 0
         self.loading_more=True
@@ -1066,9 +1136,10 @@ class LibraryUI:
             filters={'takenAfter':start.isoformat(timespec='milliseconds')+'Z','takenBefore':(end-timedelta(milliseconds=1)).isoformat(timespec='milliseconds')+'Z'}
             def load(filters=filters,job_key=job_key):
                 if self.mosaic!=mosaic or job_key not in self.image_wanted:return None
-                items,_=client.search(filters,size=4)
+                policy=getattr(client,'timeline_visibility',None)
+                items,_=policy.search(client,filters,size=4) if policy else client.search(filters,size=4)
                 values=[]
-                for item in items:
+                for item in items[:4]:
                     if job_key not in self.image_wanted:return None
                     values.append((item.id,decode_image(client.image_bytes(item),240)))
                 return values
@@ -1116,6 +1187,9 @@ class LibraryUI:
         else:self.refresh_remote()
 
     def flush_pending_media(self):
+        visibility=getattr(self,'pending_visibility_refresh',None)
+        if visibility:
+            self.pending_visibility_refresh=None;self.pending_media=None;visibility();return
         if getattr(self,'refresh_after_viewer',False):
             self.refresh_after_viewer=False
             GLib.timeout_add(100,lambda:(self.refresh_remote(),False)[1])

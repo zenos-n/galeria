@@ -767,3 +767,25 @@ collapsed sidebar placement without writing back. GNOME, ubuntu:GNOME and KDE
 cases pass; first mapped controls take 82–96 ms in private Xvfb/Cairo. The
 reported production process's original GTK/portal mismatch was not captured;
 a fresh Wayland probe already read close-only before this fix.
+
+### Local timeline exclusions (0.14.18)
+
+Account-scoped screenshot/album rules and device-folder rules affect only the
+unsearched main timeline. Albums, search and raw metadata/image caches stay
+unchanged. Excluded IDs/month counts are built on workers, deduplicated across
+overlapping albums, cached for offline startup, refreshed when bucket/album
+signatures change (or after five minutes), and applied before compact hydration,
+date-cover downloads and optimistic upload display. Screenshot detection uses
+filenames and screenshot-named albums/folders, not image recognition. No server
+visibility mutation is sent. Fresh metadata failures retain the prior disk copy.
+
+109 unit checks and native preference/menu/local-folder/failure/focus/cached
+restart checks pass. Slow metadata leaves the GTK loop responsive; pixel identity
+is retained through hiding/showing. In the private 45,490-item Xvfb/Cairo fixture,
+an initial 758 ms rule-application pause fell to 113 ms by using existing
+worker plans and native parents. Feedback is 33 ms; showing all items again
+has 15 ms feedback and a 357 ms max gap. Cached startup prepares
+maps/rows off-thread and builds native cells in 4 ms chunks: first feedback 37 ms,
+full grid 902 ms, max loop gap 162 ms. Local 45k-folder filtering: feedback 30 ms,
+max loop gap 63 ms. These are synthetic UI-loop measurements, not production FPS
+guarantees. Read-only live API smoke check passed against Immich v3.3.3.

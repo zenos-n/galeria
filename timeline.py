@@ -94,6 +94,7 @@ class Mosaic(Gtk.Widget):
         self.active_widgets=set()
         self.cell_build_deadline=0;self.cell_build_pending=False;self.cell_build_tick=0;self.incremental_cells=False
         reusable={tile.media_item.id:tile for tile in reuse.tiles} if reuse else {}
+        if prepared:reusable.update(prepared.get('cells',{}))
         uploads={tile.media_item.metadata['upload_key']:tile for tile in reuse.tiles if tile.media_item.metadata.get('upload_key')} if reuse else {}
         for index,ratio in enumerate(ratios):
             item=items[index] if items is not None else None
