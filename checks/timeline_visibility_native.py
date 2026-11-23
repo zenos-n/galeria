@@ -52,7 +52,7 @@ try:
     switch.set_active(True)
     pump(lambda:client.waiting.is_set() and bool(painted))
     assert (painted[0]-started)*1000<400
-    assert window.timeline_visibility_pending and not group.get_sensitive()
+    assert window.timeline_visibility_pending and group.get_sensitive()
     until=time.monotonic()+.45;pump(lambda:time.monotonic()>=until)
     assert len(heartbeats)>=10,'Filtering blocked the UI loop'
     client.gate.set();pump(lambda:not window.timeline_visibility_pending and not window.loading_more)

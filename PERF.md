@@ -789,3 +789,16 @@ maps/rows off-thread and builds native cells in 4 ms chunks: first feedback 37 m
 full grid 902 ms, max loop gap 162 ms. Local 45k-folder filtering: feedback 30 ms,
 max loop gap 63 ms. These are synthetic UI-loop measurements, not production FPS
 guarantees. Read-only live API smoke check passed against Immich v3.3.3.
+
+### Interactive visibility switches (0.14.19)
+
+Visibility controls stay sensitive while background work runs. Save desired
+rules immediately, debounce rebuild starts by 120 ms, cancel queued futures
+and obsolete page scans, and publish only the latest policy. Keep the last
+applied policy as the rollback baseline for the whole toggle batch and settle
+all changed controls together; discard the baseline after completion. Ordinary
+query caches remain reusable between switches. A native real-pointer test holds
+an older metadata request, applies a newer cached choice before releasing it,
+then rejects the stale failure; rapid toggles end on the exact final rule.
+Pointer-to-painted-state feedback 205–216 ms includes XTest command overhead;
+max loop gap 115 ms. Retained texture identity is unchanged.

@@ -1,4 +1,5 @@
 import json,os,unittest
+from concurrent.futures import CancelledError
 from datetime import datetime
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -107,6 +108,18 @@ class TimelineVisibilityTests(unittest.TestCase):
         client.refresh_serial=1
         self.assertEqual(client.time_buckets(),[{'timeBucket':'2026-11-01','count':2}])
         self.assertNotIn('new-shot',[item.id for item in client.time_bucket('2026-11',cached=True)])
+
+    def test_cancelled_rule_does_not_fetch_or_publish_a_snapshot(self):
+        client=self.client;policy=TimelineVisibility({'screenshots':True});policy.cancelled.set()
+        with self.assertRaises(CancelledError):policy.buckets(client,[])
+        self.assertEqual(client.calls,[])
+        policy=TimelineVisibility({'screenshots':True});client.timeline_visibility=policy
+        search=client.search
+        def cancel(*args,**kwargs):
+            result=search(*args,**kwargs);policy.cancelled.set();return result
+        with patch.object(client,'search',side_effect=cancel):
+            with self.assertRaises(CancelledError):client.time_buckets()
+        self.assertIsNone(client.media_cache().get(policy.cache_key))
 
 
 if __name__=='__main__':unittest.main()

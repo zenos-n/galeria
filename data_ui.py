@@ -584,6 +584,7 @@ class LibraryUI:
                 callback(value)
             return False
         future.add_done_callback(completed)
+        return future
 
     def busy_library(self,title):
         self.status_actions.set_visible(False)

@@ -1,8 +1,10 @@
 """Account-local timeline rules; server media and raw caches stay unchanged."""
 from collections import Counter
+from concurrent.futures import CancelledError
 import hashlib
 import json
 import re
+import threading
 from pathlib import PurePath
 from library import LibraryError
 
@@ -27,9 +29,13 @@ class TimelineVisibility:
         self.folders=tuple(rules.get('folders',[]))
         self.ids=frozenset();self.counts={}
         self.on_progress=None
+        self.cancelled=threading.Event()
         self.enabled=bool(self.screenshots or self.albums or self.folders)
         digest=hashlib.sha256(json.dumps([self.screenshots,sorted(self.albums),self.folders]).encode()).hexdigest()
         self.cache_key='timeline-visibility:v2:'+digest
+
+    def check_cancelled(self):
+        if self.cancelled.is_set():raise CancelledError()
 
     def hidden(self,item):
         if item.id in self.ids:return True
@@ -41,6 +47,7 @@ class TimelineVisibility:
         return [item for item in items if not self.hidden(item)] if self.enabled else items
 
     def buckets(self,client,buckets,cached=False):
+        self.check_cancelled()
         if not self.enabled:return buckets
         cache=client.media_cache()
         blob=cache.get(self.cache_key,None if cached else 300)
@@ -66,10 +73,12 @@ class TimelineVisibility:
                     nonlocal checked
                     cursor=1;seen=set()
                     while cursor is not None:
+                        self.check_cancelled()
                         position=(type(cursor),str(cursor))
                         if position in seen:raise LibraryError('Immich repeated a timeline filter page. Try refreshing the library.')
                         seen.add(position)
                         items,cursor=client.search(filters,page=cursor,size=1000)
+                        self.check_cancelled()
                         checked+=len(items)
                         if self.on_progress:self.on_progress(checked)
                         for item in items:
@@ -86,7 +95,9 @@ class TimelineVisibility:
                 if client.modern_search:
                     for start in range(0,len(uncertain),1000):collect({'id':uncertain[start:start+1000]})
                 snapshot={'signature':signature,'items':found}
+                self.check_cancelled()
                 cache.put(self.cache_key,json.dumps(snapshot).encode())
+        self.check_cancelled()
         self.ids=frozenset(snapshot['items']);self.counts=Counter(snapshot['items'].values())
         totals=Counter()
         for bucket in buckets:totals[bucket['timeBucket'][:7]]+=int(bucket['count'])

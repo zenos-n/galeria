@@ -22,18 +22,51 @@ def after_paint(window,callback):
 
 
 def update(window,values,done=lambda _success:None):
-    key=identity(window);old=deepcopy(rules(window));client=window.client
-    previous=getattr(client,'timeline_visibility',None) if client else None
+    key=identity(window);client=window.client
+    batch=getattr(window,'visibility_update',None)
+    if not batch or batch['finished'] or batch['client'] is not client or batch['generation']!=window.data_generation:
+        batch={'client':client,'key':key,'generation':window.data_generation,'old':deepcopy(rules(window)),
+               'previous':getattr(client,'timeline_visibility',None) if client else None,'callbacks':[],
+               'index':window.timeline_index,'buckets':window.timeline_buckets,
+               'policy':None,'timer':0,'future':None,'toast':None,'finished':False}
+        window.visibility_update=batch
+    if batch['timer']:GLib.source_remove(batch['timer']);batch['timer']=0
+    if batch['future']:batch['future'].cancel()
+    if batch['policy']:batch['policy'].cancelled.set()
+    if batch['toast']:batch['toast'].dismiss()
     policy=TimelineVisibility(values)
+    batch['policy']=policy;batch['callbacks'].append(done)
     window.preferences.setdefault('timeline_visibility',{})[key]=values
     window.save_preferences()
     window.pending_visibility_refresh=None
     window.search_generation+=1
     window.page_cache.clear();window.date_cover_cache.clear()
+    window.timeline_visibility_pending=True
+    if client:client.timeline_visibility=policy
+    def start():
+        batch['timer']=0
+        if window.visibility_update is batch and batch['policy'] is policy:
+            after_paint(window,lambda:_apply_update(window,policy,batch))
+        return False
+    batch['timer']=GLib.timeout_add(120,start)
+
+
+def _apply_update(window,policy,batch):
+    client=batch['client'];key=batch['key'];old=batch['old'];previous=batch['previous']
+    baseline_index=batch['index'];baseline_buckets=batch['buckets']
+    def current():return window.visibility_update is batch and batch['policy'] is policy and window.client is client and window.data_generation==batch['generation']
+    if not current():return
+    def done(success):
+        if not current() or batch['finished']:return
+        batch['finished']=True;batch['future']=None
+        callbacks=batch['callbacks'];batch['callbacks']=[]
+        for callback in callbacks:callback(success)
+        batch['previous']=None;batch['old']=None;batch['toast']=None;batch['index']=None;batch['buckets']=None
     if not client:
         source=window.local_items;window.timeline_visibility_pending=True
         toast=Adw.Toast(title='Updating timeline…',timeout=0);window.toast.add_toast(toast)
-        def current_local():return window.client is None and window.local_items is source and TimelineVisibility(rules(window)).cache_key==policy.cache_key
+        batch['toast']=toast
+        def current_local():return current() and window.local_items is source and TimelineVisibility(rules(window)).cache_key==policy.cache_key
         def ready_local(items):
             toast.dismiss()
             if not current_local():done(False);return
@@ -46,35 +79,37 @@ def update(window,values,done=lambda _success:None):
             window.timeline_visibility_pending=False
             window.preferences['timeline_visibility'][key]=old;window.save_preferences()
             window.notice('Could not update timeline: '+message);done(False)
-        after_paint(window,lambda:window.background(lambda:policy.filter(source),ready_local,failed_local) if current_local() else toast.dismiss())
+        batch['future']=window.background(lambda:policy.filter(source),ready_local,failed_local)
         return
-    client.timeline_visibility=policy
     window.timeline_visibility_pending=True
     toast=Adw.Toast(title='Updating timeline…',timeout=0);window.toast.add_toast(toast)
+    batch['toast']=toast
     def progress(count):
-        if window.client is client and client.timeline_visibility is policy and window.timeline_visibility_pending:
+        if current() and window.timeline_visibility_pending:
             toast.set_title(f'Updating timeline… {count:,} items checked')
         return False
     policy.on_progress=lambda count:GLib.idle_add(progress,count)
-    client.refresh_serial=getattr(client,'refresh_serial',0)+1
     loaded=set(window.timeline_index.loaded) if window.timeline_index else set()
     def work():
         from timeline_index import TimelineIndex
-        buckets=client.time_buckets(fresh=True)
+        policy.check_cancelled()
+        buckets=policy.buckets(client,client.time_buckets({'visibility':'timeline'}))
+        policy.check_cancelled()
         index=TimelineIndex(buckets) if client.modern_search else None
         if index:
             for month in loaded & index.ranges.keys():
+                policy.check_cancelled()
                 items=client.time_bucket(month,cached=True)
                 if items is not None:index.apply(month,items)
         return buckets,index
     def ready(value):
-        if window.client is not client or client.timeline_visibility is not policy:toast.dismiss();done(False);return
+        if not current():toast.dismiss();return
         window.timeline_buckets,window.timeline_index=value
         window.timeline_pending=set();window.dates_ready=True
         def finished():
             toast.dismiss();window.timeline_visibility_pending=False;done(True)
         def rebuild():
-            if window.client is not client or client.timeline_visibility is not policy:return
+            if not current():return
             if window.viewer and not window.viewer.device_file:
                 window.pending_visibility_refresh=rebuild;finished();return
             if not window.filtering_timeline():finished();return
@@ -93,29 +128,32 @@ def update(window,values,done=lambda _success:None):
             uploads=manager(window,False);values=uploads.merge(index.items) if uploads else list(index.items)
             buckets=list(window.timeline_buckets)
             def plan():
+                policy.check_cancelled()
                 width,target,mode,month,year=dimensions
-                return prepare_timeline(policy.filter(values),buckets,width,target,removed=removing,mode=mode,expanded_month=month,expanded_year=year)
+                prepared=prepare_timeline(policy.filter(values),buckets,width,target,removed=removing,mode=mode,expanded_month=month,expanded_year=year)
+                policy.check_cancelled();return prepared
             def applied(prepared):
-                if window.client is not client or client.timeline_visibility is not policy:toast.dismiss();done(False);return
+                if not current():toast.dismiss();return
                 if window.mosaic is not mosaic or window.timeline_index is not index or captured!=state() or not window.filtering_timeline() or window.viewer and not window.viewer.device_file:
                     rebuild();return
                 window.set_library_items(prepared['items'],append=True,reflow=True,prepared=prepared)
                 finished();window.request_timeline_metadata()
-            window.background(plan,applied,failed,executor=window.layout_io)
+            batch['future']=window.background(plan,applied,failed,executor=window.layout_io)
         rebuild()
     def failed(message):
         toast.dismiss()
-        if window.client is not client or client.timeline_visibility is not policy:return
+        if not current():return
         client.timeline_visibility=previous;window.timeline_visibility_pending=False
+        window.timeline_index=baseline_index;window.timeline_buckets=baseline_buckets;window.timeline_pending=set()
         window.preferences['timeline_visibility'][key]=old;window.save_preferences()
         if window.current_page=='library':window.search_library(preserve_folder=True,force=True)
         window.notice('Could not update timeline: '+message);done(False)
     def start():
-        if not window.data_stopped and window.client is client and client.timeline_visibility is policy:
-            window.background(work,ready,failed)
+        if not window.data_stopped and current():
+            batch['future']=window.background(work,ready,failed)
         else:toast.dismiss();done(False)
         return False
-    after_paint(window,start)
+    start()
 
 
 def toggle_album(window,album_id):
@@ -132,11 +170,10 @@ def preferences_group(window):
     def changed(row,_):
         nonlocal changing
         if changing:return
-        values=deepcopy(rules(window));values['screenshots']=row.get_active();group.set_sensitive(False)
+        values=deepcopy(rules(window));values['screenshots']=row.get_active()
         def finished(success):
             nonlocal changing
             changing=True;row.set_active(bool(rules(window).get('screenshots')));changing=False
-            group.set_sensitive(True)
         update(window,values,finished)
     screenshots.connect('notify::active',changed);group.add(screenshots)
     manage=Adw.ActionRow(title='Albums in timeline' if window.client else 'Hidden folders',activatable=True)
@@ -167,10 +204,8 @@ def manage_visibility(window):
                     if row.get_active():
                         if album['id'] in hidden:hidden.remove(album['id'])
                     elif album['id'] not in hidden:hidden.append(album['id'])
-                    group.set_sensitive(False)
                     def finished(success):
                         changing['value']=True;row.set_active(album['id'] not in rules(window).get('albums',[]));changing['value']=False
-                        group.set_sensitive(True)
                     update(window,values,finished)
                 row.connect('notify::active',changed);group.add(row)
             if not albums:group.add(Adw.ActionRow(title='No albums available'))
