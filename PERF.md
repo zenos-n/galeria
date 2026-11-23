@@ -779,7 +779,7 @@ date-cover downloads and optimistic upload display. Screenshot detection uses
 filenames and screenshot-named albums/folders, not image recognition. No server
 visibility mutation is sent. Fresh metadata failures retain the prior disk copy.
 
-109 unit checks and native preference/menu/local-folder/failure/focus/cached
+110 unit checks and native preference/menu/local-folder/failure/focus/cached
 restart checks pass. Slow metadata leaves the GTK loop responsive; pixel identity
 is retained through hiding/showing. In the private 45,490-item Xvfb/Cairo fixture,
 an initial 758 ms rule-application pause fell to 113 ms by using existing

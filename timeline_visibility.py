@@ -47,12 +47,19 @@ class TimelineVisibility:
         try:snapshot=json.loads(blob) if blob else None
         except (ValueError,TypeError):snapshot=None
         if snapshot is not None and (not isinstance(snapshot,dict) or not isinstance(snapshot.get('items'),dict)):snapshot=None
+        if self.albums or self.screenshots:
+            if cached:
+                blob=cache.get('albums')
+                if blob is None:return None
+                try:albums=json.loads(blob)
+                except (ValueError,TypeError):return None
+            else:albums=client.albums()
+        else:albums=[]
+        excluded=[album for album in albums if album['id'] in self.albums or self.screenshots and screenshot_name(album.get('albumName',''))]
+        signature=json.dumps([buckets,[(a['id'],a.get('assetCount'),a.get('updatedAt')) for a in excluded]],sort_keys=True)
         if cached:
-            if snapshot is None:return None
+            if snapshot is None or snapshot.get('signature')!=signature:return None
         else:
-            albums=client.albums() if self.albums or self.screenshots else []
-            excluded=[album for album in albums if album['id'] in self.albums or self.screenshots and screenshot_name(album.get('albumName',''))]
-            signature=json.dumps([buckets,[(a['id'],a.get('assetCount'),a.get('updatedAt')) for a in excluded]],sort_keys=True)
             if snapshot is None or snapshot.get('signature')!=signature:
                 found={};unscoped=set();checked=0
                 def collect(filters,predicate=lambda item:True):

@@ -96,5 +96,17 @@ class TimelineVisibilityTests(unittest.TestCase):
         self.assertNotIn('shared',client.timeline_visibility.ids)
         self.assertEqual([item.id for item in client.time_bucket('2026-11')],['camera'])
 
+    def test_cached_startup_rejects_an_index_older_than_cached_metadata(self):
+        client=self.client;client.timeline_visibility=TimelineVisibility({'screenshots':True});client.time_buckets()
+        client.timeline_visibility=None
+        client.assets.append({**client.assets[0],'id':'new-shot','originalFileName':'Screenshot new.png'})
+        client.time_buckets(fresh=True);client.time_bucket('2026-11',fresh=True)
+        client.timeline_visibility=TimelineVisibility({'screenshots':True})
+        with patch.object(client,'request',side_effect=AssertionError('HTTP during cached restore')):
+            self.assertIsNone(client.time_buckets(cached=True))
+        client.refresh_serial=1
+        self.assertEqual(client.time_buckets(),[{'timeBucket':'2026-11-01','count':2}])
+        self.assertNotIn('new-shot',[item.id for item in client.time_bucket('2026-11',cached=True)])
+
 
 if __name__=='__main__':unittest.main()
