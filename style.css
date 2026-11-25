@@ -1,4 +1,3 @@
-.gallery-sidebar { background: @sidebar_bg_color; }
 .gallery-sidebar .navigation-sidebar { padding: 6px 10px; }
 .gallery-sidebar row { min-height: 34px; margin: 1px 0; border-radius: 7px; }
 .gallery-sidebar .navigation-sidebar row { padding: 0 8px; }
@@ -47,8 +46,6 @@
 .upload-popover progressbar trough { min-height: 6px; border-radius: 6px; }
 .upload-popover progressbar progress { min-height: 6px; border-radius: 6px; }
 .upload-cancel { background: alpha(@window_fg_color,.08); min-height: 28px; min-width: 28px; }
-.details-sidebar { background: @sidebar_bg_color; color: @sidebar_fg_color; }
-.details-sidebar headerbar { background: @sidebar_bg_color; color: @sidebar_fg_color; }
 .fullscreen-black { background: #000; }
 .share-preview { background: alpha(@window_fg_color,.08); border-radius: 8px; }
 .drop-hint { background: alpha(@window_bg_color,.96); outline: 3px solid @accent_color; outline-offset: -12px; }
