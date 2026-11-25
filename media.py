@@ -9,6 +9,7 @@ class PhotoStage(Gtk.Widget):
     def __init__(self, source, index):
         super().__init__(hexpand=True, vexpand=True)
         self.ratio = source.photo_ratio
+        self.hdr_media=False
         self.progress = 0.0
         self.source_rect = None
         self.tick = 0
@@ -53,7 +54,8 @@ class PhotoStage(Gtk.Widget):
         self.symbol.set_opacity(0)
         self.image=Gtk.Picture(can_shrink=True,content_fit=Gtk.ContentFit.COVER)
         self.image.set_overflow(Gtk.Overflow.HIDDEN)
-        self.material.set_child(self.image)
+        self.image_offload=Gtk.GraphicsOffload(child=self.image,enabled=Gtk.GraphicsOffloadEnabled.DISABLED)
+        self.material.set_child(self.image_offload)
         self.material.add_overlay(self.surface)
         self.surface.set_can_target(False)
         if getattr(source,'media_texture',None):
@@ -62,7 +64,11 @@ class PhotoStage(Gtk.Widget):
 
     def set_texture(self,texture):
         self.ratio=texture.get_intrinsic_width()/texture.get_intrinsic_height()
+        from hdr_media import texture_hdr
         self.image.set_paintable(texture)
+        hdr=texture_hdr(texture);self.hdr_media=hdr
+        self.image_offload.set_black_background(hdr)
+        self.image_offload.set_enabled(Gtk.GraphicsOffloadEnabled.ENABLED if hdr else Gtk.GraphicsOffloadEnabled.DISABLED)
         self.symbol.set_visible(False)
         self.queue_allocate()
 
@@ -85,7 +91,15 @@ class PhotoStage(Gtk.Widget):
         available_height = max(1, height-self.top_inset-bottom-margin*2)
         w = min(max(1, width-margin*2), available_height*ratio)
         h = w / ratio
-        return (width-w)/2, self.top_inset + margin + (available_height-h)/2, w, h
+        rect=((width-w)/2, self.top_inset + margin + (available_height-h)/2, w, h)
+        native=self.get_native()
+        if self.hdr_media and native and native.get_surface():
+            from hdr_media import aligned_rect
+            ok,bounds=self.compute_bounds(native)
+            dx,dy=native.get_surface_transform()
+            origin=(bounds.get_x()+dx,bounds.get_y()+dy) if ok else (dx,dy)
+            return aligned_rect(*rect,native.get_surface().get_scale(),origin)
+        return rect
 
     def rect(self, width, height):
         if self.geometry_rect is not None:

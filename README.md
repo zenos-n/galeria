@@ -432,9 +432,21 @@ vault. The cached grid thumbnail remains visible while the original loads.
 Video viewing streams the original through the authenticated range proxy instead
 of a potentially tone-mapped Immich playback rendition. Clapper controls use
 GStreamer's GTK paintable sink, retaining 10-bit PQ/HLG frames and their color
-state. GTK handles display conversion and SDR outputs. On GTK4.22, Galeria enables
-its process-local `GDK_DEBUG=color-mgmt` opt-in before opening the display; it does
-not change GNOME settings. HDR must be enabled for the monitor in the desktop.
+state. HDR must be enabled for the monitor in the desktop.
+
+Since0.14.21 the window, text, icons, controls and SDR media stay sRGB/8-bit.
+Only media explicitly tagged PQ/HLG enables graphics offload to an independent
+HDR subsurface. A small app-local GTK4.22.4 backport supplies this policy and
+high-precision RGBA16F shared buffers for HDR photos. It preserves the texture's
+color information and does not modify the system GTK or display settings.
+HLG photos normalize to PQ on decode workers; HLG video uses a10-bit conversion
+filter on streaming threads for compositors that accept PQ but not HLG.
+Fractional-scale media bounds align to both logical and physical pixels.
+If offload is unavailable (for example X11, clipped/translucent transitions or
+unsupported transforms), GTK uses an SDR fallback, keeping the UI unchanged.
+`checks/hdr_surfaces_native.py` and `checks/check_hdr_protocol.py` verify actual
+Wayland parent/child image descriptions and active buffers after transitions;
+HDR-tagged textures alone do not prove HDR presentation.
 
 The current editors and generated grid thumbnails remain SDR. Editing a photo
 with a non-sRGB source explains that saved copies do not preserve HDR. Dolby

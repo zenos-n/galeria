@@ -337,6 +337,7 @@ class Viewer(Gtk.Overlay):
                 return GLib.SOURCE_CONTINUE
             self.media_stack.remove(old)
             old.dispose()
+            self.stage.queue_allocate()  # Re-align after the stack's slide transform settles.
             return GLib.SOURCE_REMOVE
         GLib.timeout_add(40,cleanup)
         self.title.set_title(f'Photo preview · {self.index+1}')

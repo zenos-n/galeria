@@ -1,12 +1,21 @@
 { pkgs ? import (builtins.getFlake "nixpkgs").outPath {
   config.allowUnfreePredicate = package: (package.pname or "") == "galeria";
 } }:
-pkgs.stdenv.mkDerivation {
+let
+  mediaGtk = pkgs.gtk4.overrideAttrs (old: {
+    patches = (old.patches or []) ++ [ ./gtk-media-hdr.patch ];
+  });
+in pkgs.stdenv.mkDerivation {
   pname = "galeria";
-  version = "0.14.20";
+  version = "0.14.21";
   src = pkgs.lib.cleanSource ./.;
   nativeBuildInputs = with pkgs; [ wrapGAppsHook4 gobject-introspection makeWrapper ];
-  buildInputs = with pkgs; [ gtk4 libadwaita libsecret libshumate libglycin libglycin-gtk4 libglycin.setupHook glycin-loaders shared-mime-info clapper-unwrapped.lib gst_all_1.gst-plugins-rs gst_all_1.gstreamer gst_all_1.gst-plugins-base gst_all_1.gst-libav gst_all_1.gst-plugins-good gst_all_1.gst-plugins-bad ];
+  buildInputs = with pkgs; [ mediaGtk libadwaita libsecret libshumate libglycin libglycin-gtk4 libglycin.setupHook glycin-loaders shared-mime-info clapper-unwrapped.lib gst_all_1.gst-plugins-rs gst_all_1.gstreamer gst_all_1.gst-plugins-base gst_all_1.gst-libav gst_all_1.gst-plugins-good gst_all_1.gst-plugins-bad ];
+  # Reuse existing GTK ABI consumers with this app-local runtime backport.
+  preFixup = ''
+    gappsWrapperArgs+=(--prefix GI_TYPELIB_PATH : "${mediaGtk}/lib/girepository-1.0")
+    gappsWrapperArgs+=(--prefix LD_LIBRARY_PATH : "${mediaGtk}/lib")
+  '';
   dontBuild = true;
   installPhase = ''
     mkdir -p $out/lib/galeria $out/bin $out/share/applications $out/share/metainfo $out/share/icons/hicolor/scalable/apps

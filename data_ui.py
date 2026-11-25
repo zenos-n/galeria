@@ -1288,7 +1288,8 @@ class LibraryUI:
                 texture=decode_texture(client.image_bytes(item,True,vault));fallback=True
             if not current():return None
             if client and not item.path:client.check_original_access(item)
-            return texture,editor_pixels(texture),fallback
+            from hdr_media import photo_presentation
+            return photo_presentation(texture),editor_pixels(texture),fallback
         def ready(value):
             if not current() or value is None:return
             stage.image_loading.set_visible(False)

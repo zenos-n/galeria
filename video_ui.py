@@ -11,7 +11,7 @@ Clapper.init(None)
 class VideoPlayer(Gtk.Overlay):
     def __init__(self,uri,window=None):
         super().__init__(hexpand=True,vexpand=True,css_classes=['galeria-video'])
-        self.has_played=False
+        self.has_played=False;self.window=window
         self.video=ClapperGtk.Video.new()
         self.set_child(self.video)
         self.video.set_opacity(0)
@@ -29,6 +29,11 @@ class VideoPlayer(Gtk.Overlay):
         if self.hdr_sink is None:raise RuntimeError('The GTK color-managed video sink is missing.')
         self.hdr_sink.get_property('paintable')  # Initialize GTK resources on the UI thread.
         self.player.set_video_sink(self.hdr_sink)
+        self.media_offload=None;self.offload_closed=False;self.hlg_filter=None;self.normalising_hlg=False
+        self.video_pad=self.hdr_sink.get_static_pad('sink')
+        self.caps_handler=self.video_pad.connect('notify::caps',lambda *_:GLib.idle_add(self.update_offload))
+        self.update_offload()
+        self.connect('notify::visible',lambda *_:self.update_offload())
         self.player.set_autoplay(False)
         from session_store import preferences_read,preferences_write
         prefs=window.preferences if window and hasattr(window,'preferences') else preferences_read()
@@ -57,6 +62,42 @@ class VideoPlayer(Gtk.Overlay):
         self.player.connect('error',self.failed)
         self.player.get_queue().add_item(Clapper.MediaItem.new(uri))
 
+    def update_offload(self):
+        if self.offload_closed:return False
+        if self.media_offload is None:
+            # Clapper 0.10 puts the sink's picture under its controls overlay.
+            overlay=self.video.get_first_child()
+            picture=overlay.get_child() if isinstance(overlay,Gtk.Overlay) else None
+            if not isinstance(picture,Gtk.Picture) or picture.get_paintable()!=self.hdr_sink.get_property('paintable'):return False
+            overlay.set_child(None)
+            self.media_offload=Gtk.GraphicsOffload(child=picture,enabled=Gtk.GraphicsOffloadEnabled.DISABLED)
+            overlay.set_child(self.media_offload)
+        from hdr_media import video_hdr,video_transfer
+        caps=self.video_pad.get_current_caps()
+        if video_transfer(caps)==18 and self.hlg_filter is None:
+            self.hlg_filter=Gst.parse_bin_from_description('videoconvert gamma-mode=remap primaries-mode=fast n-threads=4 ! capsfilter caps="video/x-raw,format=P010_10LE,colorimetry=bt2100-pq"',True)
+            resume=self.player.get_state() in (Clapper.PlayerState.PLAYING,Clapper.PlayerState.BUFFERING)
+            self.normalising_hlg=True
+            self.player.stop();self.player.set_video_filter(self.hlg_filter)
+            self.player.play() if resume else self.player.pause()
+            return False
+        if self.normalising_hlg:
+            if video_transfer(caps)!=16:return False
+            self.normalising_hlg=False
+        hdr=video_hdr(caps)
+        picture=self.media_offload.get_child()
+        picture.set_content_fit(Gtk.ContentFit.FILL if hdr else Gtk.ContentFit.CONTAIN)
+        stage=getattr(getattr(self.window,'viewer',None),'stage',None)
+        if stage and stage.video_player is self and self.get_visible():
+            paintable=picture.get_paintable()
+            width,height=paintable.get_intrinsic_width(),paintable.get_intrinsic_height()
+            ratio=width/height if hdr and width>0 and height>0 else stage.ratio
+            if stage.hdr_media!=hdr or stage.ratio!=ratio:
+                stage.hdr_media=hdr;stage.ratio=ratio;stage.queue_allocate()
+        self.media_offload.set_black_background(hdr)
+        self.media_offload.set_enabled(Gtk.GraphicsOffloadEnabled.ENABLED if hdr else Gtk.GraphicsOffloadEnabled.DISABLED)
+        return False
+
     def restart(self):self.end_replay.set_visible(False);self.player.seek(0);self.player.play()
 
     def toggle(self):
@@ -69,19 +110,24 @@ class VideoPlayer(Gtk.Overlay):
     def pause(self):self.player.pause()
 
     def state_changed(self,*_):
+        self.update_offload()
         state=self.player.get_state()
         if state in (Clapper.PlayerState.PLAYING,Clapper.PlayerState.PAUSED):self.has_played=True
         item=self.player.get_queue().get_current_item();duration=item.get_duration() if item else 0
         ended=state==Clapper.PlayerState.STOPPED or state==Clapper.PlayerState.PAUSED and duration>0 and self.player.get_position()>=duration-.05
         looping=self.player.get_queue().get_progression_mode()==Clapper.QueueProgressionMode.REPEAT_ITEM
-        self.end_replay.set_visible(ended and self.has_played and not looping)
-        loading=(state==Clapper.PlayerState.BUFFERING or state==Clapper.PlayerState.STOPPED and not self.has_played) and not self.error_label.get_visible()
+        self.end_replay.set_visible(ended and self.has_played and not looping and not self.normalising_hlg)
+        loading=(self.normalising_hlg or state==Clapper.PlayerState.BUFFERING or state==Clapper.PlayerState.STOPPED and not self.has_played) and not self.error_label.get_visible()
         self.spinner.set_visible(loading)
-        if not loading:self.video.set_opacity(1)
+        if self.normalising_hlg:self.video.set_opacity(0)
+        elif not loading:self.video.set_opacity(1)
 
     def failed(self,_player,error,*_):
         self.spinner.set_visible(False)
         self.error_label.set_label('Could not play video: '+error.message)
         self.error_label.set_visible(True)
 
-    def stop(self):self.player.stop()
+    def stop(self):
+        self.offload_closed=True
+        if self.caps_handler:self.video_pad.disconnect(self.caps_handler);self.caps_handler=0
+        self.player.stop();self.window=None

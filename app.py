@@ -8,8 +8,9 @@ import sys
 import threading
 import time
 
-# GTK 4.22 requires this per-process opt-in for Wayland HDR negotiation.
-os.environ['GDK_DEBUG']=','.join(filter(None,(os.environ.get('GDK_DEBUG'),'color-mgmt')))
+# Parent UI remains SDR; only explicitly HDR media is eligible for offload.
+os.environ['GDK_MEDIA_ONLY_HDR']='1'
+os.environ['GDK_DEBUG']=','.join(filter(None,(os.environ.get('GDK_DEBUG'),'color-mgmt,force-offload')))
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -534,7 +535,7 @@ class GalleryWindow(LibraryUI,Adw.ApplicationWindow):
 
     def about(self):
         dialog = Adw.AboutDialog(application_name="Galeria", application_icon="com.neg-zero.Galeria",
-                                 version="0.14.20", developer_name="Negative Zero",
+                                 version="0.14.21", developer_name="Negative Zero",
                                  comments="A native gallery for local folders and Immich.")
         dialog.present(self)
 

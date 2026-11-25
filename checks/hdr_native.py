@@ -63,7 +63,7 @@ def check():
             w.viewer.move(1);phase=4
         elif phase==4:
             if not w.viewer.photo_editor.original:return True
-            assert w.viewer.stage.image.get_paintable().get_color_state().create_cicp_params().get_transfer_function()==18
+            assert w.viewer.stage.image.get_paintable().get_color_state().create_cicp_params().get_transfer_function()==16
             if w.viewer.media_stack.get_transition_running():return True
             from io import BytesIO
             from cache import MediaCache
@@ -86,7 +86,7 @@ def check():
             phase=41
         elif phase==41:
             assert w.viewer.stage.image_loading.get_visible()
-            assert w.viewer.stage.image.get_paintable().get_color_state().create_cicp_params().get_transfer_function()==18
+            assert w.viewer.stage.image.get_paintable().get_color_state().create_cicp_params().get_transfer_function()==16
             if time.monotonic()-held_at<.32:return True
             assert started.is_set() and feedback and feedback[0]<400
             release.set();phase=42
@@ -108,7 +108,8 @@ def check():
             if node is None:return True
             text=node.serialize().get_data().decode()
             if 'texture {' not in text:return True
-            transfer=16 if video_index==0 else 18
+            transfer=16
+            if video_index==1 and not re.search(r'transfer: 16;',text):return True
             assert re.search(r'transfer: '+str(transfer)+r';',text),text[:150]
             assert 'primaries: 9;' in text
             assert any(s in text for s in ['P010','YUV420_10','yuv420-10','yuv420_10']),text[:500]

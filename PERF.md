@@ -832,3 +832,34 @@ Wayland trace binds wp_color_manager_v1, creates a BT2020/PQ image description,
 and attaches it to the displayed fullscreen surface. The opt-in is required
 on this GTK release; encoding an HDR file alone is insufficient. No global
 settings changes or measured physical luminance claims.
+
+
+## Media-only HDR UI (0.14.21)
+
+The0.14.20 per-display color-management opt-in made the entire parent window
+follow the compositor's PQ preference. Embedded SDR UI then bypassed the normal
+SDR source path/desktop white handling. The app-local GTK4.22.4 backport keeps
+parent/popup surfaces sRGB and their render targets8-bit; only explicitly PQ/HLG
+media enables GtkGraphicsOffload. No CSS brightening or global calibration.
+The identical-ABI runtime/typelib is scoped to the packaged app and native checks
+verify only one GTK library is loaded. HDR memory textures use advertised RGBA16F
+SHM buffers with matching encoding/fourcc and RGB identity/full-range state;
+the stock force-offload Cairo path silently converted to SDR8-bit.
+
+HLG photos normalize to PQ on decode workers. HLG videos are identified from
+negotiated colorimetry, then Clapper serializes stop/set10-bit gamma-remap filter/
+resume; SDR and ordinary10-bit content never take this path. Image positions
+snap to both logical/device integer bounds (166⅔% requires3-logical-pixel steps)
+inside the original rectangle. Re-allocate after GtkStack slide completion,
+because a temporary ancestor translation otherwise leaves stale final bounds.
+Only metadata/geometry changes allocate the video stage; playback position ticks
+do not force reflow.
+
+115unit tests pass. Native Xvfb tests retain source precision, edit/restore,
+held-download feedback1.4ms/maxloop125.7ms, playback/zoom/loop and editor exit.
+Actual NVIDIA/GNOME Wayland166⅔% test after settling: one sRGB UI parent;
+SDR PNG/H.264 have no HDR child; PQ/HLG PNG and10-bitPQ/HLG HEVC have active PQ
+children, photos usingRGBA16F buffers. UI loop max344ms including first video
+setup; initialwindow gap201.5ms. Private generated media/profiles; these figures
+are responsiveness evidence, not a physical luminance calibration or FPS claim.
+Offload can fall back to SDR during unsupported/clipped/alpha transforms.
