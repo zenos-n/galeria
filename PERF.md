@@ -807,7 +807,9 @@ max loop gap 115 ms. Retained texture identity is unchanged.
 ## HDR viewing (0.14.20)
 
 Replaced focus-view Pillow RGBA8 decoding with sandboxed Glycin2.1.5 textures
-and original-photo cache reads on preview workers. Switched Clapper0.10 from its
+and original-photo cache reads on preview workers. Original photos have a
+separate128MiB account cache so browsing large originals does not evict the
+512MiB grid-thumbnail cache. Move-to-locked forbids/purges public originals. Switched Clapper0.10 from its
 sRGB-tagged sink to gst-plugins-rs0.14.4 GTK paintable output, streaming original
 videos through the authenticated range bridge. The GTK sink paintable is
 initialized on the UI thread before playback; otherwise asynchronous READY

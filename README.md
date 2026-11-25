@@ -425,7 +425,8 @@ Focus view uses sandboxed Glycin decoding of original photos, retaining native
 precision and ICC/CICP color information. HDR PQ/HLG PNG and AVIF are covered by
 native tests; Glycin also provides HEIF and JPEG XL decoding. SDR server previews
 remain a fallback when an original cannot be fetched or decoded, with a notice.
-Original photo bytes are cached per account; locked originals use the encrypted
+Original photo bytes have a separate128MiB account cache, so they do not evict
+grid thumbnails; locked originals use the encrypted
 vault. The cached grid thumbnail remains visible while the original loads.
 
 Video viewing streams the original through the authenticated range proxy instead

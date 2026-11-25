@@ -395,6 +395,7 @@ class LibraryUI:
             def work():
                 result=client.update_assets(ids,{'visibility':'locked'})
                 client.media_cache().forbid((id+':' for id in ids),preserve=image_keys)
+                client.original_cache().forbid((id+':' for id in ids))
                 client.video_cache().forbid(('video-prefix:'+id for id in ids),preserve=video_keys)
                 return result
             self.mutate_media(work,done)

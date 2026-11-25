@@ -101,7 +101,7 @@ class ImmichClient:
         self.user = None
         self.http = build_opener(NoRedirects())
         self.cache=None
-        self.video_prefix_cache=None;self.video_cache_lock=threading.Lock()
+        self.video_prefix_cache=None;self.display_original_cache=None;self.video_cache_lock=threading.Lock()
         self.locked_until=0
         self.server_lock_pending=False
         self.modern_search=True
@@ -114,6 +114,14 @@ class ImmichClient:
             from cache import MediaCache
             self.cache=MediaCache(self.identity)
         return self.cache
+
+    def original_cache(self):
+        with self.video_cache_lock:
+            if self.display_original_cache is None:
+                from cache import MediaCache
+                ordinary=self.media_cache()
+                self.display_original_cache=MediaCache(self.identity+'|display-originals',root=ordinary.root.parent.parent,budget=128*1024*1024)
+            return self.display_original_cache
 
     def video_cache(self):
         with self.video_cache_lock:
@@ -384,7 +392,7 @@ class ImmichClient:
         if original:self.check_original_access(item)
         key=self.image_key(item,preview,original)
         locked=item.metadata.get('visibility')=='locked'
-        cache=vault if locked else self.media_cache()
+        cache=vault if locked else self.original_cache() if original else self.media_cache()
         if not locked and not item.metadata.get('visibility') and (self.locked_until or self.server_lock_pending):cache=None
         def load():
             if original:
@@ -435,7 +443,7 @@ class ImmichClient:
         except LibraryError as error:
             if error.status in (400,401,403):raise LibraryError('Could not unlock. Check your PIN or password and try again.',error.status) from None
             raise
-        self.media_cache().clear()
+        self.media_cache().clear();self.original_cache().clear()
         self.locked_until=time.monotonic()+14*60
 
     def lock_session(self):

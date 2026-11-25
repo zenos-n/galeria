@@ -26,6 +26,12 @@ class MediaTests(unittest.TestCase):
             self.assertEqual(client.image_bytes(item,original=True),payload)
             self.assertEqual(client.image_bytes(item,original=True),payload)
             self.assertEqual(client.open_original.call_count,1)
+            originals=client.original_cache()
+            self.assertNotEqual(originals.root,cache.root)
+            self.assertEqual(originals.budget,128*1024*1024)
+            cache.put('grid-thumbnail',b'cached thumbnail')
+            originals.budget=1;originals.put('another-original',payload)
+            self.assertEqual(cache.get('grid-thumbnail'),b'cached thumbnail')
             self.assertIsNone(cache.get(client.image_key(item,True)))
             item.metadata['visibility']='locked';client.locked_until=time.monotonic()+30
             self.assertEqual(client.image_bytes(item,vault=vault,original=True),payload)
