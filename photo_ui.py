@@ -12,7 +12,7 @@ from edit_history import History
 
 class PhotoEditor:
     def __init__(self,viewer):
-        self.viewer=viewer;self.stage=viewer.stage;self.original=None
+        self.viewer=viewer;self.stage=viewer.stage;self.original=None;self.source_texture=None
         self.values={name:0 for name in ADJUSTMENTS};self.selected='Brightness'
         self.straighten=0;self.comparing=False;self.syncing=False
         self.generation=0;self.debounce=0;self.running=False;self.closed=False
@@ -59,9 +59,10 @@ class PhotoEditor:
         self.viewer.tool_message.set_label(message);self.viewer.tool_message.set_visible(bool(message))
         if was_visible!=bool(message):self.viewer.sync_editor_inset()
 
-    def set_source(self,pixels):
+    def set_source(self,pixels,texture=None):
         if self.closed:return
-        self.original=pixels;self.stage.set_texture(self.viewer.window.texture_from_pixels(pixels))
+        self.original=pixels;self.source_texture=texture
+        self.stage.set_texture(texture or self.viewer.window.texture_from_pixels(pixels))
         self.stage.render_ratio=pixels[0]/pixels[1]
         self.stage.queue_allocate()
         self.save_button.set_sensitive(True)
@@ -100,6 +101,14 @@ class PhotoEditor:
     def start(self):
         self.debounce=0
         if self.closed or not self.original or self.running:return False
+        if not self.viewer.editing and not self.dirty() and self.source_texture:
+            self.stage.set_texture(self.source_texture);self.stage.render_ratio=self.original[0]/self.original[1]
+            self.stage.surface.set_opacity(0);self.markup.set_visible(False);self.markup.set_can_target(False)
+            self.stage.queue_allocate();return False
+        if self.viewer.editing and self.source_texture:
+            from gi.repository import Gdk
+            if not self.source_texture.get_color_state().equal(Gdk.ColorState.get_srgb()):
+                self.notice('Editing uses SDR colors. Saved copies do not preserve HDR.')
         generation=self.generation;self.running=True
         pixels=self.original;values={} if self.comparing else dict(self.values)
         drawing=self.viewer.editing and not self.comparing
@@ -170,13 +179,14 @@ class PhotoEditor:
             from upload_media import upload_bytes
             if not item.path:client.check_original_access(item)
             preview=False
+            from imaging import decode_texture,editor_pixels
             try:
-                with open(item.path,'rb') if item.path else client.open_original(item) as source:
-                    with Image.open(source) as image:output=render(image,values,strokes,rotation,flipped,angle,crop)
-            except (OSError,ValueError):
+                texture=decode_texture(item.path if item.path else client.image_bytes(item,vault=window.vault,original=True))
+            except (GLib.Error,OSError,ValueError):
                 if item.path:raise
-                with Image.open(BytesIO(client.image_bytes(item,True,window.vault))) as image:output=render(image,values,strokes,rotation,flipped,angle,crop)
-                preview=True
+                texture=decode_texture(client.image_bytes(item,True,window.vault));preview=True
+            pixels=editor_pixels(texture,limit=None)
+            output=render(Image.frombytes('RGBA',pixels[:2],pixels[2]),values,strokes,rotation,flipped,angle,crop)
             stream=BytesIO();output.save(stream,format='PNG')
             if not item.path:client.check_original_access(item)
             if window.client!=client or cancel.is_set():raise InterruptedError()
@@ -219,4 +229,4 @@ class PhotoEditor:
         if self.debounce:GLib.source_remove(self.debounce);self.debounce=0
         if self.markup.get_parent()==self.stage.picture:self.stage.picture.remove_overlay(self.markup)
         self.markup.entry.set_visible(False);self.markup.strokes.clear();self.markup.cache.clear();self.history.past.clear();self.history.future.clear();self.history.saved=None
-        self.original=None
+        self.original=None;self.source_texture=None

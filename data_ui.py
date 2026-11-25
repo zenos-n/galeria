@@ -126,7 +126,7 @@ class LibraryUI:
             if job_key is not None and job_key not in self.image_wanted:self.video_prefetch.discard(key);return
             if item.path:
                 with open(item.path,'rb') as stream:stream.read(2*1024*1024)
-            else:proxy.preload(client,item,vault)
+            else:proxy.preload(client,item,vault,original=True)
         self.background(work,lambda _:None,lambda _:None,images='video')
 
     def remember_account(self,client):
@@ -1273,12 +1273,29 @@ class LibraryUI:
         if not item or item.kind!='IMAGE':return
         client=self.client
         vault=self.vault
+        stage.image_loading.set_visible(True)
+        def current():return self.viewer and self.viewer.stage==stage and self.client is client
         def load():
-            if not self.viewer or self.viewer.stage!=stage:return None
-            return decode_image(item.path if item.path else client.image_bytes(item,True,vault),2400)
+            if not current():return None
+            from imaging import decode_texture,editor_pixels
+            fallback=False
+            try:
+                texture=decode_texture(item.path if item.path else client.image_bytes(item,vault=vault,original=True))
+            except (GLib.Error,OSError,LibraryError) as error:
+                if item.path or isinstance(error,LibraryError) and error.status in (401,403):raise
+                client.check_original_access(item)
+                texture=decode_texture(client.image_bytes(item,True,vault));fallback=True
+            if not current():return None
+            if client and not item.path:client.check_original_access(item)
+            return texture,editor_pixels(texture),fallback
         def ready(value):
-            if not self.viewer or self.viewer.stage!=stage:return
+            if not current() or value is None:return
+            stage.image_loading.set_visible(False)
+            texture,pixels,fallback=value
             photo=getattr(self.viewer,'photo_editor',None)
-            if photo:photo.set_source(value)
-            else:stage.set_texture(self.texture_from_pixels(value))
-        self.background(load,ready,lambda message:self.notice('Preview could not load: '+message),images='preview')
+            if photo:photo.set_source(pixels,texture)
+            else:stage.set_texture(texture)
+            if fallback:self.notice('Original unavailable. Showing the server preview; HDR may be unavailable.')
+        def failed(message):
+            if current():stage.image_loading.set_visible(False);self.notice('Photo could not load: '+message)
+        self.background(load,ready,failed,images='preview')

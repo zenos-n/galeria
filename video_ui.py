@@ -2,7 +2,8 @@
 import gi
 gi.require_version('Clapper','0.0')
 gi.require_version('ClapperGtk','0.0')
-from gi.repository import Adw,Clapper,ClapperGtk,Gio,GLib,Gtk
+gi.require_version('Gst','1.0')
+from gi.repository import Adw,Clapper,ClapperGtk,Gio,GLib,Gst,Gtk
 
 Clapper.init(None)
 
@@ -23,6 +24,11 @@ class VideoPlayer(Gtk.Overlay):
                                   css_classes=['osd'],margin_start=24,margin_end=24)
         self.add_overlay(self.error_label)
         self.player=self.video.get_player()
+        # Clapper 0.10's own sink creates sRGB textures even for PQ/HLG frames.
+        self.hdr_sink=Gst.ElementFactory.make('gtk4paintablesink')
+        if self.hdr_sink is None:raise RuntimeError('The GTK color-managed video sink is missing.')
+        self.hdr_sink.get_property('paintable')  # Initialize GTK resources on the UI thread.
+        self.player.set_video_sink(self.hdr_sink)
         self.player.set_autoplay(False)
         from session_store import preferences_read,preferences_write
         prefs=window.preferences if window and hasattr(window,'preferences') else preferences_read()

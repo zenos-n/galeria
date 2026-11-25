@@ -43,7 +43,7 @@ def media_from_asset(asset):
                      max(.1, min(10, width / max(1, height))), asset.get('type', 'IMAGE'), metadata=asset)
 
 
-IMAGE_TYPES = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tif', '.tiff', '.heic', '.avif'}
+IMAGE_TYPES = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tif', '.tiff', '.heic', '.heif', '.avif', '.jxl', '.exr'}
 VIDEO_TYPES = {'.mp4', '.mov', '.mkv', '.webm', '.avi', '.m4v'}
 
 
@@ -380,12 +380,17 @@ class ImmichClient:
         if not blob:raise LibraryError('The thumbnail is not ready yet.',404)
         return blob
 
-    def image_bytes(self,item,preview=False,vault=None):
-        key=self.image_key(item,preview)
+    def image_bytes(self,item,preview=False,vault=None,original=False):
+        if original:self.check_original_access(item)
+        key=self.image_key(item,preview,original)
         locked=item.metadata.get('visibility')=='locked'
         cache=vault if locked else self.media_cache()
         if not locked and not item.metadata.get('visibility') and (self.locked_until or self.server_lock_pending):cache=None
         def load():
+            if original:
+                with self.open_original(item) as response:data=response.read()
+                self.check_original_access(item)
+                return data
             try:return self.thumbnail(item.id,preview)
             except LibraryError as error:
                 if error.status!=404:raise
@@ -398,11 +403,12 @@ class ImmichClient:
             if cache:cache.remove(key)
             data=load()
             if cache:cache.put(key,data)
+        if original:self.check_original_access(item)
         return data
 
-    def image_key(self,item,preview=False):
+    def image_key(self,item,preview=False,original=False):
         version=item.metadata.get('updatedAt') or item.metadata.get('checksum') or ''
-        return f'{item.id}:{version}:{"preview" if preview else "thumbnail"}'
+        return f'{item.id}:{version}:{"original-display" if original else "preview" if preview else "thumbnail"}'
 
     def collection_cover(self,asset_id):
         cache=self.media_cache();key='cover-info:'+asset_id

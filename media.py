@@ -1,5 +1,5 @@
 """Thumbnail-to-viewer morph using the source thumbnail's actual rendering."""
-from gi.repository import Gdk, GLib, Graphene, Gsk, Gtk
+from gi.repository import Adw, Gdk, GLib, Graphene, Gsk, Gtk
 from crop_ui import CropOverlay
 
 
@@ -37,6 +37,9 @@ class PhotoStage(Gtk.Widget):
                                 halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
         self.symbol.add_css_class("placeholder-icon")
         self.picture.add_overlay(self.symbol)
+        self.image_loading=Adw.Spinner(width_request=32,height_request=32,halign=Gtk.Align.CENTER,
+                                       valign=Gtk.Align.CENTER,visible=False,can_target=False)
+        self.picture.add_overlay(self.image_loading)
         self.crop_frame = CropOverlay()
         self.crop_frame.aspect=self.ratio
         self.crop_frame.set_visible(False)

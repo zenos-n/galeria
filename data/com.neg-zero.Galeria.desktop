@@ -9,7 +9,7 @@ Terminal=false
 Categories=Graphics;Photography;Viewer;
 StartupNotify=true
 Actions=SyncFolders;
-MimeType=image/jpeg;image/png;image/webp;image/avif;image/gif;image/bmp;image/tiff;video/mp4;video/webm;video/quicktime;video/x-matroska;
+MimeType=image/jpeg;image/png;image/webp;image/avif;image/heic;image/heif;image/jxl;image/x-exr;image/gif;image/bmp;image/tiff;video/mp4;video/webm;video/quicktime;video/x-matroska;
 
 [Desktop Action SyncFolders]
 Name=Folder sync

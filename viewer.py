@@ -165,7 +165,7 @@ class Viewer(Gtk.Overlay):
             self.window.background(lambda:client.asset(item.id) if current() else None,ready,failed)
             return
         if item and item.kind=='VIDEO':
-            uri=Gio.File.new_for_path(item.path).get_uri() if item.path else self.window.get_video_proxy().register(self.window.client,item,self.window.vault)
+            uri=Gio.File.new_for_path(item.path).get_uri() if item.path else self.window.get_video_proxy().register(self.window.client,item,self.window.vault,original=True)
             self.stage.set_video(uri)
         self.window.load_preview(self.stage,self.source)
 

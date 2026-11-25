@@ -417,3 +417,29 @@ requests are pending. Failed requests restore their own items and timeline
 ranges, with pending removals filtered out of stale page data. Mutation I/O
 runs independently of preview and metadata loading. Image opening morphs use
 the decoded texture aspect and a clipped cover fit to avoid side strips.
+
+
+### HDR viewing
+
+Focus view uses sandboxed Glycin decoding of original photos, retaining native
+precision and ICC/CICP color information. HDR PQ/HLG PNG and AVIF are covered by
+native tests; Glycin also provides HEIF and JPEG XL decoding. SDR server previews
+remain a fallback when an original cannot be fetched or decoded, with a notice.
+Original photo bytes are cached per account; locked originals use the encrypted
+vault. The cached grid thumbnail remains visible while the original loads.
+
+Video viewing streams the original through the authenticated range proxy instead
+of a potentially tone-mapped Immich playback rendition. Clapper controls use
+GStreamer's GTK paintable sink, retaining 10-bit PQ/HLG frames and their color
+state. GTK handles display conversion and SDR outputs. On GTK4.22, Galeria enables
+its process-local `GDK_DEBUG=color-mgmt` opt-in before opening the display; it does
+not change GNOME settings. HDR must be enabled for the monitor in the desktop.
+
+The current editors and generated grid thumbnails remain SDR. Editing a photo
+with a non-sRGB source explains that saved copies do not preserve HDR. Dolby
+Vision dynamic metadata and JPEG/HEIC gain-map reconstruction are not implemented;
+those files may show their SDR/base layer. HDR brightness depends on the monitor,
+its HDR mode and the compositor; encoded 10,000-nit white does not imply the
+monitor can emit 10,000 nits. `checks/hdr_native.py` verifies decoder precision,
+PQ/HLG frame color states, held-download responsiveness and HDR restoration after
+leaving the editor using generated media and private preferences.

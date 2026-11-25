@@ -802,3 +802,31 @@ an older metadata request, applies a newer cached choice before releasing it,
 then rejects the stale failure; rapid toggles end on the exact final rule.
 Pointer-to-painted-state feedback 205–216 ms includes XTest command overhead;
 max loop gap 115 ms. Retained texture identity is unchanged.
+
+
+## HDR viewing (0.14.20)
+
+Replaced focus-view Pillow RGBA8 decoding with sandboxed Glycin2.1.5 textures
+and original-photo cache reads on preview workers. Switched Clapper0.10 from its
+sRGB-tagged sink to gst-plugins-rs0.14.4 GTK paintable output, streaming original
+videos through the authenticated range bridge. The GTK sink paintable is
+initialized on the UI thread before playback; otherwise asynchronous READY
+creation can access a Rust GL thread guard from the streaming thread.
+
+Generated 16-bit CICP PQ/HLG PNG, 10-bit AVIF, wide-gamut P3, ordinary SDR and
+10-bit HEVC PQ/HLG media verify decoded texture precision and actual rendered
+video-node color states. A held original fetch keeps the prior thumbnail visible
+and input/rendering active: source native check first loading feedback1.1ms,
+maximum10ms-heartbeat gap124.9ms. Photo edit entry uses SDR pixels and clean exit
+restores the original HDR texture. Private Xvfb/Cairo figures are synthetic,
+not display calibration or production FPS guarantees. Existing112unit and
+native viewer controls/editor save-cancel-discard checks pass.
+
+Read-only GNOME50.4 output inspection reports HDR enabled on DP-2(AW2725Q).
+A generated split black/10,000-nit16-bit PQ PNG decoded to r16g16b16; downloading
+into Rec2100-linear float gives black0 and white49.261 (203-nit diffuse-white
+normalization). With GTK4.22.4's process-local GDK_DEBUG=color-mgmt opt-in, the
+Wayland trace binds wp_color_manager_v1, creates a BT2020/PQ image description,
+and attaches it to the displayed fullscreen surface. The opt-in is required
+on this GTK release; encoding an HDR file alone is insufficient. No global
+settings changes or measured physical luminance claims.

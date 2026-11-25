@@ -13,6 +13,28 @@ from imaging import decode_image,duration_label
 
 
 class MediaTests(unittest.TestCase):
+    def test_original_display_cache_preserves_bytes_and_checks_access(self):
+        from library import ImmichClient,media_from_asset,LibraryError
+        from unittest.mock import Mock
+        with TemporaryDirectory() as root:
+            client=ImmichClient('https://fixture.invalid');client.token='fixture'
+            cache=MediaCache('account',root);vault=MediaCache('vault',root,key=b'x'*32)
+            client.media_cache=lambda:cache
+            item=media_from_asset({'id':'hdr','visibility':'timeline','updatedAt':'1'})
+            payload=b'16-bit original with CICP'
+            client.open_original=Mock(side_effect=lambda _:BytesIO(payload))
+            self.assertEqual(client.image_bytes(item,original=True),payload)
+            self.assertEqual(client.image_bytes(item,original=True),payload)
+            self.assertEqual(client.open_original.call_count,1)
+            self.assertIsNone(cache.get(client.image_key(item,True)))
+            item.metadata['visibility']='locked';client.locked_until=time.monotonic()+30
+            self.assertEqual(client.image_bytes(item,vault=vault,original=True),payload)
+            self.assertNotIn(payload,vault.path(client.image_key(item,original=True)).read_bytes())
+            client.locked_until=0
+            with self.assertRaises(LibraryError):client.image_bytes(item,vault=vault,original=True)
+            item.metadata['visibility']='timeline';client.token=None
+            with self.assertRaises(LibraryError):client.image_bytes(item,original=True)
+
     def test_video_prefix_migration_and_eviction_preserve_thumbnail_cache(self):
         with TemporaryDirectory() as root:
             images=MediaCache('account',root,budget=200)

@@ -37,15 +37,15 @@ class VideoProxy:
     def authorized(self,client,item):
         return bool(client.token) and (item.metadata.get('visibility')!='locked' or client.locked_until>time.monotonic())
 
-    def prefix_key(self,item):return 'video-prefix:'+item.id+str(item.metadata.get('updatedAt') or item.metadata.get('checksum',''))
+    def prefix_key(self,item,original=False):return 'video-prefix:'+item.id+str(item.metadata.get('updatedAt') or item.metadata.get('checksum',''))+(':original' if original else '')
 
-    def preload(self,client,item,vault=None):
+    def preload(self,client,item,vault=None,original=False):
         if not self.authorized(client,item):return
         cache=vault if item.metadata.get('visibility')=='locked' else client.video_cache()
         if cache is None:return
-        key=self.prefix_key(item)
+        key=self.prefix_key(item,original)
         def load():
-            with self.open(client,item,'bytes=0-2097151') as response:
+            with self.open(client,item,'bytes=0-2097151',original=original) as response:
                 match=re.match(r'bytes 0-\d+/(\d+)',response.headers.get('Content-Range',''))
                 if response.status!=206 or not match:return b''
                 body=response.read(2*1024*1024)
@@ -65,7 +65,7 @@ class VideoProxy:
         client,item,vault,original=source
         if not self.authorized(client,item):handler.send_error(403);return
         cache=vault if item.metadata.get('visibility')=='locked' else client.video_cache()
-        packet=cache.get(self.prefix_key(item)) if cache and not original else None
+        packet=cache.get(self.prefix_key(item,original)) if cache else None
         prefix=b'';metadata=None
         if packet:
             try:
@@ -91,7 +91,7 @@ class VideoProxy:
                     if head:return
                     stop=min(end+1,len(prefix));handler.wfile.write(prefix[start:stop])
                     if stop<=end:
-                        with self.open(client,item,f'bytes={stop}-{end}') as response:
+                        with self.open(client,item,f'bytes={stop}-{end}',original=original) as response:
                             if response.status!=206:return
                             self.copy(response,handler,client,item)
                     return
